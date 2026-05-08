@@ -12,6 +12,7 @@ import Contact from "./pages/Contact";
 import FAQ from "./pages/FAQ";
 import Checkout from "./pages/Checkout";
 import OrderConfirmation from "./pages/OrderConfirmation";
+import Integrations from "./pages/Integrations";
 
 function Router() {
   return (
@@ -23,6 +24,7 @@ function Router() {
       <Route path="/faq" component={FAQ} />
       <Route path="/checkout" component={Checkout} />
       <Route path="/order-confirmation" component={OrderConfirmation} />
+      <Route path="/integrations" component={Integrations} />
       <Route path="/404" component={NotFound} />
       <Route component={NotFound} />
     </Switch>

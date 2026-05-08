@@ -519,6 +519,45 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ===== PARTNERS & INTEGRATIONS ===== */}
+      <section className="py-16 bg-[#1A1A1A] border-t border-white/5">
+        <div className="max-w-[1280px] mx-auto px-6 lg:px-10">
+          <div className="flex flex-col md:flex-row items-center justify-between gap-8">
+            <div>
+              <p className="section-label">Powered By</p>
+              <h2 className="font-display text-2xl md:text-3xl font-bold text-white">
+                BUILT TO <span className="text-[#FF6B00]">SCALE.</span>
+              </h2>
+              <p className="font-body text-[#888] text-sm mt-2 max-w-[360px]">
+                This store runs on a fully automated stack — payments, fulfillment, and customer support all handled for you.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-4 items-center">
+              {[
+                { name: "Shopify", desc: "Checkout", url: "https://shopify.com" },
+                { name: "Printify", desc: "Fulfillment", url: "https://printify.com" },
+                { name: "Tidio", desc: "AI Support", url: "https://tidio.com" },
+                { name: "Stripe", desc: "Payments", url: "https://stripe.com" },
+              ].map((partner) => (
+                <a
+                  key={partner.name}
+                  href={partner.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex flex-col items-center bg-[#2A2A2A] border border-white/10 hover:border-[#FF6B00]/40 px-6 py-4 transition-all duration-200 group"
+                >
+                  <span className="font-display text-sm font-bold text-white group-hover:text-[#FF6B00] transition-colors">{partner.name}</span>
+                  <span className="font-body text-[10px] text-[#555] mt-1">{partner.desc}</span>
+                </a>
+              ))}
+            </div>
+            <Link href="/integrations">
+              <span className="btn-outline text-xs px-6 py-3 whitespace-nowrap">SETUP GUIDE</span>
+            </Link>
+          </div>
+        </div>
+      </section>
+
       <Footer />
     </div>
   );

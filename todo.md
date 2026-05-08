@@ -21,3 +21,9 @@
 - [ ] Add PayPal, Klarna, Afterpay full integration (currently redirects to Stripe for card)
 - [ ] Add real customer reviews
 - [ ] Update About page with real brand story
+
+## Third-Party Integrations
+- [x] Add Tidio AI chat widget (script placeholder ready in index.html — user must add their Tidio key to activate)
+- [x] Add Shopify Buy Button support (Integrations page with full setup guide — user must connect their Shopify store)
+- [x] Add Integrations page explaining Shopify + Printify setup workflow
+- [x] Add integrations status section on Home page (Partners section linking to /integrations)
