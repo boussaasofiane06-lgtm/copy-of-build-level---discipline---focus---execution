@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { Client, Environment, OrdersController, CheckoutPaymentIntent } from "@paypal/paypal-server-sdk";
 import { z } from "zod";
 import { asc } from "drizzle-orm";
 import { COOKIE_NAME } from "@shared/const";
@@ -14,6 +15,16 @@ import { products } from "../drizzle/schema";
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2026-04-22.dahlia",
 });
+
+// PayPal client
+const paypalClient = new Client({
+  clientCredentialsAuthCredentials: {
+    oAuthClientId: process.env.PAYPAL_CLIENT_ID || "",
+    oAuthClientSecret: process.env.PAYPAL_CLIENT_SECRET || "",
+  },
+  environment: process.env.PAYPAL_ENV === "live" ? Environment.Production : Environment.Sandbox,
+});
+const paypalOrders = new OrdersController(paypalClient);
 
 export const appRouter = router({
   system: systemRouter,
@@ -110,6 +121,75 @@ export const appRouter = router({
         }).catch(() => {/* non-blocking */});
 
         return { url: session.url, sessionId: session.id };
+      }),
+
+    // PayPal: create order
+    createPayPalOrder: publicProcedure
+      .input(
+        z.object({
+          items: z.array(
+            z.object({
+              name: z.string(),
+              priceUSD: z.number(),
+              quantity: z.number(),
+            })
+          ),
+          currency: z.string().default("USD"),
+        })
+      )
+      .mutation(async ({ input }) => {
+        const totalAmount = input.items
+          .reduce((sum, i) => sum + i.priceUSD * i.quantity, 0)
+          .toFixed(2);
+
+        const order = await paypalOrders.createOrder({
+          body: {
+            intent: CheckoutPaymentIntent.Capture,
+            purchaseUnits: [
+              {
+                amount: {
+                  currencyCode: input.currency.toUpperCase(),
+                  value: totalAmount,
+                  breakdown: {
+                    itemTotal: {
+                      currencyCode: input.currency.toUpperCase(),
+                      value: totalAmount,
+                    },
+                  },
+                },
+                items: input.items.map((i) => ({
+                  name: i.name,
+                  quantity: String(i.quantity),
+                  unitAmount: {
+                    currencyCode: input.currency.toUpperCase(),
+                    value: i.priceUSD.toFixed(2),
+                  },
+                })),
+              },
+            ],
+          },
+        });
+
+        return { orderId: order.result.id };
+      }),
+
+    // PayPal: capture order after approval
+    capturePayPalOrder: publicProcedure
+      .input(z.object({ orderId: z.string() }))
+      .mutation(async ({ input }) => {
+        const capture = await paypalOrders.captureOrder({
+          id: input.orderId,
+        });
+
+        const status = capture.result.status;
+        if (status === "COMPLETED") {
+          await notifyOwner({
+            title: "💰 PayPal Payment Received — BUILD LEVEL",
+            content: `PayPal order ${input.orderId} was completed successfully.`,
+          }).catch(() => {});
+        }
+
+        return { status, orderId: input.orderId };
       }),
   }),
 

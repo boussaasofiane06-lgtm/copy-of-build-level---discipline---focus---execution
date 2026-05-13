@@ -12,6 +12,9 @@ import Footer from "@/components/Footer";
 import { useCart, CURRENCY_SYMBOLS, type Currency } from "@/contexts/CartContext";
 import { toast } from "sonner";
 import { trpc } from "@/lib/trpc";
+import { PayPalScriptProvider, PayPalButtons } from "@paypal/react-paypal-js";
+
+const PAYPAL_CLIENT_ID = import.meta.env.VITE_PAYPAL_CLIENT_ID as string;
 
 const CURRENCIES: Currency[] = ["USD", "GBP", "EUR", "CAD", "AUD"];
 
@@ -26,7 +29,8 @@ const PAYMENT_METHODS: { id: PaymentMethod; label: string; icon: string; descrip
   { id: "afterpay", label: "Afterpay", icon: "🟢", description: "Pay over 6 weeks, interest-free" },
 ];
 
-export default function Checkout() {
+// Inner checkout component — needs access to cart context
+function CheckoutInner() {
   const [, navigate] = useLocation();
   const { items, subtotalUSD, convertPrice, currency, setCurrency, clearCart } = useCart();
   const [selectedPayment, setSelectedPayment] = useState<PaymentMethod>("card");
@@ -61,6 +65,9 @@ export default function Checkout() {
     },
   });
 
+  const createPayPalOrder = trpc.shop.createPayPalOrder.useMutation();
+  const capturePayPalOrder = trpc.shop.capturePayPalOrder.useMutation();
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (items.length === 0) {
@@ -70,7 +77,6 @@ export default function Checkout() {
     setIsProcessing(true);
 
     if (selectedPayment === "card" || selectedPayment === "apple_pay" || selectedPayment === "google_pay") {
-      // Use Stripe checkout
       createCheckout.mutate({
         items: items.map((i) => ({
           name: i.name,
@@ -82,12 +88,6 @@ export default function Checkout() {
         customerEmail: form.email,
         paymentMethod: selectedPayment,
       });
-    } else if (selectedPayment === "paypal") {
-      toast.info("Redirecting to PayPal...");
-      setTimeout(() => {
-        toast.success("PayPal checkout coming soon! Use card payment for now.");
-        setIsProcessing(false);
-      }, 1500);
     } else if (selectedPayment === "klarna") {
       toast.info("Redirecting to Klarna...");
       setTimeout(() => {
@@ -100,6 +100,9 @@ export default function Checkout() {
         toast.success("Afterpay checkout coming soon! Use card payment for now.");
         setIsProcessing(false);
       }, 1500);
+    } else {
+      // PayPal — handled by PayPalButtons below, not by form submit
+      setIsProcessing(false);
     }
   };
 
@@ -278,7 +281,7 @@ export default function Checkout() {
                   ))}
                 </div>
 
-                {/* Card fields — shown only for card payment */}
+                {/* Card fields */}
                 {selectedPayment === "card" && (
                   <div className="space-y-3 p-4 bg-[#333] border border-white/10">
                     <input
@@ -329,7 +332,63 @@ export default function Checkout() {
                   </div>
                 )}
 
-                {(selectedPayment === "paypal" || selectedPayment === "klarna" || selectedPayment === "afterpay") && (
+                {/* PayPal Buttons — live integration */}
+                {selectedPayment === "paypal" && (
+                  <div className="p-4 bg-[#333] border border-white/10">
+                    <p className="font-body text-xs text-[#888] mb-4 text-center">
+                      Click the PayPal button below to complete your purchase securely.
+                    </p>
+                    {PAYPAL_CLIENT_ID ? (
+                      <PayPalButtons
+                        style={{ layout: "vertical", color: "gold", shape: "rect", label: "paypal" }}
+                        createOrder={async () => {
+                          const result = await createPayPalOrder.mutateAsync({
+                            items: items.map((i) => ({
+                              name: i.name,
+                              priceUSD: i.priceUSD,
+                              quantity: i.quantity,
+                            })),
+                          });
+                          if (!result.orderId) throw new Error("Failed to create PayPal order");
+                          return result.orderId;
+                        }}
+                        onApprove={async (data) => {
+                          try {
+                            setIsProcessing(true);
+                            const result = await capturePayPalOrder.mutateAsync({
+                              orderId: data.orderID,
+                            });
+                            if (result.status === "COMPLETED") {
+                              clearCart();
+                              toast.success("Payment successful! Thank you for your order.");
+                              navigate("/order-confirmation?session=" + data.orderID);
+                            } else {
+                              toast.error("Payment not completed. Please try again.");
+                            }
+                          } catch (err: unknown) {
+                            const msg = err instanceof Error ? err.message : "Payment failed";
+                            toast.error("PayPal error: " + msg);
+                          } finally {
+                            setIsProcessing(false);
+                          }
+                        }}
+                        onError={(err) => {
+                          console.error("PayPal error:", err);
+                          toast.error("PayPal encountered an error. Please try another payment method.");
+                        }}
+                        onCancel={() => {
+                          toast.info("PayPal payment cancelled.");
+                        }}
+                      />
+                    ) : (
+                      <p className="font-body text-xs text-[#FF6B00] text-center">
+                        PayPal is not configured. Please use card payment.
+                      </p>
+                    )}
+                  </div>
+                )}
+
+                {(selectedPayment === "klarna" || selectedPayment === "afterpay") && (
                   <div className="p-4 bg-[#333] border border-white/10 text-center">
                     <p className="font-body text-sm text-[#888]">
                       You will be redirected to{" "}
@@ -356,23 +415,26 @@ export default function Checkout() {
                 </div>
               </div>
 
-              <button
-                type="submit"
-                disabled={isProcessing}
-                className="btn-primary w-full py-5 text-sm tracking-[0.2em] flex items-center justify-center gap-3 disabled:opacity-60"
-              >
-                {isProcessing ? (
-                  <>
-                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
-                    PROCESSING...
-                  </>
-                ) : (
-                  <>
-                    <CreditCard size={16} />
-                    PLACE ORDER — {convertPrice(totalUSD)}
-                  </>
-                )}
-              </button>
+              {/* Submit button — hidden for PayPal (handled by PayPalButtons) */}
+              {selectedPayment !== "paypal" && (
+                <button
+                  type="submit"
+                  disabled={isProcessing}
+                  className="btn-primary w-full py-5 text-sm tracking-[0.2em] flex items-center justify-center gap-3 disabled:opacity-60"
+                >
+                  {isProcessing ? (
+                    <>
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      PROCESSING...
+                    </>
+                  ) : (
+                    <>
+                      <CreditCard size={16} />
+                      PLACE ORDER — {convertPrice(totalUSD)}
+                    </>
+                  )}
+                </button>
+              )}
             </form>
 
             {/* RIGHT — Order Summary */}
@@ -398,7 +460,7 @@ export default function Checkout() {
                       <div className="flex-1">
                         <p className="font-display text-xs font-semibold text-white">{item.name}</p>
                         <p className="font-body text-[10px] text-[#888] mt-0.5">Size: {item.size}</p>
-                        <p className="font-display text-sm font-bold text-[#FF6B00] mt-1">
+                        <p className="font-body text-xs text-[#FF6B00] mt-1">
                           {convertPrice(item.priceUSD * item.quantity)}
                         </p>
                       </div>
@@ -408,36 +470,42 @@ export default function Checkout() {
 
                 <div className="space-y-3 pt-4 border-t border-white/10">
                   <div className="flex justify-between">
-                    <span className="font-body text-sm text-[#888]">Subtotal</span>
-                    <span className="font-display text-sm text-white">{convertPrice(subtotalUSD)}</span>
+                    <span className="font-body text-xs text-[#888]">Subtotal</span>
+                    <span className="font-body text-xs text-white">{convertPrice(subtotalUSD)}</span>
                   </div>
                   <div className="flex justify-between">
-                    <span className="font-body text-sm text-[#888]">Shipping</span>
-                    <span className="font-display text-sm text-white">
-                      {shippingUSD === 0 ? (
-                        <span className="text-green-400">FREE</span>
-                      ) : (
-                        convertPrice(shippingUSD)
-                      )}
+                    <span className="font-body text-xs text-[#888]">Shipping</span>
+                    <span className="font-body text-xs text-white">
+                      {shippingUSD === 0 ? "FREE" : convertPrice(shippingUSD)}
                     </span>
                   </div>
                   {shippingUSD > 0 && (
-                    <p className="font-body text-xs text-[#666]">
+                    <p className="font-body text-[10px] text-[#888]">
                       Free shipping on orders over {convertPrice(100)}
                     </p>
                   )}
                   <div className="flex justify-between pt-3 border-t border-white/10">
-                    <span className="font-display text-sm tracking-widest text-white">TOTAL</span>
-                    <span className="font-display text-xl font-bold text-[#FF6B00]">
+                    <span className="font-display text-sm font-bold text-white">TOTAL</span>
+                    <span className="font-display text-sm font-bold text-[#FF6B00]">
                       {convertPrice(totalUSD)}
                     </span>
                   </div>
                 </div>
+              </div>
 
-                <div className="mt-6 p-4 bg-[#FF6B00]/10 border border-[#FF6B00]/20">
-                  <p className="font-body text-xs text-[#FF6B00]">
-                    🔒 Your payment is protected by 256-bit SSL encryption. We never store your card details.
-                  </p>
+              {/* Trust badges */}
+              <div className="mt-4 p-4 bg-[#1A1A1A] border border-white/10">
+                <p className="font-display text-[10px] tracking-widest text-[#888] mb-3">
+                  ACCEPTED PAYMENTS
+                </p>
+                <div className="flex gap-3 flex-wrap">
+                  {["💳 Visa", "💳 Mastercard", "💳 Amex", "🅿️ PayPal", "🍎 Apple Pay", "🔵 Google Pay"].map(
+                    (p) => (
+                      <span key={p} className="font-body text-[10px] text-[#888] bg-[#333] px-2 py-1">
+                        {p}
+                      </span>
+                    )
+                  )}
                 </div>
               </div>
             </div>
@@ -447,5 +515,20 @@ export default function Checkout() {
 
       <Footer />
     </div>
+  );
+}
+
+// Outer wrapper provides PayPal script context
+export default function Checkout() {
+  return (
+    <PayPalScriptProvider
+      options={{
+        clientId: PAYPAL_CLIENT_ID || "test",
+        currency: "USD",
+        intent: "capture",
+      }}
+    >
+      <CheckoutInner />
+    </PayPalScriptProvider>
   );
 }
