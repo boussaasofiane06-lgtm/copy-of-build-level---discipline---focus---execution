@@ -9,7 +9,6 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Link } from "wouter";
-import { getLoginUrl } from "@/const";
 import {
   Plus, Pencil, Trash2, Upload, Save, X, Package, Settings,
   ShoppingBag, ToggleLeft, ToggleRight, Star, StarOff, ChevronLeft,
@@ -44,6 +43,68 @@ const EMPTY_FORM: ProductFormData = {
 
 const CATEGORIES = ["hoodies", "t-shirts", "hats", "accessories", "apparel"];
 
+// ─── Password Login ──────────────────────────────────────────────────────────
+
+function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
+  const [password, setPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password }),
+      });
+      if (res.ok) {
+        onSuccess();
+      } else {
+        setError("Incorrect password. Try again.");
+      }
+    } catch {
+      setError("Connection error. Please try again.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-[#111] flex flex-col items-center justify-center gap-6 px-4">
+      <div className="font-display text-2xl font-bold tracking-[0.15em] text-white">
+        BUILD<span className="text-[#FF6B00]"> LEVEL</span>
+      </div>
+      <p className="font-display text-white text-xl tracking-widest">ADMIN ACCESS</p>
+      <form onSubmit={handleSubmit} className="flex flex-col gap-4 w-full max-w-[320px]">
+        <input
+          type="password"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          placeholder="Enter admin password"
+          className="bg-[#1A1A1A] border border-white/10 text-white font-body text-sm px-4 py-3 outline-none focus:border-[#FF6B00] transition-colors w-full"
+          autoFocus
+        />
+        {error && <p className="text-red-400 text-xs font-body">{error}</p>}
+        <button
+          type="submit"
+          disabled={loading || !password}
+          className="bg-[#FF6B00] text-white font-display text-sm tracking-widest px-8 py-3 hover:bg-[#e55e00] transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+        >
+          {loading ? <Loader2 size={16} className="animate-spin" /> : null}
+          {loading ? "VERIFYING..." : "LOG IN"}
+        </button>
+      </form>
+      <Link href="/" className="font-display text-xs text-[#555] tracking-wider hover:text-white transition-colors">
+        BACK TO SITE
+      </Link>
+    </div>
+  );
+}
+
 // ─── Admin Guard ──────────────────────────────────────────────────────────────
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
@@ -58,24 +119,7 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
   }
 
   if (!user) {
-    return (
-      <div className="min-h-screen bg-[#111] flex flex-col items-center justify-center gap-6">
-        <div className="font-display text-2xl font-bold tracking-[0.15em] text-white mb-2">
-          BUILD<span className="text-[#FF6B00]"> LEVEL</span>
-        </div>
-        <p className="font-display text-white text-xl tracking-widest">ADMIN ACCESS REQUIRED</p>
-        <p className="font-body text-[#888] text-sm">Log in to access the admin panel.</p>
-        <a
-          href={getLoginUrl()}
-          className="font-display text-sm tracking-widest bg-[#FF6B00] text-white px-8 py-3 hover:bg-[#e55e00] transition-colors"
-        >
-          LOG IN
-        </a>
-        <Link href="/" className="font-display text-xs text-[#555] tracking-wider hover:text-white transition-colors mt-2">
-          BACK TO SITE
-        </Link>
-      </div>
-    );
+    return <AdminPasswordLogin onSuccess={() => window.location.reload()} />;
   }
 
   if (user.role !== "admin") {
