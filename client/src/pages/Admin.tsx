@@ -9,6 +9,7 @@ import { useAuth } from "@/_core/hooks/useAuth";
 import { trpc } from "@/lib/trpc";
 import { toast } from "sonner";
 import { Link } from "wouter";
+import { getLoginUrl } from "@/const";
 import {
   Plus, Pencil, Trash2, Upload, Save, X, Package, Settings,
   ShoppingBag, ToggleLeft, ToggleRight, Star, StarOff, ChevronLeft,
@@ -58,10 +59,19 @@ function AdminGuard({ children }: { children: React.ReactNode }) {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-[#111] flex flex-col items-center justify-center gap-4">
+      <div className="min-h-screen bg-[#111] flex flex-col items-center justify-center gap-6">
+        <div className="font-display text-2xl font-bold tracking-[0.15em] text-white mb-2">
+          BUILD<span className="text-[#FF6B00]"> LEVEL</span>
+        </div>
         <p className="font-display text-white text-xl tracking-widest">ADMIN ACCESS REQUIRED</p>
-        <p className="font-body text-[#888] text-sm">Please log in to access the admin panel.</p>
-        <Link href="/" className="font-display text-xs text-[#FF6B00] tracking-wider border border-[#FF6B00] px-4 py-2 hover:bg-[#FF6B00] hover:text-white transition-colors">
+        <p className="font-body text-[#888] text-sm">Log in to access the admin panel.</p>
+        <a
+          href={getLoginUrl()}
+          className="font-display text-sm tracking-widest bg-[#FF6B00] text-white px-8 py-3 hover:bg-[#e55e00] transition-colors"
+        >
+          LOG IN
+        </a>
+        <Link href="/" className="font-display text-xs text-[#555] tracking-wider hover:text-white transition-colors mt-2">
           BACK TO SITE
         </Link>
       </div>
