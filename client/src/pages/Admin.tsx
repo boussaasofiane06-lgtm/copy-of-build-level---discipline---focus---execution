@@ -12,7 +12,8 @@ import { Link } from "wouter";
 import {
   Plus, Pencil, Trash2, Upload, Save, X, Package, Settings,
   ShoppingBag, ToggleLeft, ToggleRight, Star, StarOff, ChevronLeft,
-  Loader2, Image as ImageIcon, ExternalLink, BookOpen, Download
+  Loader2, Image as ImageIcon, ExternalLink, BookOpen, Download,
+  Video, Link2, Users
 } from "lucide-react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -916,10 +917,269 @@ function DigitalTab() {
   );
 }
 
+// ─── AI Videos Tab ──────────────────────────────────────────────────────────
+
+function AIVideosTab() {
+  const { data: videos = [], refetch } = trpc.aiVideos.adminList.useQuery();
+  const createVideo = trpc.aiVideos.adminCreate.useMutation({ onSuccess: () => { toast.success("Video added!"); refetch(); setShowForm(false); setForm(EMPTY_VIDEO); } });
+  const updateVideo = trpc.aiVideos.adminUpdate.useMutation({ onSuccess: () => { toast.success("Video updated!"); refetch(); setShowForm(false); setEditItem(null); } });
+  const deleteVideo = trpc.aiVideos.adminDelete.useMutation({ onSuccess: () => { toast.success("Deleted"); refetch(); } });
+
+  const EMPTY_VIDEO = { title: "", description: "", videoUrl: "", thumbnailUrl: "", category: "motivation", duration: "", badge: "", published: false, sortOrder: 0 };
+  const [showForm, setShowForm] = useState(false);
+  const [editItem, setEditItem] = useState<any>(null);
+  const [form, setForm] = useState(EMPTY_VIDEO);
+
+  const handleSave = () => {
+    if (!form.title.trim()) { toast.error("Title required"); return; }
+    if (editItem) { updateVideo.mutate({ ...form, id: editItem.id }); }
+    else { createVideo.mutate(form); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="font-display text-white font-bold tracking-widest text-lg">AI VIDEOS</h1>
+          <p className="font-body text-[#555] text-sm mt-1">Manage AI-generated motivational videos. Hidden from public until published.</p>
+        </div>
+        <button onClick={() => { setEditItem(null); setForm(EMPTY_VIDEO); setShowForm(true); }} className="admin-btn-primary flex items-center gap-2">
+          <Plus size={14} /> ADD VIDEO
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-[#1A1A1A] border border-white/10 p-6 mb-6">
+          <h2 className="font-display text-white font-bold tracking-widest text-sm mb-4">{editItem ? "EDIT VIDEO" : "NEW VIDEO"}</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label className="admin-label">TITLE *</label><input className="admin-input" value={form.title} onChange={e => setForm(f => ({...f, title: e.target.value}))} placeholder="Video title" /></div>
+            <div><label className="admin-label">CATEGORY</label><select className="admin-input" value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}><option value="motivation">Motivation</option><option value="training">Training</option><option value="mindset">Mindset</option><option value="discipline">Discipline</option></select></div>
+            <div><label className="admin-label">VIDEO URL</label><input className="admin-input" value={form.videoUrl} onChange={e => setForm(f => ({...f, videoUrl: e.target.value}))} placeholder="YouTube, Vimeo, or direct URL" /></div>
+            <div><label className="admin-label">THUMBNAIL URL</label><input className="admin-input" value={form.thumbnailUrl} onChange={e => setForm(f => ({...f, thumbnailUrl: e.target.value}))} placeholder="Thumbnail image URL" /></div>
+            <div><label className="admin-label">DURATION</label><input className="admin-input" value={form.duration} onChange={e => setForm(f => ({...f, duration: e.target.value}))} placeholder="e.g. 3:45" /></div>
+            <div><label className="admin-label">BADGE</label><input className="admin-input" value={form.badge} onChange={e => setForm(f => ({...f, badge: e.target.value}))} placeholder="e.g. NEW, FEATURED" /></div>
+            <div className="md:col-span-2"><label className="admin-label">DESCRIPTION</label><textarea className="admin-input" rows={3} value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} placeholder="Video description" /></div>
+            <div className="flex items-center gap-3">
+              <label className="admin-label">PUBLISHED</label>
+              <button onClick={() => setForm(f => ({...f, published: !f.published}))} className="text-[#FF6B00]">{form.published ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}</button>
+              <span className="font-body text-xs text-[#555]">{form.published ? "Live" : "Draft"}</span>
+            </div>
+          </div>
+          <div className="flex gap-3 mt-4">
+            <button onClick={handleSave} disabled={createVideo.isPending || updateVideo.isPending} className="admin-btn-primary flex items-center gap-2"><Save size={14} /> SAVE</button>
+            <button onClick={() => { setShowForm(false); setEditItem(null); }} className="admin-btn-secondary">CANCEL</button>
+          </div>
+        </div>
+      )}
+
+      {videos.length === 0 && !showForm && (
+        <div className="bg-[#1A1A1A] border border-white/10 border-dashed p-12 text-center">
+          <Video size={32} className="text-[#333] mx-auto mb-3" />
+          <p className="font-display text-[#555] text-xs tracking-widest">NO VIDEOS YET</p>
+          <p className="font-body text-[#444] text-xs mt-1">Add your first AI video to get started.</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {videos.map((v: any) => (
+          <div key={v.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {v.thumbnailUrl ? <img src={v.thumbnailUrl} className="w-16 h-10 object-cover rounded" /> : <div className="w-16 h-10 bg-[#222] rounded flex items-center justify-center"><Video size={16} className="text-[#444]" /></div>}
+              <div>
+                <p className="font-display text-white text-sm font-bold tracking-wider">{v.title}</p>
+                <p className="font-body text-[#555] text-xs">{v.category} {v.duration ? `• ${v.duration}` : ""}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`font-display text-xs tracking-widest px-2 py-0.5 ${v.published ? "bg-green-900/30 text-green-400" : "bg-[#222] text-[#555]"}`}>{v.published ? "LIVE" : "DRAFT"}</span>
+              <button onClick={() => { setEditItem(v); setForm({ title: v.title, description: v.description || "", videoUrl: v.videoUrl || "", thumbnailUrl: v.thumbnailUrl || "", category: v.category, duration: v.duration || "", badge: v.badge || "", published: v.published, sortOrder: v.sortOrder }); setShowForm(true); }} className="p-1.5 text-[#555] hover:text-white transition-colors"><Pencil size={14} /></button>
+              <button onClick={() => { if (window.confirm(`Delete "${v.title}"?`)) deleteVideo.mutate({ id: v.id }); }} className="p-1.5 text-[#555] hover:text-red-400 transition-colors"><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Affiliate Tab ────────────────────────────────────────────────────────────
+
+function AffiliateTab() {
+  const { data: items = [], refetch } = trpc.affiliate.adminList.useQuery();
+  const createItem = trpc.affiliate.adminCreate.useMutation({ onSuccess: () => { toast.success("Product added!"); refetch(); setShowForm(false); setForm(EMPTY); } });
+  const updateItem = trpc.affiliate.adminUpdate.useMutation({ onSuccess: () => { toast.success("Updated!"); refetch(); setShowForm(false); setEditItem(null); } });
+  const deleteItem = trpc.affiliate.adminDelete.useMutation({ onSuccess: () => { toast.success("Deleted"); refetch(); } });
+
+  const EMPTY = { name: "", description: "", price: "", affiliateUrl: "", imageUrl: "", category: "gear", brand: "", badge: "", commission: "", published: false, sortOrder: 0 };
+  const [showForm, setShowForm] = useState(false);
+  const [editItem, setEditItem] = useState<any>(null);
+  const [form, setForm] = useState(EMPTY);
+
+  const handleSave = () => {
+    if (!form.name.trim()) { toast.error("Name required"); return; }
+    if (!form.affiliateUrl.trim()) { toast.error("Affiliate URL required"); return; }
+    const payload = { ...form, price: form.price ? parseFloat(form.price) : undefined };
+    if (editItem) { updateItem.mutate({ ...payload, id: editItem.id }); }
+    else { createItem.mutate(payload); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="font-display text-white font-bold tracking-widest text-lg">AFFILIATE PRODUCTS</h1>
+          <p className="font-body text-[#555] text-sm mt-1">Recommend gear and earn commissions. Hidden from public until published.</p>
+        </div>
+        <button onClick={() => { setEditItem(null); setForm(EMPTY); setShowForm(true); }} className="admin-btn-primary flex items-center gap-2">
+          <Plus size={14} /> ADD PRODUCT
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-[#1A1A1A] border border-white/10 p-6 mb-6">
+          <h2 className="font-display text-white font-bold tracking-widest text-sm mb-4">{editItem ? "EDIT PRODUCT" : "NEW AFFILIATE PRODUCT"}</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label className="admin-label">NAME *</label><input className="admin-input" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="Product name" /></div>
+            <div><label className="admin-label">BRAND</label><input className="admin-input" value={form.brand} onChange={e => setForm(f => ({...f, brand: e.target.value}))} placeholder="Brand name" /></div>
+            <div><label className="admin-label">AFFILIATE URL *</label><input className="admin-input" value={form.affiliateUrl} onChange={e => setForm(f => ({...f, affiliateUrl: e.target.value}))} placeholder="https://..." /></div>
+            <div><label className="admin-label">IMAGE URL</label><input className="admin-input" value={form.imageUrl} onChange={e => setForm(f => ({...f, imageUrl: e.target.value}))} placeholder="Product image URL" /></div>
+            <div><label className="admin-label">PRICE (USD)</label><input className="admin-input" type="number" value={form.price} onChange={e => setForm(f => ({...f, price: e.target.value}))} placeholder="29.99" /></div>
+            <div><label className="admin-label">COMMISSION</label><input className="admin-input" value={form.commission} onChange={e => setForm(f => ({...f, commission: e.target.value}))} placeholder="e.g. 10% or $5" /></div>
+            <div><label className="admin-label">CATEGORY</label><select className="admin-input" value={form.category} onChange={e => setForm(f => ({...f, category: e.target.value}))}><option value="gear">Gear</option><option value="supplements">Supplements</option><option value="equipment">Equipment</option><option value="books">Books</option><option value="tech">Tech</option></select></div>
+            <div><label className="admin-label">BADGE</label><input className="admin-input" value={form.badge} onChange={e => setForm(f => ({...f, badge: e.target.value}))} placeholder="e.g. RECOMMENDED" /></div>
+            <div className="md:col-span-2"><label className="admin-label">DESCRIPTION</label><textarea className="admin-input" rows={2} value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} placeholder="Short description" /></div>
+            <div className="flex items-center gap-3">
+              <label className="admin-label">PUBLISHED</label>
+              <button onClick={() => setForm(f => ({...f, published: !f.published}))} className="text-[#FF6B00]">{form.published ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}</button>
+              <span className="font-body text-xs text-[#555]">{form.published ? "Live" : "Draft"}</span>
+            </div>
+          </div>
+          <div className="flex gap-3 mt-4">
+            <button onClick={handleSave} disabled={createItem.isPending || updateItem.isPending} className="admin-btn-primary flex items-center gap-2"><Save size={14} /> SAVE</button>
+            <button onClick={() => { setShowForm(false); setEditItem(null); }} className="admin-btn-secondary">CANCEL</button>
+          </div>
+        </div>
+      )}
+
+      {items.length === 0 && !showForm && (
+        <div className="bg-[#1A1A1A] border border-white/10 border-dashed p-12 text-center">
+          <Link2 size={32} className="text-[#333] mx-auto mb-3" />
+          <p className="font-display text-[#555] text-xs tracking-widest">NO AFFILIATE PRODUCTS YET</p>
+          <p className="font-body text-[#444] text-xs mt-1">Add products you recommend and earn commissions.</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {items.map((item: any) => (
+          <div key={item.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              {item.imageUrl ? <img src={item.imageUrl} className="w-12 h-12 object-cover rounded" /> : <div className="w-12 h-12 bg-[#222] rounded flex items-center justify-center"><Link2 size={16} className="text-[#444]" /></div>}
+              <div>
+                <p className="font-display text-white text-sm font-bold tracking-wider">{item.name}</p>
+                <p className="font-body text-[#555] text-xs">{item.brand ? `${item.brand} • ` : ""}{item.category}{item.commission ? ` • ${item.commission} commission` : ""}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`font-display text-xs tracking-widest px-2 py-0.5 ${item.published ? "bg-green-900/30 text-green-400" : "bg-[#222] text-[#555]"}`}>{item.published ? "LIVE" : "DRAFT"}</span>
+              <button onClick={() => { setEditItem(item); setForm({ name: item.name, description: item.description || "", price: item.price ? String(item.price) : "", affiliateUrl: item.affiliateUrl, imageUrl: item.imageUrl || "", category: item.category, brand: item.brand || "", badge: item.badge || "", commission: item.commission || "", published: item.published, sortOrder: item.sortOrder }); setShowForm(true); }} className="p-1.5 text-[#555] hover:text-white transition-colors"><Pencil size={14} /></button>
+              <button onClick={() => { if (window.confirm(`Delete "${item.name}"?`)) deleteItem.mutate({ id: item.id }); }} className="p-1.5 text-[#555] hover:text-red-400 transition-colors"><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ─── Membership Tab ───────────────────────────────────────────────────────────
+
+function MembershipTab() {
+  const { data: tiers = [], refetch } = trpc.membership.adminList.useQuery();
+  const createTier = trpc.membership.adminCreate.useMutation({ onSuccess: () => { toast.success("Tier added!"); refetch(); setShowForm(false); setForm(EMPTY); } });
+  const updateTier = trpc.membership.adminUpdate.useMutation({ onSuccess: () => { toast.success("Updated!"); refetch(); setShowForm(false); setEditItem(null); } });
+  const deleteTier = trpc.membership.adminDelete.useMutation({ onSuccess: () => { toast.success("Deleted"); refetch(); } });
+
+  const EMPTY = { name: "", description: "", price: "", interval: "monthly" as "monthly" | "yearly", features: "", badge: "", stripePriceId: "", published: false, sortOrder: 0 };
+  const [showForm, setShowForm] = useState(false);
+  const [editItem, setEditItem] = useState<any>(null);
+  const [form, setForm] = useState(EMPTY);
+
+  const handleSave = () => {
+    if (!form.name.trim()) { toast.error("Name required"); return; }
+    if (!form.price) { toast.error("Price required"); return; }
+    const featuresArr = form.features.split("\n").map((f: string) => f.trim()).filter(Boolean);
+    const payload = { ...form, price: parseFloat(form.price), features: featuresArr };
+    if (editItem) { updateTier.mutate({ ...payload, id: editItem.id }); }
+    else { createTier.mutate(payload); }
+  };
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="font-display text-white font-bold tracking-widest text-lg">COMMUNITY MEMBERSHIP</h1>
+          <p className="font-body text-[#555] text-sm mt-1">Set up membership tiers for your community. Hidden from public until published.</p>
+        </div>
+        <button onClick={() => { setEditItem(null); setForm(EMPTY); setShowForm(true); }} className="admin-btn-primary flex items-center gap-2">
+          <Plus size={14} /> ADD TIER
+        </button>
+      </div>
+
+      {showForm && (
+        <div className="bg-[#1A1A1A] border border-white/10 p-6 mb-6">
+          <h2 className="font-display text-white font-bold tracking-widest text-sm mb-4">{editItem ? "EDIT TIER" : "NEW MEMBERSHIP TIER"}</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div><label className="admin-label">TIER NAME *</label><input className="admin-input" value={form.name} onChange={e => setForm(f => ({...f, name: e.target.value}))} placeholder="e.g. ELITE, PRO, BASIC" /></div>
+            <div><label className="admin-label">BADGE</label><input className="admin-input" value={form.badge} onChange={e => setForm(f => ({...f, badge: e.target.value}))} placeholder="e.g. MOST POPULAR" /></div>
+            <div><label className="admin-label">PRICE (USD) *</label><input className="admin-input" type="number" value={form.price} onChange={e => setForm(f => ({...f, price: e.target.value}))} placeholder="9.99" /></div>
+            <div><label className="admin-label">BILLING INTERVAL</label><select className="admin-input" value={form.interval} onChange={e => setForm(f => ({...f, interval: e.target.value as "monthly" | "yearly"}))}><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></div>
+            <div><label className="admin-label">STRIPE PRICE ID</label><input className="admin-input" value={form.stripePriceId} onChange={e => setForm(f => ({...f, stripePriceId: e.target.value}))} placeholder="price_... (from Stripe dashboard)" /></div>
+            <div className="flex items-center gap-3 pt-6">
+              <label className="admin-label">PUBLISHED</label>
+              <button onClick={() => setForm(f => ({...f, published: !f.published}))} className="text-[#FF6B00]">{form.published ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}</button>
+              <span className="font-body text-xs text-[#555]">{form.published ? "Live" : "Draft"}</span>
+            </div>
+            <div className="md:col-span-2"><label className="admin-label">DESCRIPTION</label><textarea className="admin-input" rows={2} value={form.description} onChange={e => setForm(f => ({...f, description: e.target.value}))} placeholder="What members get" /></div>
+            <div className="md:col-span-2"><label className="admin-label">FEATURES (one per line)</label><textarea className="admin-input" rows={4} value={form.features} onChange={e => setForm(f => ({...f, features: e.target.value}))} placeholder="Access to private community\nWeekly workout plans\nMonthly Q&A calls" /></div>
+          </div>
+          <div className="flex gap-3 mt-4">
+            <button onClick={handleSave} disabled={createTier.isPending || updateTier.isPending} className="admin-btn-primary flex items-center gap-2"><Save size={14} /> SAVE</button>
+            <button onClick={() => { setShowForm(false); setEditItem(null); }} className="admin-btn-secondary">CANCEL</button>
+          </div>
+        </div>
+      )}
+
+      {tiers.length === 0 && !showForm && (
+        <div className="bg-[#1A1A1A] border border-white/10 border-dashed p-12 text-center">
+          <Users size={32} className="text-[#333] mx-auto mb-3" />
+          <p className="font-display text-[#555] text-xs tracking-widest">NO MEMBERSHIP TIERS YET</p>
+          <p className="font-body text-[#444] text-xs mt-1">Create tiers for your community membership program.</p>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {tiers.map((tier: any) => (
+          <div key={tier.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-center justify-between">
+            <div>
+              <p className="font-display text-white text-sm font-bold tracking-wider">{tier.name} {tier.badge && <span className="text-[#FF6B00] text-xs ml-2">{tier.badge}</span>}</p>
+              <p className="font-body text-[#555] text-xs">${tier.price}/{tier.interval} • {Array.isArray(tier.features) ? tier.features.length : 0} features</p>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className={`font-display text-xs tracking-widest px-2 py-0.5 ${tier.published ? "bg-green-900/30 text-green-400" : "bg-[#222] text-[#555]"}`}>{tier.published ? "LIVE" : "DRAFT"}</span>
+              <button onClick={() => { setEditItem(tier); setForm({ name: tier.name, description: tier.description || "", price: String(tier.price), interval: tier.interval, features: Array.isArray(tier.features) ? tier.features.join("\n") : "", badge: tier.badge || "", stripePriceId: tier.stripePriceId || "", published: tier.published, sortOrder: tier.sortOrder }); setShowForm(true); }} className="p-1.5 text-[#555] hover:text-white transition-colors"><Pencil size={14} /></button>
+              <button onClick={() => { if (window.confirm(`Delete "${tier.name}"?`)) deleteTier.mutate({ id: tier.id }); }} className="p-1.5 text-[#555] hover:text-red-400 transition-colors"><Trash2 size={14} /></button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
 export default function Admin() {
-  const [tab, setTab] = useState<"products" | "settings" | "integrations" | "blog" | "digital">("products");
+  const [tab, setTab] = useState<"products" | "settings" | "integrations" | "blog" | "digital" | "videos" | "affiliate" | "membership">("products");
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState<(ProductFormData & { id?: number }) | null>(null);
 
@@ -1018,12 +1278,15 @@ export default function Admin() {
             { id: "products", label: "PRODUCTS", icon: Package },
             { id: "blog", label: "BLOG", icon: BookOpen },
             { id: "digital", label: "DIGITAL", icon: Download },
+            { id: "videos", label: "AI VIDEOS", icon: Video },
+            { id: "affiliate", label: "AFFILIATE", icon: Link2 },
+            { id: "membership", label: "MEMBERSHIP", icon: Users },
             { id: "settings", label: "SETTINGS", icon: Settings },
             { id: "integrations", label: "INTEGRATIONS", icon: ExternalLink },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id as "products" | "settings" | "integrations" | "blog" | "digital")}
+              onClick={() => setTab(id as "products" | "settings" | "integrations" | "blog" | "digital" | "videos" | "affiliate" | "membership")}
               className={`flex items-center gap-2 px-5 py-4 font-display text-xs font-bold tracking-widest border-b-2 transition-colors ${
                 tab === id
                   ? "border-[#FF6B00] text-white"
@@ -1129,6 +1392,9 @@ export default function Admin() {
           {tab === "integrations" && <IntegrationsTab />}
           {tab === "blog" && <BlogTab />}
           {tab === "digital" && <DigitalTab />}
+          {tab === "videos" && <AIVideosTab />}
+          {tab === "affiliate" && <AffiliateTab />}
+          {tab === "membership" && <MembershipTab />}
         </div>
 
         {/* Add Product Modal */}

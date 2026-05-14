@@ -10,7 +10,7 @@ import { notifyOwner } from "./_core/notification";
 import { invokeLLM } from "./_core/llm";
 import { adminRouter } from "./admin";
 import { getDb } from "./db";
-import { products, blogPosts, digitalProducts, digitalPurchases } from "../drizzle/schema";
+import { products, blogPosts, digitalProducts, digitalPurchases, aiVideos, affiliateProducts, membershipTiers } from "../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
 import crypto from "crypto";
 
@@ -481,6 +481,187 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
           title: `📬 New Contact Form — ${input.name}`,
           content: `Name: ${input.name}\nEmail: ${input.email}\n\nMessage:\n${input.message}`,
         }).catch(() => {/* non-blocking */});
+        return { success: true };
+      }),
+  }),
+
+  aiVideos: router({
+    list: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(aiVideos).where(eq(aiVideos.published, true)).orderBy(asc(aiVideos.sortOrder), desc(aiVideos.createdAt));
+    }),
+    adminList: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(aiVideos).orderBy(asc(aiVideos.sortOrder), desc(aiVideos.createdAt));
+    }),
+    adminCreate: publicProcedure
+      .input(z.object({
+        title: z.string().min(1),
+        description: z.string().optional(),
+        videoUrl: z.string().optional(),
+        thumbnailUrl: z.string().optional(),
+        category: z.string().default("motivation"),
+        duration: z.string().optional(),
+        badge: z.string().optional(),
+        published: z.boolean().default(false),
+        sortOrder: z.number().default(0),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        await db.insert(aiVideos).values(input);
+        return { success: true };
+      }),
+    adminUpdate: publicProcedure
+      .input(z.object({
+        id: z.number(),
+        title: z.string().min(1),
+        description: z.string().optional(),
+        videoUrl: z.string().optional(),
+        thumbnailUrl: z.string().optional(),
+        category: z.string(),
+        duration: z.string().optional(),
+        badge: z.string().optional(),
+        published: z.boolean(),
+        sortOrder: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        const { id, ...data } = input;
+        await db.update(aiVideos).set(data).where(eq(aiVideos.id, id));
+        return { success: true };
+      }),
+    adminDelete: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        await db.delete(aiVideos).where(eq(aiVideos.id, input.id));
+        return { success: true };
+      }),
+  }),
+
+  affiliate: router({
+    list: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(affiliateProducts).where(eq(affiliateProducts.published, true)).orderBy(asc(affiliateProducts.sortOrder), desc(affiliateProducts.createdAt));
+    }),
+    adminList: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(affiliateProducts).orderBy(asc(affiliateProducts.sortOrder), desc(affiliateProducts.createdAt));
+    }),
+    adminCreate: publicProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        description: z.string().optional(),
+        price: z.number().optional(),
+        affiliateUrl: z.string().url(),
+        imageUrl: z.string().optional(),
+        category: z.string().default("gear"),
+        brand: z.string().optional(),
+        badge: z.string().optional(),
+        commission: z.string().optional(),
+        published: z.boolean().default(false),
+        sortOrder: z.number().default(0),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        await db.insert(affiliateProducts).values({ ...input, price: input.price?.toString() });
+        return { success: true };
+      }),
+    adminUpdate: publicProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1),
+        description: z.string().optional(),
+        price: z.number().optional(),
+        affiliateUrl: z.string().url(),
+        imageUrl: z.string().optional(),
+        category: z.string(),
+        brand: z.string().optional(),
+        badge: z.string().optional(),
+        commission: z.string().optional(),
+        published: z.boolean(),
+        sortOrder: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        const { id, price, ...data } = input;
+        await db.update(affiliateProducts).set({ ...data, price: price?.toString() }).where(eq(affiliateProducts.id, id));
+        return { success: true };
+      }),
+    adminDelete: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        await db.delete(affiliateProducts).where(eq(affiliateProducts.id, input.id));
+        return { success: true };
+      }),
+  }),
+
+  membership: router({
+    list: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(membershipTiers).where(eq(membershipTiers.published, true)).orderBy(asc(membershipTiers.sortOrder));
+    }),
+    adminList: publicProcedure.query(async () => {
+      const db = await getDb();
+      if (!db) return [];
+      return db.select().from(membershipTiers).orderBy(asc(membershipTiers.sortOrder));
+    }),
+    adminCreate: publicProcedure
+      .input(z.object({
+        name: z.string().min(1),
+        description: z.string().optional(),
+        price: z.number().min(0),
+        interval: z.enum(["monthly", "yearly"]).default("monthly"),
+        features: z.array(z.string()).default([]),
+        badge: z.string().optional(),
+        stripePriceId: z.string().optional(),
+        published: z.boolean().default(false),
+        sortOrder: z.number().default(0),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        await db.insert(membershipTiers).values({ ...input, price: input.price.toString() });
+        return { success: true };
+      }),
+    adminUpdate: publicProcedure
+      .input(z.object({
+        id: z.number(),
+        name: z.string().min(1),
+        description: z.string().optional(),
+        price: z.number().min(0),
+        interval: z.enum(["monthly", "yearly"]),
+        features: z.array(z.string()),
+        badge: z.string().optional(),
+        stripePriceId: z.string().optional(),
+        published: z.boolean(),
+        sortOrder: z.number().optional(),
+      }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        const { id, price, ...data } = input;
+        await db.update(membershipTiers).set({ ...data, price: price.toString() }).where(eq(membershipTiers.id, id));
+        return { success: true };
+      }),
+    adminDelete: publicProcedure
+      .input(z.object({ id: z.number() }))
+      .mutation(async ({ input }) => {
+        const db = await getDb();
+        if (!db) throw new Error("DB unavailable");
+        await db.delete(membershipTiers).where(eq(membershipTiers.id, input.id));
         return { success: true };
       }),
   }),

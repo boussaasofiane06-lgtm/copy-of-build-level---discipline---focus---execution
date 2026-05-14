@@ -111,3 +111,62 @@ export const digitalPurchases = mysqlTable("digital_purchases", {
 
 export type DigitalPurchase = typeof digitalPurchases.$inferSelect;
 export type InsertDigitalPurchase = typeof digitalPurchases.$inferInsert;
+
+// AI Videos table
+export const aiVideos = mysqlTable("ai_videos", {
+  id: int("id").autoincrement().primaryKey(),
+  title: varchar("title", { length: 255 }).notNull(),
+  description: text("description"),
+  videoUrl: text("videoUrl"),
+  thumbnailUrl: text("thumbnailUrl"),
+  category: varchar("category", { length: 64 }).notNull().default("motivation"),
+  duration: varchar("duration", { length: 32 }),
+  badge: varchar("badge", { length: 64 }),
+  published: boolean("published").notNull().default(false),
+  sortOrder: int("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AiVideo = typeof aiVideos.$inferSelect;
+export type InsertAiVideo = typeof aiVideos.$inferInsert;
+
+// Affiliate products table
+export const affiliateProducts = mysqlTable("affiliate_products", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }),
+  affiliateUrl: text("affiliateUrl").notNull(),
+  imageUrl: text("imageUrl"),
+  category: varchar("category", { length: 64 }).notNull().default("gear"),
+  brand: varchar("brand", { length: 128 }),
+  badge: varchar("badge", { length: 64 }),
+  commission: varchar("commission", { length: 32 }),
+  published: boolean("published").notNull().default(false),
+  sortOrder: int("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type AffiliateProduct = typeof affiliateProducts.$inferSelect;
+export type InsertAffiliateProduct = typeof affiliateProducts.$inferInsert;
+
+// Membership tiers table
+export const membershipTiers = mysqlTable("membership_tiers", {
+  id: int("id").autoincrement().primaryKey(),
+  name: varchar("name", { length: 128 }).notNull(),
+  description: text("description"),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  interval: mysqlEnum("interval", ["monthly", "yearly"]).notNull().default("monthly"),
+  features: json("features").$type<string[]>().notNull().default([]),
+  badge: varchar("badge", { length: 64 }),
+  stripePriceId: varchar("stripePriceId", { length: 128 }),
+  published: boolean("published").notNull().default(false),
+  sortOrder: int("sortOrder").notNull().default(0),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type MembershipTier = typeof membershipTiers.$inferSelect;
+export type InsertMembershipTier = typeof membershipTiers.$inferInsert;
