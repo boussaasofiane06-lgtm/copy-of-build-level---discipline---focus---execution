@@ -45,6 +45,28 @@ const CATEGORIES = ["hoodies", "t-shirts", "hats", "accessories", "apparel"];
 
 // ─── Password Login ──────────────────────────────────────────────────────────
 
+// Frontend-only password check using SubtleCrypto (PBKDF2) — no server needed
+async function checkPassword(input: string): Promise<boolean> {
+  try {
+    const SALT = "buildlevel_admin_2024";
+    const EXPECTED = "767d6c20edbb7f7f1e3fbf231df5e49d0f48b756fa7fed6aa9b83ce3b9bced5f";
+    const enc = new TextEncoder();
+    const keyMaterial = await crypto.subtle.importKey(
+      "raw", enc.encode(input), "PBKDF2", false, ["deriveBits"]
+    );
+    const bits = await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: enc.encode(SALT), iterations: 100000, hash: "SHA-256" },
+      keyMaterial, 256
+    );
+    const hex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, "0")).join("");
+    return hex === EXPECTED;
+  } catch {
+    return false;
+  }
+}
+
+const ADMIN_SESSION_KEY = "bl_admin_unlocked";
+
 function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
@@ -55,19 +77,15 @@ function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true);
     setError("");
     try {
-      const res = await fetch("/api/admin/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
-        body: JSON.stringify({ password }),
-      });
-      if (res.ok) {
+      const ok = await checkPassword(password);
+      if (ok) {
+        sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
         onSuccess();
       } else {
         setError("Incorrect password. Try again.");
       }
     } catch {
-      setError("Connection error. Please try again.");
+      setError("Something went wrong. Try again.");
     } finally {
       setLoading(false);
     }
@@ -108,30 +126,12 @@ function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
 // ─── Admin Guard ──────────────────────────────────────────────────────────────
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
-  const { user, loading } = useAuth();
+  const [unlocked, setUnlocked] = useState(
+    () => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1"
+  );
 
-  if (loading) {
-    return (
-      <div className="min-h-screen bg-[#111] flex items-center justify-center">
-        <Loader2 className="animate-spin text-[#FF6B00]" size={32} />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return <AdminPasswordLogin onSuccess={() => window.location.reload()} />;
-  }
-
-  if (user.role !== "admin") {
-    return (
-      <div className="min-h-screen bg-[#111] flex flex-col items-center justify-center gap-4">
-        <p className="font-display text-white text-xl tracking-widest">ACCESS DENIED</p>
-        <p className="font-body text-[#888] text-sm">You don't have admin privileges.</p>
-        <Link href="/" className="font-display text-xs text-[#FF6B00] tracking-wider border border-[#FF6B00] px-4 py-2 hover:bg-[#FF6B00] hover:text-white transition-colors">
-          BACK TO SITE
-        </Link>
-      </div>
-    );
+  if (!unlocked) {
+    return <AdminPasswordLogin onSuccess={() => setUnlocked(true)} />;
   }
 
   return <>{children}</>;
