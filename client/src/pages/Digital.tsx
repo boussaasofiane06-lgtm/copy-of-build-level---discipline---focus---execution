@@ -8,11 +8,32 @@ import { Download, Lock, Star } from "lucide-react";
 
 const CATEGORIES = ["All", "Guide", "Workout", "Nutrition", "Mindset", "Wallpaper"];
 
+// Static fallback products — always visible even without server
+const STATIC_PRODUCTS = [
+  {
+    id: 1,
+    name: "DISCIPLINE MINDSET — The BUILD LEVEL Guide",
+    description: "A fully-loaded 13-page guide to building unbreakable mental strength. Covers 7 chapters: What Discipline Really Means, The Architecture of Your Mind, The Five Pillars of Mental Discipline, Daily Protocols, Handling Failure, Advanced Mental Training, and The BUILD LEVEL Code. This is not motivation. This is a system.",
+    price: 19.99,
+    category: "mindset",
+    badge: "NEW",
+    imageUrl: "https://d2xsxph8kpxj0f.cloudfront.net/310519663635005932/ZpCxvttgRWUJYjQSvWcg6k/discipline-mindset-cover-4tL8ikv8VjQQa3vbGynnuC.webp",
+    fileUrl: "/manus-storage/BUILD_LEVEL_Discipline_Mindset_4f45f459.pdf",
+    fileName: "BUILD_LEVEL_Discipline_Mindset.pdf",
+    published: true,
+  },
+];
+
 export default function Digital() {
   const [activeCategory, setActiveCategory] = useState("All");
   const [checkoutEmail, setCheckoutEmail] = useState<Record<number, string>>({});
   const [loadingId, setLoadingId] = useState<number | null>(null);
-  const { data: products = [], isLoading } = trpc.digital.list.useQuery();
+  const { data: serverProducts, isLoading } = trpc.digital.list.useQuery(undefined, {
+    retry: false,
+    staleTime: 30_000,
+  });
+  // Use server products if available, otherwise fall back to static list
+  const products = serverProducts && serverProducts.length > 0 ? serverProducts : (isLoading ? [] : STATIC_PRODUCTS);
   const createCheckout = trpc.digital.createCheckout.useMutation();
 
   const filtered = activeCategory === "All"
