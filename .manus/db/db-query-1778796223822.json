@@ -1,0 +1,9 @@
+{
+  "query": "\nINSERT INTO digital_products (name, description, price, fileUrl, fileName, category, badge, published, sortOrder)\nVALUES (\n  'DISCIPLINE MINDSET — The BUILD LEVEL Guide',\n  'A fully-loaded 13-page guide to building unbreakable mental strength. Covers 7 chapters: What Discipline Really Means, The Architecture of Your Mind, The Five Pillars of Mental Discipline, Daily Protocols, Handling Failure, Advanced Mental Training, and The BUILD LEVEL Code. This is not motivation. This is a system.',\n  19.99,\n  '/manus-storage/BUILD_LEVEL_Discipline_Mindset_4f45f459.pdf',\n  'BUILD_LEVEL_Discipline_Mindset.pdf',\n  'Mindset',\n  'NEW',\n  1,\n  1\n);\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute \nINSERT INTO digital_products (name, description, price, fileUrl, fileName, category, badge, published, sortOrder)\nVALUES (\n  'DISCIPLINE MINDSET — The BUILD LEVEL Guide',\n  'A fully-loaded 13-page guide to building unbreakable mental strength. Covers 7 chapters: What Discipline Really Means, The Architecture of Your Mind, The Five Pillars of Mental Discipline, Daily Protocols, Handling Failure, Advanced Mental Training, and The BUILD LEVEL Code. This is not motivation. This is a system.',\n  19.99,\n  '/manus-storage/BUILD_LEVEL_Discipline_Mindset_4f45f459.pdf',\n  'BUILD_LEVEL_Discipline_Mindset.pdf',\n  'Mindset',\n  'NEW',\n  1,\n  1\n);\n",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 269
+}
