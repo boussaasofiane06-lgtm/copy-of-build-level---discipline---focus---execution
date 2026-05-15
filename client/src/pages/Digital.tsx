@@ -1,9 +1,9 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { trpc } from "@/lib/trpc";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import { toast } from "sonner";
-import { Download, Lock, Star, Headphones, BookOpen, Play, Pause, Volume2 } from "lucide-react";
+import { Download, Lock, Star, Headphones, BookOpen, Play, Pause, Volume2, Globe, Loader2, CheckCircle, ChevronDown } from "lucide-react";
 
 const CATEGORIES = ["All", "Guide", "Audiobook", "Workout", "Nutrition", "Mindset"];
 
@@ -11,8 +11,8 @@ const CATEGORIES = ["All", "Guide", "Audiobook", "Workout", "Nutrition", "Mindse
 const STATIC_PRODUCTS = [
   {
     id: 1,
-    name: "DISCIPLINE MINDSET — The BUILD LEVEL Guide",
-    description: "A fully-loaded 13-page guide to building unbreakable mental strength. Covers 7 chapters: What Discipline Really Means, The Architecture of Your Mind, The Five Pillars of Mental Discipline, Daily Protocols, Handling Failure, Advanced Mental Training, and The BUILD LEVEL Code. This is not motivation. This is a system.",
+    name: "DISCIPLINE MINDSET: Control Your Mind. Master Your Life.",
+    description: "A fully-loaded guide to building unbreakable mental strength. Covers 5 chapters: Discipline as Identity, Build Your Focus Engine, The Five Pillars of Mental Discipline, Daily Protocols That Execute, and Failure Without Identity Collapse. This is not motivation. This is a system.",
     price: 19.99,
     category: "mindset",
     productType: "pdf" as const,
@@ -26,12 +26,25 @@ const STATIC_PRODUCTS = [
   },
 ];
 
-// Audio Player component for audiobooks
+// Audio Player component
 function AudioPlayer({ audioUrl, title }: { audioUrl: string; title: string }) {
   const [playing, setPlaying] = useState(false);
-  const [audio] = useState(() => new Audio(audioUrl));
+  const [progress, setProgress] = useState(0);
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  useEffect(() => {
+    const audio = new Audio(audioUrl);
+    audioRef.current = audio;
+    audio.ontimeupdate = () => {
+      if (audio.duration) setProgress((audio.currentTime / audio.duration) * 100);
+    };
+    audio.onended = () => { setPlaying(false); setProgress(0); };
+    return () => { audio.pause(); audio.src = ""; };
+  }, [audioUrl]);
 
   const toggle = () => {
+    const audio = audioRef.current;
+    if (!audio) return;
     if (playing) {
       audio.pause();
       setPlaying(false);
@@ -41,23 +54,188 @@ function AudioPlayer({ audioUrl, title }: { audioUrl: string; title: string }) {
     }
   };
 
-  audio.onended = () => setPlaying(false);
-
   return (
-    <div className="bg-[#1A1A1A] border border-[#FF6B00]/30 p-4 flex items-center gap-4 mt-3">
-      <button
-        onClick={toggle}
-        className="w-10 h-10 bg-[#FF6B00] flex items-center justify-center flex-shrink-0 hover:bg-[#e55e00] transition-colors"
-      >
-        {playing ? <Pause size={16} className="text-black" /> : <Play size={16} className="text-black" />}
-      </button>
-      <div className="flex-1 min-w-0">
-        <p className="font-display text-white text-xs tracking-wide truncate">{title}</p>
-        <div className="flex items-center gap-1 mt-1">
-          <Volume2 size={10} className="text-[#FF6B00]" />
-          <span className="font-body text-[#555] text-[10px]">Preview available</span>
+    <div className="bg-[#1A1A1A] border border-[#FF6B00]/30 p-4 mt-3">
+      <div className="flex items-center gap-3 mb-2">
+        <button
+          onClick={toggle}
+          className="w-9 h-9 bg-[#FF6B00] flex items-center justify-center flex-shrink-0 hover:bg-[#e55e00] transition-colors"
+        >
+          {playing ? <Pause size={14} className="text-black" /> : <Play size={14} className="text-black" />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="font-display text-white text-[11px] tracking-wide truncate">{title}</p>
+          <div className="flex items-center gap-1 mt-0.5">
+            <Volume2 size={9} className="text-[#FF6B00]" />
+            <span className="font-body text-[#555] text-[10px]">Audio narration</span>
+          </div>
         </div>
       </div>
+      {/* Progress bar */}
+      <div className="w-full bg-[#333] h-0.5">
+        <div className="bg-[#FF6B00] h-0.5 transition-all" style={{ width: `${progress}%` }} />
+      </div>
+    </div>
+  );
+}
+
+// Language Selector + Translation Panel
+function TranslationPanel({ productId, productName }: { productId: number; productName: string }) {
+  const [open, setOpen] = useState(false);
+  const [selectedLang, setSelectedLang] = useState<{ code: string; name: string; nativeName: string } | null>(null);
+  const [translationId, setTranslationId] = useState<number | null>(null);
+  const [pollingStatus, setPollingStatus] = useState<string | null>(null);
+
+  const { data: languages } = trpc.translation.getSupportedLanguages.useQuery();
+  const { data: existingTranslation, refetch: refetchTranslation } = trpc.translation.getTranslation.useQuery(
+    { productId, language: selectedLang?.code || "" },
+    { enabled: !!selectedLang, staleTime: 5_000 }
+  );
+
+  const requestMutation = trpc.translation.requestTranslation.useMutation();
+  const processMutation = trpc.translation.processTranslation.useMutation();
+
+  // Poll for status when processing
+  useEffect(() => {
+    if (!translationId || pollingStatus === "ready" || pollingStatus === "error") return;
+    const interval = setInterval(async () => {
+      await refetchTranslation();
+      if (existingTranslation?.status === "ready" || existingTranslation?.status === "error") {
+        setPollingStatus(existingTranslation.status);
+        clearInterval(interval);
+      }
+    }, 3000);
+    return () => clearInterval(interval);
+  }, [translationId, pollingStatus, existingTranslation, refetchTranslation]);
+
+  const handleLanguageSelect = async (lang: { code: string; name: string; nativeName: string }) => {
+    setSelectedLang(lang);
+    setOpen(false);
+    setPollingStatus(null);
+    setTranslationId(null);
+
+    // Check if already exists
+    await refetchTranslation();
+  };
+
+  const handleGenerate = async () => {
+    if (!selectedLang) return;
+    try {
+      const result = await requestMutation.mutateAsync({ productId, language: selectedLang.code });
+      setTranslationId(result.id);
+      setPollingStatus(result.status);
+
+      if (result.status === "pending") {
+        toast.info(`Generating ${selectedLang.name} translation + audio. This takes 1-2 minutes...`);
+        // Kick off processing
+        processMutation.mutate({ translationId: result.id });
+        setPollingStatus("translating");
+      } else if (result.status === "ready") {
+        setPollingStatus("ready");
+        toast.success(`${selectedLang.name} version ready!`);
+      }
+    } catch {
+      toast.error("Failed to start translation. Please try again.");
+    }
+  };
+
+  const isProcessing = pollingStatus === "translating" || pollingStatus === "generating_audio" || pollingStatus === "pending";
+  const isReady = existingTranslation?.status === "ready" || pollingStatus === "ready";
+
+  const statusLabel: Record<string, string> = {
+    pending: "Starting...",
+    translating: "Translating content...",
+    generating_audio: "Generating voice audio...",
+    ready: "Ready",
+    error: "Error — try again",
+  };
+
+  return (
+    <div className="mt-4 border-t border-white/10 pt-4">
+      <div className="flex items-center gap-2 mb-3">
+        <Globe size={13} className="text-[#FF6B00]" />
+        <span className="font-display text-[#FF6B00] text-[10px] tracking-widest">AVAILABLE IN 12 LANGUAGES</span>
+      </div>
+
+      {/* Language dropdown */}
+      <div className="relative">
+        <button
+          onClick={() => setOpen(!open)}
+          className="w-full bg-[#1A1A1A] border border-white/10 text-white font-body text-xs px-3 py-2.5 flex items-center justify-between hover:border-[#FF6B00]/50 transition-colors"
+        >
+          <span className={selectedLang ? "text-white" : "text-[#444]"}>
+            {selectedLang ? `${selectedLang.nativeName} (${selectedLang.name})` : "Choose your language..."}
+          </span>
+          <ChevronDown size={12} className={`text-[#555] transition-transform ${open ? "rotate-180" : ""}`} />
+        </button>
+
+        {open && languages && (
+          <div className="absolute top-full left-0 right-0 bg-[#1A1A1A] border border-white/10 z-20 max-h-48 overflow-y-auto">
+            {languages.map((lang) => (
+              <button
+                key={lang.code}
+                onClick={() => handleLanguageSelect(lang)}
+                className="w-full text-left px-3 py-2 font-body text-xs text-[#888] hover:bg-[#FF6B00]/10 hover:text-white transition-colors flex items-center justify-between"
+              >
+                <span>{lang.nativeName}</span>
+                <span className="text-[#444]">{lang.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* Status / Action */}
+      {selectedLang && (
+        <div className="mt-3">
+          {isReady && existingTranslation ? (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2">
+                <CheckCircle size={12} className="text-green-400" />
+                <span className="font-body text-green-400 text-xs">{selectedLang.name} version ready</span>
+              </div>
+              {existingTranslation.audioUrl && (
+                <AudioPlayer audioUrl={existingTranslation.audioUrl} title={`${productName} — ${selectedLang.name}`} />
+              )}
+              {existingTranslation.audioDuration && (
+                <div className="flex items-center gap-1">
+                  <Headphones size={10} className="text-[#555]" />
+                  <span className="font-body text-[#555] text-[10px]">{existingTranslation.audioDuration} audio narration</span>
+                </div>
+              )}
+              <p className="font-body text-[#555] text-[10px]">
+                Purchase above to receive the {selectedLang.name} PDF + audio in your email.
+              </p>
+            </div>
+          ) : isProcessing ? (
+            <div className="flex items-center gap-2 py-2">
+              <Loader2 size={12} className="text-[#FF6B00] animate-spin" />
+              <span className="font-body text-[#888] text-xs">
+                {statusLabel[pollingStatus || "pending"]}
+              </span>
+            </div>
+          ) : existingTranslation?.status === "error" ? (
+            <div className="space-y-2">
+              <p className="font-body text-red-400 text-xs">Translation failed. Please try again.</p>
+              <button
+                onClick={handleGenerate}
+                className="w-full bg-[#1A1A1A] border border-[#FF6B00]/50 text-[#FF6B00] font-display text-[10px] tracking-widest py-2 hover:bg-[#FF6B00]/10 transition-colors"
+              >
+                RETRY
+              </button>
+            </div>
+          ) : (
+            <button
+              onClick={handleGenerate}
+              disabled={requestMutation.isPending}
+              className="w-full bg-[#1A1A1A] border border-[#FF6B00]/50 text-[#FF6B00] font-display text-[10px] tracking-widest py-2.5 hover:bg-[#FF6B00]/10 transition-colors flex items-center justify-center gap-2 disabled:opacity-50"
+            >
+              <Globe size={11} />
+              {requestMutation.isPending ? "STARTING..." : `GENERATE ${selectedLang.name.toUpperCase()} VERSION + AUDIO`}
+            </button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -115,10 +293,10 @@ export default function Digital() {
             <span className="text-[#FF6B00]">PRODUCTS</span>
           </h1>
           <p className="font-body text-[#888] text-lg max-w-xl">
-            Guides, audiobooks, and tools to help you build your level. Buy once, access instantly.
+            Guides, audiobooks, and tools to help you build your level. Buy once, access instantly — in your language.
           </p>
           {/* Type icons */}
-          <div className="flex gap-6 mt-8">
+          <div className="flex flex-wrap gap-6 mt-8">
             <div className="flex items-center gap-2">
               <BookOpen size={16} className="text-[#FF6B00]" />
               <span className="font-display text-[#888] text-xs tracking-widest">PDF GUIDES</span>
@@ -126,6 +304,10 @@ export default function Digital() {
             <div className="flex items-center gap-2">
               <Headphones size={16} className="text-[#FF6B00]" />
               <span className="font-display text-[#888] text-xs tracking-widest">AUDIOBOOKS</span>
+            </div>
+            <div className="flex items-center gap-2">
+              <Globe size={16} className="text-[#FF6B00]" />
+              <span className="font-display text-[#888] text-xs tracking-widest">12 LANGUAGES</span>
             </div>
           </div>
         </div>
@@ -253,6 +435,9 @@ export default function Digital() {
                           {loadingId === product.id ? "REDIRECTING..." : isAudiobook ? "BUY NOW — STREAM + DOWNLOAD" : "BUY NOW — INSTANT ACCESS"}
                         </button>
                       </div>
+
+                      {/* Translation Panel */}
+                      <TranslationPanel productId={product.id} productName={product.name} />
                     </div>
                   </div>
                 );
@@ -264,10 +449,11 @@ export default function Digital() {
 
       {/* Trust section */}
       <section className="py-12 px-4 border-t border-white/10">
-        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+        <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-4 gap-6 text-center">
           {[
             { icon: <Lock size={20} />, title: "SECURE PAYMENT", desc: "Powered by Stripe. Your payment info is never stored." },
             { icon: <Headphones size={20} />, title: "STREAM + DOWNLOAD", desc: "Listen online or download to your device. Yours forever." },
+            { icon: <Globe size={20} />, title: "12 LANGUAGES", desc: "AI-translated with matching voice audio in your language." },
             { icon: <Star size={20} />, title: "QUALITY CONTENT", desc: "Built by people who live the BUILD LEVEL mindset." },
           ].map((item) => (
             <div key={item.title} className="flex flex-col items-center gap-3">

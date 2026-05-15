@@ -9,6 +9,7 @@ import { publicProcedure, router } from "./_core/trpc";
 import { notifyOwner } from "./_core/notification";
 import { invokeLLM } from "./_core/llm";
 import { adminRouter } from "./admin";
+import { translationRouter } from "./translationRouter";
 import { getDb } from "./db";
 import { products, blogPosts, digitalProducts, digitalPurchases, aiVideos, affiliateProducts, membershipTiers } from "../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
@@ -456,6 +457,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
   }),
 
   admin: adminRouter,
+  translation: translationRouter,
 
   notifications: router({
     // Owner alert when someone signs up to the email list

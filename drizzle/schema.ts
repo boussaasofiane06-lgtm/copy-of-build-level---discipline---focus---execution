@@ -173,3 +173,22 @@ export const membershipTiers = mysqlTable("membership_tiers", {
 
 export type MembershipTier = typeof membershipTiers.$inferSelect;
 export type InsertMembershipTier = typeof membershipTiers.$inferInsert;
+
+// Digital product translations — stores per-language translated PDFs and AI voice audio
+export const digitalProductTranslations = mysqlTable("digital_product_translations", {
+  id: int("id").autoincrement().primaryKey(),
+  productId: int("productId").notNull(),
+  language: varchar("language", { length: 8 }).notNull(),       // e.g. 'es', 'fr', 'pt'
+  languageName: varchar("languageName", { length: 64 }).notNull(), // e.g. 'Spanish'
+  status: mysqlEnum("status", ["pending", "translating", "generating_audio", "ready", "error"]).notNull().default("pending"),
+  translatedText: text("translatedText"),                        // full translated content (JSON string)
+  pdfUrl: text("pdfUrl"),                                        // storage path to translated PDF
+  audioUrl: text("audioUrl"),                                    // storage path to AI voice audio
+  audioDuration: varchar("audioDuration", { length: 32 }),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().onUpdateNow().notNull(),
+});
+
+export type DigitalProductTranslation = typeof digitalProductTranslations.$inferSelect;
+export type InsertDigitalProductTranslation = typeof digitalProductTranslations.$inferInsert;

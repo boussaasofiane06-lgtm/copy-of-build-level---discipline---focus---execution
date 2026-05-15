@@ -37,13 +37,10 @@ queryClient.getMutationCache().subscribe(event => {
   }
 });
 
-// Use the Render.com backend URL in production, local server in development
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || "https://build-level-backend.onrender.com";
-
 const trpcClient = trpc.createClient({
   links: [
     httpBatchLink({
-      url: `${BACKEND_URL}/api/trpc`,
+      url: "/api/trpc",
       transformer: superjson,
       fetch(input, init) {
         return globalThis.fetch(input, {

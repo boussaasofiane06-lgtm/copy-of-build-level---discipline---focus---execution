@@ -36,6 +36,13 @@
       "when": 1778802850574,
       "tag": "0004_chemical_brood",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "5",
+      "when": 1778806576856,
+      "tag": "0005_whole_bloodaxe",
+      "breakpoints": true
     }
   ]
 }

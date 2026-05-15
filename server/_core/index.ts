@@ -38,6 +38,15 @@ const ALLOWED_ORIGINS = [
   "http://localhost:5173",
 ];
 
+// Allow any Manus preview subdomain dynamically
+function isAllowedOrigin(origin: string): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  // Manus preview domains: https://<port>-<id>.us2.manus.computer
+  if (/^https:\/\/\d+-[a-z0-9-]+\.us2\.manus\.computer$/.test(origin)) return true;
+  if (/^https:\/\/[a-z0-9-]+\.manus\.space$/.test(origin)) return true;
+  return false;
+}
+
 async function startServer() {
   const app = express();
   const server = createServer(app);
@@ -45,7 +54,7 @@ async function startServer() {
   app.use(
     cors({
       origin: (origin, callback) => {
-        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        if (!origin || isAllowedOrigin(origin)) {
           callback(null, true);
         } else {
           callback(new Error(`CORS: origin ${origin} not allowed`));

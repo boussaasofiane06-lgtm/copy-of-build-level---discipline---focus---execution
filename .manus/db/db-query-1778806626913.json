@@ -1,0 +1,9 @@
+{
+  "query": "CREATE TABLE IF NOT EXISTS `digital_product_translations` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `productId` int NOT NULL,\n  `language` varchar(8) NOT NULL,\n  `languageName` varchar(64) NOT NULL,\n  `status` enum('pending','translating','generating_audio','ready','error') NOT NULL DEFAULT 'pending',\n  `translatedText` text,\n  `pdfUrl` text,\n  `audioUrl` text,\n  `audioDuration` varchar(32),\n  `errorMessage` text,\n  `createdAt` timestamp NOT NULL DEFAULT (now()),\n  `updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n  CONSTRAINT `digital_product_translations_id` PRIMARY KEY(`id`)\n);",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute CREATE TABLE IF NOT EXISTS `digital_product_translations` (\n  `id` int AUTO_INCREMENT NOT NULL,\n  `productId` int NOT NULL,\n  `language` varchar(8) NOT NULL,\n  `languageName` varchar(64) NOT NULL,\n  `status` enum('pending','translating','generating_audio','ready','error') NOT NULL DEFAULT 'pending',\n  `translatedText` text,\n  `pdfUrl` text,\n  `audioUrl` text,\n  `audioDuration` varchar(32),\n  `errorMessage` text,\n  `createdAt` timestamp NOT NULL DEFAULT (now()),\n  `updatedAt` timestamp NOT NULL DEFAULT (now()) ON UPDATE CURRENT_TIMESTAMP,\n  CONSTRAINT `digital_product_translations_id` PRIMARY KEY(`id`)\n);",
+  "rows": [],
+  "messages": [],
+  "stdout": "",
+  "stderr": "",
+  "execution_time_ms": 324
+}
