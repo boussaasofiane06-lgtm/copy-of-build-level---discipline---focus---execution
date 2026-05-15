@@ -1,0 +1,16 @@
+{
+  "query": "SELECT id, name, fileUrl, fileName FROM digital_products;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute SELECT id, name, fileUrl, fileName FROM digital_products;",
+  "rows": [
+    {
+      "id": "1",
+      "name": "DISCIPLINE MINDSET — The BUILD LEVEL Guide",
+      "fileUrl": "/manus-storage/BUILD_LEVEL_Discipline_Mindset_4f45f459.pdf",
+      "fileName": "BUILD_LEVEL_Discipline_Mindset.pdf"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tfileUrl\tfileName\n1\tDISCIPLINE MINDSET — The BUILD LEVEL Guide\t/manus-storage/BUILD_LEVEL_Discipline_Mindset_4f45f459.pdf\tBUILD_LEVEL_Discipline_Mindset.pdf\n",
+  "stderr": "",
+  "execution_time_ms": 321
+}

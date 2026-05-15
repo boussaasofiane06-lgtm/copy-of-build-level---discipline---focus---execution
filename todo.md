@@ -56,3 +56,23 @@
 - [x] Add admin-only route protection (only owner can access /admin)
 - [x] Wire Shop and Home pages to load products from database
 - [x] Ensure Shopify/Printify webhook endpoints are compatible (no conflicts)
+
+## Digital Products & Audiobook Support
+- [x] Digital Products page (/digital) with Stripe checkout and static fallback for Cloudflare
+- [x] Discipline Mindset PDF created (13 pages, branded) and added to DB at $19.99
+- [x] Cover image for Discipline Mindset PDF uploaded and displayed
+- [x] Admin Digital tab with product CRUD
+- [x] Audiobook support: productType selector (PDF/Audiobook/Video/Other) in admin
+- [x] Conditional audioUrl and duration fields for audiobook/video types in admin
+- [x] AudioPlayer component in Digital.tsx for audiobook product type
+
+## Blog
+- [x] Blog listing page (/blog)
+- [x] Blog post detail page (/blog/[slug])
+- [x] Admin Blog tab with create/publish/draft CRUD
+
+## Pending Future Items
+- [ ] TikTok integration (clarify: display feed, TikTok Shop, or TikTok Pixel)
+- [ ] PDF upload directly from admin panel (currently uses external URL links)
+- [ ] AI chat that actually answers customer questions (currently falls back to email)
+- [ ] info@buildlevel.com email setup (Cloudflare Email Routing)

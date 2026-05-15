@@ -1,0 +1,8 @@
+{
+  "query": "UPDATE digital_products SET file_url = '/manus-storage/BUILD_LEVEL_Discipline_Mindset_v2_61599db6.pdf', updated_at = NOW() WHERE title LIKE '%Discipline Mindset%';",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute UPDATE digital_products SET file_url = '/manus-storage/BUILD_LEVEL_Discipline_Mindset_v2_61599db6.pdf', updated_at = NOW() WHERE title LIKE '%Discipline Mindset%';",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'title' in 'where clause'"
+  ]
+}
