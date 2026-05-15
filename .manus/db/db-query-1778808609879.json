@@ -1,0 +1,20 @@
+{
+  "query": "SELECT id, name, productType, category, price, published, fileUrl, imageUrl FROM digital_products ORDER BY id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute SELECT id, name, productType, category, price, published, fileUrl, imageUrl FROM digital_products ORDER BY id;",
+  "rows": [
+    {
+      "id": "1",
+      "name": "DISCIPLINE MINDSET: Control Your Mind. Master Your Life.",
+      "productType": "pdf",
+      "category": "Mindset",
+      "price": "19.99",
+      "published": "1",
+      "fileUrl": "/manus-storage/BUILD_LEVEL_Discipline_Mindset_FINAL_87330729.pdf",
+      "imageUrl": "/manus-storage/discipline_mindset_cover-01_e978ef9b.png"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tproductType\tcategory\tprice\tpublished\tfileUrl\timageUrl\n1\tDISCIPLINE MINDSET: Control Your Mind. Master Your Life.\tpdf\tMindset\t19.99\t1\t/manus-storage/BUILD_LEVEL_Discipline_Mindset_FINAL_87330729.pdf\t/manus-storage/discipline_mindset_cover-01_e978ef9b.png\n",
+  "stderr": "",
+  "execution_time_ms": 280
+}

@@ -1,0 +1,8 @@
+{
+  "query": "\nINSERT INTO digital_products (title, description, price, product_type, file_url, image_url, is_active, created_at, updated_at)\nVALUES (\n  'EXECUTION OVER EMOTION: Act First. Feel Later. Win Always.',\n  'Stop letting how you feel determine what you accomplish. This 5-chapter BUILD LEVEL system teaches you to act first and feel later — building the identity, daily stack, and emotional intelligence of someone who executes no matter what.',\n  1999,\n  'pdf',\n  '/manus-storage/BUILD_LEVEL_Execution_Over_Emotion_9bdad6df.pdf',\n  'https://d2xsxph8kpxj0f.cloudfront.net/310519663635005932/ZpCxvttgRWUJYjQSvWcg6k/execution_over_emotion_cover-XxPLoCsZtshDew6CWZtRnF.webp',\n  1,\n  NOW(),\n  NOW()\n);\n",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute \nINSERT INTO digital_products (title, description, price, product_type, file_url, image_url, is_active, created_at, updated_at)\nVALUES (\n  'EXECUTION OVER EMOTION: Act First. Feel Later. Win Always.',\n  'Stop letting how you feel determine what you accomplish. This 5-chapter BUILD LEVEL system teaches you to act first and feel later — building the identity, daily stack, and emotional intelligence of someone who executes no matter what.',\n  1999,\n  'pdf',\n  '/manus-storage/BUILD_LEVEL_Execution_Over_Emotion_9bdad6df.pdf',\n  'https://d2xsxph8kpxj0f.cloudfront.net/310519663635005932/ZpCxvttgRWUJYjQSvWcg6k/execution_over_emotion_cover-XxPLoCsZtshDew6CWZtRnF.webp',\n  1,\n  NOW(),\n  NOW()\n);\n",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 2: Unknown column 'title' in 'field list'"
+  ]
+}
