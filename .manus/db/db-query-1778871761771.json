@@ -1,0 +1,28 @@
+{
+  "query": "SELECT id, name, price, category, published, fileUrl, imageUrl FROM digital_products ORDER BY id;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute SELECT id, name, price, category, published, fileUrl, imageUrl FROM digital_products ORDER BY id;",
+  "rows": [
+    {
+      "id": "1",
+      "name": "DISCIPLINE MINDSET: Control Your Mind. Master Your Life.",
+      "price": "19.99",
+      "category": "Mindset",
+      "published": "1",
+      "fileUrl": "/manus-storage/BUILD_LEVEL_Discipline_Mindset_FINAL_87330729.pdf",
+      "imageUrl": "/manus-storage/discipline_mindset_cover-01_e978ef9b.png"
+    },
+    {
+      "id": "30001",
+      "name": "EXECUTION OVER EMOTION: Act First. Feel Later. Win Always.",
+      "price": "19.99",
+      "category": "guide",
+      "published": "1",
+      "fileUrl": "/manus-storage/BUILD_LEVEL_Execution_Over_Emotion_17e3c8b9.pdf",
+      "imageUrl": "https://d2xsxph8kpxj0f.cloudfront.net/310519663635005932/ZpCxvttgRWUJYjQSvWcg6k/execution_over_emotion_cover-XxPLoCsZtshDew6CWZtRnF.webp"
+    }
+  ],
+  "messages": [],
+  "stdout": "id\tname\tprice\tcategory\tpublished\tfileUrl\timageUrl\n1\tDISCIPLINE MINDSET: Control Your Mind. Master Your Life.\t19.99\tMindset\t1\t/manus-storage/BUILD_LEVEL_Discipline_Mindset_FINAL_87330729.pdf\t/manus-storage/discipline_mindset_cover-01_e978ef9b.png\n30001\tEXECUTION OVER EMOTION: Act First. Feel Later. Win Always.\t19.99\tguide\t1\t/manus-storage/BUILD_LEVEL_Execution_Over_Emotion_17e3c8b9.pdf\thttps://d2xsxph8kpxj0f.cloudfront.net/310519663635005932/ZpCxvttgRWUJYjQSvWcg6k/execution_over_emotion_cover-XxPLoCsZtshDew6CWZtRnF.webp\n",
+  "stderr": "",
+  "execution_time_ms": 1030
+}
