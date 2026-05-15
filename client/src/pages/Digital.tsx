@@ -80,6 +80,66 @@ function AudioPlayer({ audioUrl, title }: { audioUrl: string; title: string }) {
 }
 
 // Language Selector + Translation Panel
+// Browser TTS Player using Web Speech API
+function BrowserTTSPlayer({ text, language, title }: { text: string; language: string; title: string }) {
+  const [speaking, setSpeaking] = useState(false);
+  const [supported] = useState(() => 'speechSynthesis' in window);
+  const utteranceRef = useRef<SpeechSynthesisUtterance | null>(null);
+
+  // Language code to BCP-47 locale map
+  const localeMap: Record<string, string> = {
+    es: 'es-ES', fr: 'fr-FR', pt: 'pt-BR', de: 'de-DE', it: 'it-IT',
+    ar: 'ar-SA', zh: 'zh-CN', ja: 'ja-JP', ko: 'ko-KR', ru: 'ru-RU',
+    hi: 'hi-IN', sw: 'sw-KE', en: 'en-US',
+  };
+
+  const toggle = () => {
+    if (!supported) { toast.error('Voice narration is not supported in this browser.'); return; }
+    if (speaking) {
+      window.speechSynthesis.cancel();
+      setSpeaking(false);
+      return;
+    }
+    // Use first ~2000 chars as a preview narration
+    const preview = text.slice(0, 2000);
+    const utt = new SpeechSynthesisUtterance(preview);
+    utt.lang = localeMap[language] || 'en-US';
+    utt.rate = 0.92;
+    utt.pitch = 1.0;
+    utt.onend = () => setSpeaking(false);
+    utt.onerror = () => { setSpeaking(false); toast.error('Voice narration stopped.'); };
+    utteranceRef.current = utt;
+    window.speechSynthesis.speak(utt);
+    setSpeaking(true);
+  };
+
+  useEffect(() => {
+    return () => { window.speechSynthesis?.cancel(); };
+  }, []);
+
+  if (!supported) return null;
+
+  return (
+    <div className="bg-[#1A1A1A] border border-[#FF6B00]/30 p-3 mt-2">
+      <div className="flex items-center gap-3">
+        <button
+          onClick={toggle}
+          className="w-8 h-8 bg-[#FF6B00] flex items-center justify-center flex-shrink-0 hover:bg-[#e55e00] transition-colors"
+        >
+          {speaking ? <Pause size={12} className="text-black" /> : <Play size={12} className="text-black" />}
+        </button>
+        <div className="flex-1 min-w-0">
+          <p className="font-display text-white text-[10px] tracking-wide truncate">{title}</p>
+          <div className="flex items-center gap-1 mt-0.5">
+            <Volume2 size={9} className="text-[#FF6B00]" />
+            <span className="font-body text-[#555] text-[10px]">{speaking ? 'Playing narration...' : 'Preview voice narration'}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TranslationPanel({ productId, productName }: { productId: number; productName: string }) {
   const [open, setOpen] = useState(false);
   const [selectedLang, setSelectedLang] = useState<{ code: string; name: string; nativeName: string } | null>(null);
@@ -99,22 +159,22 @@ function TranslationPanel({ productId, productName }: { productId: number; produ
   useEffect(() => {
     if (!translationId || pollingStatus === "ready" || pollingStatus === "error") return;
     const interval = setInterval(async () => {
-      await refetchTranslation();
-      if (existingTranslation?.status === "ready" || existingTranslation?.status === "error") {
-        setPollingStatus(existingTranslation.status);
+      const result = await refetchTranslation();
+      const status = result.data?.status;
+      if (status === "ready" || status === "error") {
+        setPollingStatus(status);
         clearInterval(interval);
+        if (status === "ready") toast.success(`${selectedLang?.name} version ready!`);
       }
     }, 3000);
     return () => clearInterval(interval);
-  }, [translationId, pollingStatus, existingTranslation, refetchTranslation]);
+  }, [translationId, pollingStatus, refetchTranslation, selectedLang]);
 
   const handleLanguageSelect = async (lang: { code: string; name: string; nativeName: string }) => {
     setSelectedLang(lang);
     setOpen(false);
     setPollingStatus(null);
     setTranslationId(null);
-
-    // Check if already exists
     await refetchTranslation();
   };
 
@@ -126,8 +186,7 @@ function TranslationPanel({ productId, productName }: { productId: number; produ
       setPollingStatus(result.status);
 
       if (result.status === "pending") {
-        toast.info(`Generating ${selectedLang.name} translation + audio. This takes 1-2 minutes...`);
-        // Kick off processing
+        toast.info(`Translating into ${selectedLang.name}... This takes about 1 minute.`);
         processMutation.mutate({ translationId: result.id });
         setPollingStatus("translating");
       } else if (result.status === "ready") {
@@ -145,7 +204,7 @@ function TranslationPanel({ productId, productName }: { productId: number; produ
   const statusLabel: Record<string, string> = {
     pending: "Starting...",
     translating: "Translating content...",
-    generating_audio: "Generating voice audio...",
+    generating_audio: "Preparing audio...",
     ready: "Ready",
     error: "Error — try again",
   };
@@ -194,17 +253,22 @@ function TranslationPanel({ productId, productName }: { productId: number; produ
                 <CheckCircle size={12} className="text-green-400" />
                 <span className="font-body text-green-400 text-xs">{selectedLang.name} version ready</span>
               </div>
-              {existingTranslation.audioUrl && (
-                <AudioPlayer audioUrl={existingTranslation.audioUrl} title={`${productName} — ${selectedLang.name}`} />
+              {/* Browser TTS player using translated text */}
+              {existingTranslation.translatedText && (
+                <BrowserTTSPlayer
+                  text={existingTranslation.translatedText}
+                  language={selectedLang.code}
+                  title={`${productName} — ${selectedLang.name} narration`}
+                />
               )}
               {existingTranslation.audioDuration && (
                 <div className="flex items-center gap-1">
                   <Headphones size={10} className="text-[#555]" />
-                  <span className="font-body text-[#555] text-[10px]">{existingTranslation.audioDuration} audio narration</span>
+                  <span className="font-body text-[#555] text-[10px]">{existingTranslation.audioDuration} estimated read time</span>
                 </div>
               )}
               <p className="font-body text-[#555] text-[10px]">
-                Purchase above to receive the {selectedLang.name} PDF + audio in your email.
+                Purchase above to receive the {selectedLang.name} PDF in your email.
               </p>
             </div>
           ) : isProcessing ? (

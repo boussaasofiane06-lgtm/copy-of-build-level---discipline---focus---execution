@@ -357,35 +357,21 @@ export const translationRouter = router({
         const fullText = buildFullText();
         const translatedText = await translateText(fullText, record.language, lang.name);
 
-        // Step 2: Generate TTS audio
-        await db
-          .update(digitalProductTranslations)
-          .set({ status: "generating_audio", translatedText })
-          .where(eq(digitalProductTranslations.id, input.translationId));
-
-        // Build a shorter audio script (intro + key points from each chapter)
+        // Build audio script (stored for browser TTS — no server-side audio generation needed)
         const audioScript = buildAudioScript(translatedText, record.language, lang.name);
-        const audioBuffer = await generateTTSAudio(audioScript, record.language);
 
-        let audioUrl: string | null = null;
-        if (audioBuffer) {
-          const audioKey = `translations/${record.productId}/${record.language}/audio.mp3`;
-          const stored = await storagePut(audioKey, audioBuffer, "audio/mpeg");
-          audioUrl = stored.url;
-        }
-
-        // Step 3: Mark as ready
+        // Mark as ready — browser will use Web Speech API for voice narration
         await db
           .update(digitalProductTranslations)
           .set({
             status: "ready",
             translatedText,
-            audioUrl,
-            audioDuration: audioBuffer ? estimateDuration(audioScript) : null,
+            audioUrl: null, // Browser TTS used instead of server audio file
+            audioDuration: estimateDuration(audioScript),
           })
           .where(eq(digitalProductTranslations.id, input.translationId));
 
-        return { status: "ready", audioUrl };
+        return { status: "ready", audioUrl: null };
       } catch (err: any) {
         await db
           .update(digitalProductTranslations)
