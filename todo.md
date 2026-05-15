@@ -78,9 +78,11 @@
 - [x] Remove storagePut from admin.ts (admin uses URL input instead)
 - [x] Chat widget uses static keyword-based responses (no Manus LLM)
 - [x] Digital page loads products dynamically from DB via tRPC
-- [ ] Push changes to GitHub → Render auto-deploys
-- [ ] Set up Cloudflare Worker proxy for /api/* → Render backend
-- [ ] Rebuild and redeploy frontend to Cloudflare Pages
+- [x] Push changes to GitHub → Render auto-deploys
+- [x] Set up Cloudflare Pages Function proxy for /api/* → Render backend
+- [x] Rebuild and redeploy frontend to Cloudflare Pages
+- [ ] Verify Render deployment completes with API_ONLY=true and /api/trpc/* returns JSON
+- [ ] Confirm Cloudflare Pages Function proxy works end-to-end on thebuildlevel.com
 
 ## Pending Future Items
 - [ ] TikTok integration (clarify: display feed, TikTok Shop, or TikTok Pixel)

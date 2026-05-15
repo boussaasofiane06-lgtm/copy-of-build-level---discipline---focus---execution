@@ -1,0 +1,8 @@
+{
+  "query": "SELECT id, name, description, price, stripePaymentLink, imageUrl, badge, category, sortOrder, inStock FROM products WHERE category = 'digital' ORDER BY sortOrder ASC LIMIT 50;",
+  "command": "mysql --batch --raw --column-names --default-character-set=utf8mb4 --host gateway06.us-east-1.prod.aws.tidbcloud.com --port 4000 --user 3yjy74Aq4fSfMvH.root --database ZpCxvttgRWUJYjQSvWcg6k --execute SELECT id, name, description, price, stripePaymentLink, imageUrl, badge, category, sortOrder, inStock FROM products WHERE category = 'digital' ORDER BY sortOrder ASC LIMIT 50;",
+  "returncode": 1,
+  "logs": [
+    "ERROR 1054 (42S22) at line 1: Unknown column 'stripepaymentlink' in 'field list'"
+  ]
+}
