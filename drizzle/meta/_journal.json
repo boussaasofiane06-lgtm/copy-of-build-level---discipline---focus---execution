@@ -1,47 +1,12 @@
 {
   "version": "7",
-  "dialect": "mysql",
+  "dialect": "postgresql",
   "entries": [
     {
       "idx": 0,
-      "version": "5",
-      "when": 1778198517123,
-      "tag": "0000_groovy_apocalypse",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "5",
-      "when": 1778592699705,
-      "tag": "0001_useful_spectrum",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "5",
-      "when": 1778790416389,
-      "tag": "0002_modern_rage",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "5",
-      "when": 1778791520234,
-      "tag": "0003_thin_starfox",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "5",
-      "when": 1778802850574,
-      "tag": "0004_chemical_brood",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "5",
-      "when": 1778806576856,
-      "tag": "0005_whole_bloodaxe",
+      "version": "7",
+      "when": 1778889337610,
+      "tag": "0000_simple_bloodstrike",
       "breakpoints": true
     }
   ]

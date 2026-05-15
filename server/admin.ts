@@ -66,8 +66,8 @@ export const adminRouter = router({
       shopifyVariantId: input.shopifyVariantId ?? null,
       shopifyProductId: input.shopifyProductId ?? null,
       printifyProductId: input.printifyProductId ?? null,
-    });
-    return { id: Number((result as any).insertId), success: true };
+    }).returning({ id: products.id });
+    return { id: result[0]?.id ?? 0, success: true };
   }),
 
   /** Update an existing product */
@@ -135,8 +135,8 @@ export const adminRouter = router({
       if (!db) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: "Database unavailable" });
       await db
         .insert(siteSettings)
-        .values({ key: input.key, value: input.value })
-        .onDuplicateKeyUpdate({ set: { value: input.value } });
+        .values({ key: input.key, value: input.value, updatedAt: new Date() })
+        .onConflictDoUpdate({ target: siteSettings.key, set: { value: input.value, updatedAt: new Date() } });
       return { success: true };
     }),
 
@@ -149,8 +149,8 @@ export const adminRouter = router({
       for (const [key, value] of Object.entries(input)) {
         await db
           .insert(siteSettings)
-          .values({ key, value })
-          .onDuplicateKeyUpdate({ set: { value } });
+          .values({ key, value, updatedAt: new Date() })
+          .onConflictDoUpdate({ target: siteSettings.key, set: { value, updatedAt: new Date() } });
       }
       return { success: true };
     }),

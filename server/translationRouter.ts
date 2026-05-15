@@ -315,14 +315,14 @@ export const translationRouter = router({
       }
 
       // Insert new pending record
-      const [result] = await db.insert(digitalProductTranslations).values({
+      const inserted = await db.insert(digitalProductTranslations).values({
         productId: input.productId,
         language: input.language,
         languageName: lang.name,
         status: "pending",
-      });
+      }).returning({ id: digitalProductTranslations.id });
 
-      return { status: "pending", id: (result as any).insertId };
+      return { status: "pending", id: inserted[0]?.id ?? 0 };
     }),
 
   // Process translation (called by frontend polling — does the actual work)
