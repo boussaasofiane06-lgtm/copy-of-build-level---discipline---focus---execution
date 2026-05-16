@@ -6,9 +6,25 @@
  */
 
 import crypto from "crypto";
+import path from "path";
 import type { Express, Request, Response } from "express";
 import { SignJWT, jwtVerify } from "jose";
+import multer from "multer";
+import { storagePut } from "../storage";
 import { ENV } from "./env";
+
+// Multer: store file in memory for S3 upload
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 16 * 1024 * 1024 }, // 16MB max
+  fileFilter: (_req, file, cb) => {
+    if (file.mimetype.startsWith("image/")) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only image files are allowed"));
+    }
+  },
+});
 
 const ADMIN_COOKIE = "bl_admin_session";
 const ADMIN_OPEN_ID = "__buildlevel_admin__";
@@ -101,6 +117,55 @@ export function registerAdminAuthRoutes(app: Express) {
     const token = cookies.get(ADMIN_COOKIE);
     const valid = await verifyAdminToken(token);
     res.json({ isAdmin: valid });
+  });
+
+  // POST /api/admin/upload-image — upload product image to S3 storage
+  // Auth: x-admin-token header OR admin session cookie
+  app.post("/api/admin/upload-image", upload.single("image"), async (req: Request, res: Response) => {
+    try {
+      // Verify admin token from header or cookie
+      const headerToken = req.headers["x-admin-token"] as string | undefined;
+      const cookies = parseCookies(req.headers.cookie);
+      const cookieToken = cookies.get(ADMIN_COOKIE);
+
+      let isAdmin = false;
+      if (headerToken) {
+        // Verify via scrypt (raw password sent as header token)
+        const storedHash = process.env.ADMIN_PASSWORD_HASH || "";
+        if (storedHash) {
+          const [salt, hash] = storedHash.split(":");
+          if (salt && hash) {
+            try {
+              const derived = crypto.scryptSync(headerToken, salt, 64).toString("hex");
+              isAdmin = crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
+            } catch { /* ignore */ }
+          }
+        }
+      }
+      if (!isAdmin && cookieToken) {
+        isAdmin = await verifyAdminToken(cookieToken);
+      }
+
+      if (!isAdmin) {
+        res.status(401).json({ error: "Unauthorized" });
+        return;
+      }
+
+      const file = (req as any).file;
+      if (!file) {
+        res.status(400).json({ error: "No image file provided" });
+        return;
+      }
+
+      const ext = path.extname(file.originalname).toLowerCase() || ".jpg";
+      const key = `product-images/${Date.now()}${ext}`;
+      const { url } = await storagePut(key, file.buffer, file.mimetype);
+
+      res.json({ url });
+    } catch (err: any) {
+      console.error("[upload-image] Error:", err);
+      res.status(500).json({ error: err?.message || "Upload failed" });
+    }
   });
 }
 

@@ -22,7 +22,7 @@ export async function onRequest(context) {
         "Access-Control-Allow-Origin": url.origin,
         "Access-Control-Allow-Credentials": "true",
         "Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS, PATCH",
-        "Access-Control-Allow-Headers": "Content-Type, Authorization, Cookie, X-Requested-With",
+        "Access-Control-Allow-Headers": "Content-Type, Authorization, Cookie, X-Requested-With, X-Admin-Token",
         "Access-Control-Max-Age": "86400",
       },
     });

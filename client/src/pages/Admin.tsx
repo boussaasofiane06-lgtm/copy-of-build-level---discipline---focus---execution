@@ -170,9 +170,45 @@ function ProductModal({
   const set = (k: keyof ProductFormData, v: string | boolean) =>
     setForm((f) => ({ ...f, [k]: v }));
 
-  const handleFile = (_e: React.ChangeEvent<HTMLInputElement>) => {
-    // File upload via Manus storage removed — use URL input below
-    toast.info("Please paste an image URL in the field below instead of uploading a file.");
+  const [uploading, setUploading] = useState(false);
+
+  const handleFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      toast.error("Please select an image file");
+      return;
+    }
+    if (file.size > 16 * 1024 * 1024) {
+      toast.error("Image must be under 16MB");
+      return;
+    }
+    setUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("image", file);
+      const token = sessionStorage.getItem("bl_admin_token") || "";
+      const apiBase = import.meta.env.VITE_API_URL || "";
+      const res = await fetch(`${apiBase}/api/admin/upload-image`, {
+        method: "POST",
+        headers: token ? { "x-admin-token": token } : {},
+        credentials: "include",
+        body: formData,
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Upload failed" }));
+        throw new Error(err.error || "Upload failed");
+      }
+      const { url } = await res.json();
+      setForm((f) => ({ ...f, imageUrl: url }));
+      toast.success("Image uploaded successfully!");
+    } catch (err: any) {
+      toast.error(err?.message || "Image upload failed");
+    } finally {
+      setUploading(false);
+      // Reset file input so same file can be re-selected
+      if (fileRef.current) fileRef.current.value = "";
+    }
   };
 
   return (
@@ -210,11 +246,11 @@ function ProductModal({
                 />
                 <button
                   onClick={() => fileRef.current?.click()}
-                  disabled={uploadImage.isPending}
+                  disabled={uploading}
                   className="admin-btn-secondary flex items-center gap-2 text-xs"
                 >
-                  {uploadImage.isPending ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-                  {uploadImage.isPending ? "Uploading..." : "Upload Image"}
+                  {uploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                  {uploading ? "Uploading..." : "Upload from Device"}
                 </button>
                 <input
                   type="text"
