@@ -1,0 +1,78 @@
+import { useEffect, useState } from "react";
+import { publicApi, DigitalProduct } from "../lib/api";
+
+export default function Digital() {
+  const [products, setProducts] = useState<DigitalProduct[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    publicApi.getDigitalProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
+  }, []);
+
+  const handleBuy = async (product: DigitalProduct) => {
+    if (product.stripePaymentLink) {
+      window.open(product.stripePaymentLink, "_blank");
+      return;
+    }
+    try {
+      const { url } = await publicApi.createDigitalCheckout(product.id);
+      window.open(url, "_blank");
+    } catch {
+      alert("Checkout failed. Please try again.");
+    }
+  };
+
+  const typeLabel = (t: string) => ({ pdf: "PDF Guide", audiobook: "Audiobook", video: "Video Course", other: "Digital" }[t] || "Digital");
+
+  return (
+    <div>
+      <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "48px 0 32px" }}>
+        <div className="container">
+          <h1 style={{ marginBottom: 8 }}>Digital Resources</h1>
+          <p style={{ color: "var(--text2)" }}>Guides, frameworks, and tools to level up your execution.</p>
+        </div>
+      </div>
+
+      <div className="container section-sm">
+        {loading ? (
+          <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><div className="spinner" /></div>
+        ) : products.length === 0 ? (
+          <div style={{ textAlign: "center", padding: 80, color: "var(--text2)" }}>
+            <p style={{ fontSize: "1.1rem", marginBottom: 8 }}>No digital products available yet.</p>
+            <p style={{ fontSize: "0.9rem" }}>Check back soon.</p>
+          </div>
+        ) : (
+          <div className="grid-3">
+            {products.map(p => (
+              <div key={p.id} className="card" style={{ display: "flex", flexDirection: "column" }}>
+                <div style={{ aspectRatio: "16/9", background: "var(--bg3)", overflow: "hidden", position: "relative" }}>
+                  {p.imageUrl ? (
+                    <img src={p.imageUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  ) : (
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 8 }}>
+                      <span style={{ fontSize: "2rem" }}>{p.productType === "pdf" ? "📄" : p.productType === "audiobook" ? "🎧" : p.productType === "video" ? "🎬" : "📦"}</span>
+                      <span style={{ color: "var(--text3)", fontSize: "0.75rem" }}>{typeLabel(p.productType)}</span>
+                    </div>
+                  )}
+                  {p.badge && <span className="badge badge-red" style={{ position: "absolute", top: 12, left: 12 }}>{p.badge}</span>}
+                </div>
+                <div style={{ padding: 20, flex: 1, display: "flex", flexDirection: "column" }}>
+                  <div style={{ marginBottom: 8 }}>
+                    <span className="badge badge-dark">{typeLabel(p.productType)}</span>
+                    {p.duration && <span style={{ color: "var(--text3)", fontSize: "0.75rem", marginLeft: 8 }}>{p.duration}</span>}
+                  </div>
+                  <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>{p.name}</h3>
+                  {p.description && <p style={{ color: "var(--text2)", fontSize: "0.85rem", lineHeight: 1.6, marginBottom: 16, flex: 1 }}>{p.description}</p>}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
+                    <span style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem" }}>${parseFloat(p.price).toFixed(2)}</span>
+                    <button onClick={() => handleBuy(p)} className="btn btn-primary btn-sm">Get Access</button>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
