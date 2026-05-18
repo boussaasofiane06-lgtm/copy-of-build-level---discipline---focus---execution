@@ -2,9 +2,9 @@ import { describe, it, expect } from "vitest";
 import crypto from "crypto";
 import { verifyAdminPassword } from "./_core/adminAuth";
 
-function createPasswordHash(password: string): string {
+function createPasswordHash(password: string, keyLength = 64): string {
   const salt = "admin-password-test-salt";
-  const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+  const hash = crypto.scryptSync(password, salt, keyLength).toString("hex");
   return `${salt}:${hash}`;
 }
 
@@ -24,5 +24,9 @@ describe("Admin password verification", () => {
   it("rejects malformed hashes", () => {
     expect(verifyAdminPassword("!@#$9379&*()", "")).toBe(false);
     expect(verifyAdminPassword("!@#$9379&*()", "not-a-valid-hash")).toBe(false);
+  });
+
+  it("supports hashes generated with different scrypt key lengths", () => {
+    expect(verifyAdminPassword("!@#$9379&*()", createPasswordHash("!@#$9379&*()", 32))).toBe(true);
   });
 });

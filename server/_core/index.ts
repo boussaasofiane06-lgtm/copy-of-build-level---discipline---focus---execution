@@ -7,6 +7,7 @@ import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerOAuthRoutes } from "./oauth";
 import { registerStorageProxy } from "./storageProxy";
 import { registerAdminAuthRoutes } from "./adminAuth";
+import { registerAdminRestRoutes } from "./adminRest";
 import { appRouter } from "../routers";
 import { createContext } from "./context";
 import { serveStatic, setupVite } from "./vite";
@@ -41,8 +42,14 @@ const ALLOWED_ORIGINS = [
   "http://127.0.0.1:5173",
 ];
 
+const CONFIGURED_ORIGINS = [
+  process.env.CORS_ORIGIN,
+  process.env.FRONTEND_URL,
+].flatMap((value) => value?.split(",").map((origin) => origin.trim()).filter(Boolean) ?? []);
+
 // Allow any Manus preview subdomain dynamically
 function isAllowedOrigin(origin: string): boolean {
+  if (CONFIGURED_ORIGINS.includes(origin)) return true;
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   // Manus preview domains: https://<port>-<id>.us2.manus.computer
   if (/^https:\/\/\d+-[a-z0-9-]+\.us2\.manus\.computer$/.test(origin)) return true;
@@ -53,6 +60,10 @@ function isAllowedOrigin(origin: string): boolean {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  app.get(["/health", "/api/health"], (_req, res) => {
+    res.json({ status: "ok" });
+  });
+
   // CORS — allow Cloudflare frontend domains
   app.use(
     cors({
@@ -73,6 +84,7 @@ async function startServer() {
   registerStorageProxy(app);
   registerOAuthRoutes(app);
   registerAdminAuthRoutes(app);
+  registerAdminRestRoutes(app);
   // tRPC API
   app.use(
     "/api/trpc",
@@ -95,7 +107,9 @@ async function startServer() {
   }
 
   const preferredPort = parseInt(process.env.PORT || "3000");
-  const port = await findAvailablePort(preferredPort);
+  const port = process.env.NODE_ENV === "development"
+    ? await findAvailablePort(preferredPort)
+    : preferredPort;
 
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
@@ -109,8 +123,8 @@ async function startServer() {
       const selfUrl = process.env.RENDER_EXTERNAL_URL || `http://localhost:${port}`;
       setInterval(async () => {
         try {
-          await fetch(`${selfUrl}/`);
-          console.log(`[keep-alive] Pinged ${selfUrl}`);
+          await fetch(`${selfUrl}/health`);
+          console.log(`[keep-alive] Pinged ${selfUrl}/health`);
         } catch (e) {
           console.log(`[keep-alive] Ping failed: ${e}`);
         }

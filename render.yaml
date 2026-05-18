@@ -1,22 +1,30 @@
 services:
   - type: web
-    name: build-level-backend
+    name: build-level
     runtime: node
-    rootDir: buildlevel-backend
-    buildCommand: npm install && npm run build
-    startCommand: node dist/index.js
+    buildCommand: corepack enable && pnpm install --frozen-lockfile --prod=false && pnpm build
+    startCommand: pnpm start
+    healthCheckPath: /health
     envVars:
+      - key: NODE_VERSION
+        value: 22
       - key: NODE_ENV
         value: production
-      - key: ADMIN_PASSWORD_HASH
-        sync: false
       - key: DATABASE_URL
         sync: false
       - key: JWT_SECRET
         generateValue: true
+      - key: ADMIN_PASSWORD_HASH
+        sync: false
       - key: STRIPE_SECRET_KEY
         sync: false
-      - key: STRIPE_WEBHOOK_SECRET
+      - key: PAYPAL_CLIENT_ID
+        sync: false
+      - key: PAYPAL_CLIENT_SECRET
+        sync: false
+      - key: PAYPAL_ENV
+        value: sandbox
+      - key: VITE_PAYPAL_CLIENT_ID
         sync: false
       - key: VITE_STRIPE_PUBLISHABLE_KEY
         sync: false

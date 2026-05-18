@@ -7,28 +7,14 @@
 import { TRPCError } from "@trpc/server";
 import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
-import { scryptSync, timingSafeEqual } from "crypto";
 import { products, siteSettings } from "../drizzle/schema";
 import { getDb } from "./db";
 import { publicProcedure, router } from "./_core/trpc";
-import { verifyAdminToken as verifyAdminJwt, ADMIN_COOKIE } from "./_core/adminAuth";
+import { verifyAdminPassword, verifyAdminToken as verifyAdminJwt, ADMIN_COOKIE } from "./_core/adminAuth";
 
 // Admin password verification — uses ADMIN_PASSWORD_HASH env var (scrypt format: salt:hash)
 function verifyRawPassword(token: string): boolean {
-  try {
-    const stored = process.env.ADMIN_PASSWORD_HASH;
-    if (!stored) return false;
-    const colonIdx = stored.indexOf(":");
-    if (colonIdx === -1) return false;
-    const salt = stored.substring(0, colonIdx);
-    const storedHash = stored.substring(colonIdx + 1);
-    const keyLen = storedHash.length / 2;
-    const derived = scryptSync(token, salt, keyLen);
-    const derivedHex = derived.toString("hex");
-    return timingSafeEqual(Buffer.from(derivedHex), Buffer.from(storedHash));
-  } catch {
-    return false;
-  }
+  return verifyAdminPassword(token, process.env.ADMIN_PASSWORD_HASH || "");
 }
 
 function parseCookieHeader(header: string | undefined): Map<string, string> {
