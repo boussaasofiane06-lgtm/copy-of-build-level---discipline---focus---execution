@@ -1,17 +1,15 @@
 /**
  * BUILD LEVEL — Cloudflare Pages Function: API Proxy
  *
- * Proxies all /api/* requests from Cloudflare Pages (thebuildlevel.com)
- * to the Render.com backend at https://build-level-backend.onrender.com
+ * Proxies all /api/* requests from Cloudflare Pages to the Render backend.
  *
  * This makes the site 100% independent of Manus infrastructure.
  * No Manus APIs, no Manus storage, no Manus OAuth — just Render + Cloudflare.
  */
 
-const BACKEND_URL = "https://build-level-backend.onrender.com";
-
 export async function onRequest(context) {
   const { request } = context;
+  const backendUrl = context.env?.BACKEND_URL || "https://build-level.onrender.com";
   const url = new URL(request.url);
 
   // Handle CORS preflight
@@ -29,11 +27,11 @@ export async function onRequest(context) {
   }
 
   // Build the target URL on the Render backend
-  const targetUrl = new URL(url.pathname + url.search, BACKEND_URL);
+  const targetUrl = new URL(url.pathname + url.search, backendUrl);
 
   // Clone request headers
   const headers = new Headers(request.headers);
-  headers.set("Host", new URL(BACKEND_URL).hostname);
+  headers.set("Host", new URL(backendUrl).hostname);
   // Ensure the backend knows the real origin for CORS
   headers.set("X-Forwarded-Host", url.hostname);
   headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));

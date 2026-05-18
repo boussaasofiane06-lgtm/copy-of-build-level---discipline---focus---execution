@@ -500,7 +500,7 @@ router.post("/videos", requireAdmin, async (req: Request, res: Response) => {
       published: z.boolean().optional(),
       sortOrder: z.number().optional(),
     }).parse(req.body);
-    const [row] = await db.insert(aiVideos).values({ ...data, updatedAt: new Date() }).$returningId();
+    const [row] = await db.insert(aiVideos).values({ ...data, updatedAt: new Date() } as typeof aiVideos.$inferInsert).$returningId();
     const [created] = await db.select().from(aiVideos).where(eq(aiVideos.id, row.id));
     res.json(created);
   } catch (e: any) { res.status(400).json({ error: e.message }); }

@@ -31,11 +31,13 @@ const ONE_YEAR_S = 365 * 24 * 60 * 60;
 
 // ─── Password verification ────────────────────────────────────────────────────
 
-function verifyPassword(input: string, stored: string): boolean {
+export function verifyAdminPassword(input: string, stored: string): boolean {
   try {
     const [salt, hash] = stored.split(":");
     if (!salt || !hash) return false;
-    const derived = crypto.scryptSync(input, salt, 64).toString("hex");
+    const keyLength = hash.length / 2;
+    if (!Number.isInteger(keyLength) || keyLength <= 0) return false;
+    const derived = crypto.scryptSync(input, salt, keyLength).toString("hex");
     return crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
   } catch {
     return false;
@@ -63,6 +65,21 @@ export async function verifyAdminToken(token: string | undefined): Promise<boole
   } catch {
     return false;
   }
+}
+
+export async function verifyAdminRequest(req: Request): Promise<boolean> {
+  const authHeader = req.headers.authorization;
+  if (authHeader?.startsWith("Bearer ") && await verifyAdminToken(authHeader.substring(7))) {
+    return true;
+  }
+
+  const headerToken = req.headers["x-admin-token"];
+  if (typeof headerToken === "string" && verifyAdminPassword(headerToken, process.env.ADMIN_PASSWORD_HASH || "")) {
+    return true;
+  }
+
+  const cookies = parseCookies(req.headers.cookie);
+  return verifyAdminToken(cookies.get(ADMIN_COOKIE));
 }
 
 // ─── Cookie helpers ───────────────────────────────────────────────────────────
@@ -94,7 +111,7 @@ export function registerAdminAuthRoutes(app: Express) {
       return;
     }
 
-    if (!password || !verifyPassword(password, storedHash)) {
+    if (!password || !verifyAdminPassword(password, storedHash)) {
       res.status(401).json({ error: "Invalid password" });
       return;
     }
@@ -113,40 +130,15 @@ export function registerAdminAuthRoutes(app: Express) {
 
   // GET /api/admin/me — check if admin cookie is valid
   app.get("/api/admin/me", async (req: Request, res: Response) => {
-    const cookies = parseCookies(req.headers.cookie);
-    const token = cookies.get(ADMIN_COOKIE);
-    const valid = await verifyAdminToken(token);
-    res.json({ isAdmin: valid });
+    const valid = await verifyAdminRequest(req);
+    res.json({ admin: valid, isAdmin: valid });
   });
 
   // POST /api/admin/upload-image — upload product image to S3 storage
   // Auth: x-admin-token header OR admin session cookie
   app.post("/api/admin/upload-image", upload.single("image"), async (req: Request, res: Response) => {
     try {
-      // Verify admin token from header or cookie
-      const headerToken = req.headers["x-admin-token"] as string | undefined;
-      const cookies = parseCookies(req.headers.cookie);
-      const cookieToken = cookies.get(ADMIN_COOKIE);
-
-      let isAdmin = false;
-      if (headerToken) {
-        // Verify via scrypt (raw password sent as header token)
-        const storedHash = process.env.ADMIN_PASSWORD_HASH || "";
-        if (storedHash) {
-          const [salt, hash] = storedHash.split(":");
-          if (salt && hash) {
-            try {
-              const derived = crypto.scryptSync(headerToken, salt, 64).toString("hex");
-              isAdmin = crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
-            } catch { /* ignore */ }
-          }
-        }
-      }
-      if (!isAdmin && cookieToken) {
-        isAdmin = await verifyAdminToken(cookieToken);
-      }
-
-      if (!isAdmin) {
+      if (!(await verifyAdminRequest(req))) {
         res.status(401).json({ error: "Unauthorized" });
         return;
       }
