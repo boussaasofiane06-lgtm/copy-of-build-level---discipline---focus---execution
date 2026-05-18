@@ -9,48 +9,8 @@ import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import { products, siteSettings } from "../drizzle/schema";
 import { getDb } from "./db";
-import { publicProcedure, router } from "./_core/trpc";
-import { verifyAdminPassword, verifyAdminToken as verifyAdminJwt, ADMIN_COOKIE } from "./_core/adminAuth";
-
-// Admin password verification — uses ADMIN_PASSWORD_HASH env var (scrypt format: salt:hash)
-function verifyRawPassword(token: string): boolean {
-  return verifyAdminPassword(token, process.env.ADMIN_PASSWORD_HASH || "");
-}
-
-function parseCookieHeader(header: string | undefined): Map<string, string> {
-  if (!header) return new Map();
-  const map = new Map<string, string>();
-  for (const part of header.split(";")) {
-    const [k, ...v] = part.trim().split("=");
-    if (k) map.set(k.trim(), decodeURIComponent(v.join("=")));
-  }
-  return map;
-}
-
-// Admin-only middleware — accepts JWT cookie OR raw password header
-const adminProcedure = publicProcedure.use(async ({ ctx, next }) => {
-  const req = (ctx as any).req;
-  // Check JWT cookie first (set by /api/admin/login)
-  const cookies = parseCookieHeader(req?.headers?.cookie);
-  const cookieToken = cookies.get(ADMIN_COOKIE);
-  if (cookieToken && await verifyAdminJwt(cookieToken)) {
-    return next({ ctx });
-  }
-  // Check Authorization: Bearer <token> header (for cross-origin frontends)
-  const authHeader = req?.headers?.authorization as string | undefined;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    const bearerToken = authHeader.substring(7);
-    if (await verifyAdminJwt(bearerToken)) {
-      return next({ ctx });
-    }
-  }
-  // Fallback: raw password in x-admin-token header
-  const headerToken = req?.headers?.["x-admin-token"] as string | undefined;
-  if (headerToken && verifyRawPassword(headerToken)) {
-    return next({ ctx });
-  }
-  throw new TRPCError({ code: "UNAUTHORIZED", message: "Admin access required" });
-});
+import { adminProcedure } from "./_core/adminProcedure";
+import { router } from "./_core/trpc";
 
 // Zod schemas
 const productInput = z.object({

@@ -66,4 +66,12 @@ After Render finishes deploying:
 3. Visit `/admin`, log in, and confirm products/settings load.
 4. Test shop checkout only after Stripe or PayPal environment variables are configured.
 
+## Public vs Admin Architecture
+
+- Public customers should only use storefront routes such as `/`, `/shop`, `/blog`, `/digital`, `/checkout`, and content pages.
+- Management routes live under `/admin` and are rendered through a separate admin shell.
+- Admin APIs are under `/api/admin/*` and require the admin JWT or valid admin password token.
+- Direct tRPC admin procedures are also protected by the shared admin middleware.
+- Keep integration credentials and secret values in Render, Railway, Cloudflare, or protected admin settings. Do not add them to customer-facing pages.
+
 Never commit real database URLs, JWT secrets, or payment keys to this repository.

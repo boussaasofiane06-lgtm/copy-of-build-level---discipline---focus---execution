@@ -12,7 +12,7 @@ import {
   listVideos, createVideo, updateVideo, deleteVideo,
   listAffiliateProducts, createAffiliateProduct, updateAffiliateProduct, deleteAffiliateProduct,
   listMembershipTiers, createMembershipTier, updateMembershipTier, deleteMembershipTier,
-  getSettings, saveSettings,
+  adminMe, getSettings, saveSettings,
   type Product, type BlogPost, type DigitalProduct, type AIVideo, type AffiliateProduct, type MembershipTier,
 } from "@/lib/adminApi";
 import { toast } from "sonner";
@@ -21,7 +21,8 @@ import {
   Plus, Pencil, Trash2, Upload, Save, X, Package, Settings,
   ShoppingBag, ToggleLeft, ToggleRight, Star, StarOff, ChevronLeft,
   Loader2, Image as ImageIcon, ExternalLink, BookOpen, Download,
-  Video, Link2, Users, Printer, MessageSquare
+  Video, Link2, Users, Printer, MessageSquare, CreditCard, BarChart3,
+  Bell, Palette, Workflow, Database, ShieldCheck, Boxes
 } from "lucide-react";
 import PrintifyTab from "./admin/PrintifyTab";
 import ShopifyTab from "./admin/ShopifyTab";
@@ -60,26 +61,6 @@ const CATEGORIES = ["hoodies", "t-shirts", "hats", "accessories", "apparel"];
 
 // ─── Password Login ──────────────────────────────────────────────────────────
 
-// Frontend-only password check using SubtleCrypto (PBKDF2) — no server needed
-async function checkPassword(input: string): Promise<boolean> {
-  try {
-    const SALT = "buildlevel_admin_2024";
-    const EXPECTED = "767d6c20edbb7f7f1e3fbf231df5e49d0f48b756fa7fed6aa9b83ce3b9bced5f";
-    const enc = new TextEncoder();
-    const keyMaterial = await crypto.subtle.importKey(
-      "raw", enc.encode(input), "PBKDF2", false, ["deriveBits"]
-    );
-    const bits = await crypto.subtle.deriveBits(
-      { name: "PBKDF2", salt: enc.encode(SALT), iterations: 100000, hash: "SHA-256" },
-      keyMaterial, 256
-    );
-    const hex = Array.from(new Uint8Array(bits)).map(b => b.toString(16).padStart(2, "0")).join("");
-    return hex === EXPECTED;
-  } catch {
-    return false;
-  }
-}
-
 const ADMIN_SESSION_KEY = "bl_admin_unlocked";
 const ADMIN_TOKEN_KEY = "bl_admin_token";
 
@@ -106,16 +87,6 @@ function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
         sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
         sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
         onSuccess();
-      } else if (data.success && !data.token) {
-        // Backend returned success but no token — fallback: verify locally
-        const ok = await checkPassword(password);
-        if (ok) {
-          sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
-          sessionStorage.setItem(ADMIN_TOKEN_KEY, password);
-          onSuccess();
-        } else {
-          setError("Incorrect password. Try again.");
-        }
       } else {
         setError("Incorrect password. Try again.");
       }
@@ -161,9 +132,44 @@ function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
 // ─── Admin Guard ──────────────────────────────────────────────────────────────
 
 function AdminGuard({ children }: { children: React.ReactNode }) {
-  const [unlocked, setUnlocked] = useState(
+  const [unlocked, setUnlocked] = useState(false);
+  const [checking, setChecking] = useState(
     () => sessionStorage.getItem(ADMIN_SESSION_KEY) === "1"
   );
+
+  useEffect(() => {
+    if (sessionStorage.getItem(ADMIN_SESSION_KEY) !== "1") return;
+    let alive = true;
+    adminMe()
+      .then((result) => {
+        if (!alive) return;
+        if (result.admin) {
+          setUnlocked(true);
+        } else {
+          sessionStorage.removeItem(ADMIN_SESSION_KEY);
+          sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+          setUnlocked(false);
+        }
+      })
+      .catch(() => {
+        if (!alive) return;
+        sessionStorage.removeItem(ADMIN_SESSION_KEY);
+        sessionStorage.removeItem(ADMIN_TOKEN_KEY);
+        setUnlocked(false);
+      })
+      .finally(() => {
+        if (alive) setChecking(false);
+      });
+    return () => { alive = false; };
+  }, []);
+
+  if (checking) {
+    return (
+      <div className="min-h-screen bg-[#111] text-white flex items-center justify-center">
+        <Loader2 size={22} className="animate-spin text-[#FF6B00]" />
+      </div>
+    );
+  }
 
   if (!unlocked) {
     return <AdminPasswordLogin onSuccess={() => setUnlocked(true)} />;
@@ -499,220 +505,6 @@ function SettingsTab() {
           {saving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
           {saving ? "Saving..." : "Save All Settings"}
         </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Integrations Tab ───────────────────────────────────────────────────────
-
-const INTEGRATION_STORAGE_KEY = "bl_integrations";
-
-function loadIntegrations(): Record<string, string> {
-  try {
-    return JSON.parse(localStorage.getItem(INTEGRATION_STORAGE_KEY) || "{}");
-  } catch {
-    return {};
-  }
-}
-
-function saveIntegrations(data: Record<string, string>) {
-  localStorage.setItem(INTEGRATION_STORAGE_KEY, JSON.stringify(data));
-}
-
-const INTEGRATIONS = [
-  {
-    id: "stripe",
-    name: "Stripe",
-    description: "Payment processing — accept cards, Apple Pay, and more.",
-    color: "#635BFF",
-    logo: "💳",
-    fields: [] as { key: string; label: string; placeholder: string }[],
-    alwaysConnected: true,
-    helpUrl: "https://dashboard.stripe.com",
-  },
-  {
-    id: "printify",
-    name: "Printify",
-    description: "Print-on-demand fulfillment — sync products and automate orders.",
-    color: "#00B388",
-    logo: "🖨️",
-    fields: [
-      { key: "printify_api_key", label: "API Key", placeholder: "Paste your Printify API key" },
-      { key: "printify_shop_id", label: "Shop ID", placeholder: "Your Printify Shop ID" },
-    ],
-    alwaysConnected: false,
-    helpUrl: "https://printify.com/app/account/api",
-  },
-  {
-    id: "shopify",
-    name: "Shopify",
-    description: "E-commerce backend — manage orders, inventory, and checkout.",
-    color: "#96BF48",
-    logo: "🛍️",
-    fields: [
-      { key: "shopify_store_url", label: "Store URL", placeholder: "yourstore.myshopify.com" },
-      { key: "shopify_api_key", label: "Admin API Key", placeholder: "Paste your Shopify Admin API key" },
-    ],
-    alwaysConnected: false,
-    helpUrl: "https://shopify.com/admin/apps/development",
-  },
-  {
-    id: "tidio",
-    name: "Tidio",
-    description: "AI-powered live chat and customer support widget.",
-    color: "#0A84FF",
-    logo: "💬",
-    fields: [
-      { key: "tidio_public_key", label: "Public Key", placeholder: "Paste your Tidio public key" },
-    ],
-    alwaysConnected: false,
-    helpUrl: "https://www.tidio.com/panel/settings/developer",
-  },
-];
-
-function IntegrationsTab() {
-  const [saved, setSaved] = useState<Record<string, string>>(loadIntegrations);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [draft, setDraft] = useState<Record<string, string>>({});
-  const [showKeys, setShowKeys] = useState<Record<string, boolean>>({});
-
-  const isConnected = (id: string) => {
-    const intg = INTEGRATIONS.find(i => i.id === id);
-    if (!intg) return false;
-    if (intg.alwaysConnected) return true;
-    return intg.fields.every(f => !!saved[f.key]?.trim());
-  };
-
-  const startEdit = (id: string) => {
-    const intg = INTEGRATIONS.find(i => i.id === id)!;
-    const current: Record<string, string> = {};
-    intg.fields.forEach(f => { current[f.key] = saved[f.key] || ""; });
-    setDraft(current);
-    setEditing(id);
-  };
-
-  const handleSave = (id: string) => {
-    const updated = { ...saved, ...draft };
-    setSaved(updated);
-    saveIntegrations(updated);
-    setEditing(null);
-    toast.success("Integration saved!");
-  };
-
-  const handleDisconnect = (id: string) => {
-    if (!window.confirm("Disconnect this integration? Your keys will be removed.")) return;
-    const intg = INTEGRATIONS.find(i => i.id === id)!;
-    const updated = { ...saved };
-    intg.fields.forEach(f => { delete updated[f.key]; });
-    setSaved(updated);
-    saveIntegrations(updated);
-    toast.success("Integration disconnected");
-  };
-
-  return (
-    <div>
-      <div className="mb-6">
-        <h1 className="font-display text-white font-bold tracking-widest text-lg">INTEGRATIONS</h1>
-        <p className="font-body text-[#555] text-sm mt-1">Connect your third-party services. Keys are stored locally on this device.</p>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        {INTEGRATIONS.map((intg) => {
-          const connected = isConnected(intg.id);
-          const isEditingThis = editing === intg.id;
-
-          return (
-            <div key={intg.id} className="bg-[#1A1A1A] border border-white/10 p-5 flex flex-col gap-4">
-              {/* Header */}
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl">{intg.logo}</span>
-                  <div>
-                    <p className="font-display text-white font-bold tracking-wider text-sm">{intg.name}</p>
-                    <p className="font-body text-[#666] text-xs mt-0.5">{intg.description}</p>
-                  </div>
-                </div>
-                <span className={`flex-shrink-0 flex items-center gap-1.5 font-display text-[10px] tracking-widest px-2.5 py-1 ${
-                  connected
-                    ? "bg-green-500/10 text-green-400 border border-green-500/20"
-                    : "bg-white/5 text-[#555] border border-white/10"
-                }`}>
-                  <span className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-green-400" : "bg-[#555]"}`} />
-                  {connected ? "CONNECTED" : "NOT CONNECTED"}
-                </span>
-              </div>
-
-              {/* Edit form */}
-              {isEditingThis && intg.fields.length > 0 && (
-                <div className="flex flex-col gap-3 border-t border-white/10 pt-4">
-                  {intg.fields.map(f => (
-                    <div key={f.key}>
-                      <label className="font-display text-[#888] text-[10px] tracking-widest block mb-1.5">{f.label}</label>
-                      <div className="relative">
-                        <input
-                          type={showKeys[f.key] ? "text" : "password"}
-                          value={draft[f.key] || ""}
-                          onChange={e => setDraft(d => ({ ...d, [f.key]: e.target.value }))}
-                          placeholder={f.placeholder}
-                          className="w-full bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2.5 pr-10 outline-none focus:border-[#FF6B00] transition-colors"
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowKeys(s => ({ ...s, [f.key]: !s[f.key] }))}
-                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#555] hover:text-white transition-colors text-xs"
-                        >
-                          {showKeys[f.key] ? "HIDE" : "SHOW"}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                  <div className="flex gap-2 mt-1">
-                    <button onClick={() => handleSave(intg.id)} className="admin-btn-primary flex-1 text-xs">SAVE</button>
-                    <button onClick={() => setEditing(null)} className="admin-btn-secondary text-xs px-4">CANCEL</button>
-                  </div>
-                </div>
-              )}
-
-              {/* Actions */}
-              {!isEditingThis && (
-                <div className="flex items-center gap-2 border-t border-white/10 pt-4">
-                  {intg.alwaysConnected ? (
-                    <a href={intg.helpUrl} target="_blank" rel="noopener noreferrer"
-                      className="admin-btn-secondary flex items-center gap-1.5 text-xs flex-1 justify-center">
-                      <ExternalLink size={11} /> Open Dashboard
-                    </a>
-                  ) : connected ? (
-                    <>
-                      <button onClick={() => startEdit(intg.id)} className="admin-btn-secondary flex items-center gap-1.5 text-xs flex-1 justify-center">
-                        <Pencil size={11} /> Edit Keys
-                      </button>
-                      <button onClick={() => handleDisconnect(intg.id)} className="admin-btn-danger flex items-center gap-1.5 text-xs px-3">
-                        <X size={11} />
-                      </button>
-                    </>
-                  ) : (
-                    <>
-                      <button onClick={() => startEdit(intg.id)} className="admin-btn-primary flex items-center gap-1.5 text-xs flex-1 justify-center">
-                        <Plus size={11} /> CONNECT
-                      </button>
-                      <a href={intg.helpUrl} target="_blank" rel="noopener noreferrer"
-                        className="admin-btn-secondary flex items-center gap-1.5 text-xs px-3">
-                        <ExternalLink size={11} />
-                      </a>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <div className="mt-6 bg-[#1A1A1A] border border-white/10 border-dashed p-4">
-        <p className="font-body text-[#555] text-xs text-center">
-          🔒 Keys are stored locally in your browser. They are never sent to any server.
-        </p>
       </div>
     </div>
   );
@@ -1360,10 +1152,271 @@ function MembershipTab() {
   );
 }
 
+// ─── Admin Control Center ─────────────────────────────────────────────────────
+
+type AdminTab =
+  | "overview" | "products" | "inventory" | "orders" | "customers" | "analytics"
+  | "blog" | "digital" | "videos" | "affiliate" | "membership"
+  | "printify" | "shopify" | "stripe" | "tidio" | "aichat" | "environment" | "theme"
+  | "notifications" | "automation" | "settings";
+
+type ControlField = {
+  key: string;
+  label: string;
+  type?: "text" | "select" | "textarea";
+  options?: string[];
+  placeholder?: string;
+};
+
+const controlAreas: Record<string, {
+  title: string;
+  eyebrow: string;
+  description: string;
+  icon: typeof Settings;
+  fields: ControlField[];
+}> = {
+  stripe: {
+    title: "Stripe Payment Management",
+    eyebrow: "Payments",
+    description: "Configure payment mode, checkout posture, and operational payment notes without exposing payment systems to customers.",
+    icon: CreditCard,
+    fields: [
+      { key: "stripe_mode", label: "Stripe Mode", type: "select", options: ["test", "live"] },
+      { key: "stripe_checkout_status", label: "Checkout Status", type: "select", options: ["enabled", "maintenance", "disabled"] },
+      { key: "payment_operations_notes", label: "Payment Operations Notes", type: "textarea", placeholder: "Refund policy, payout notes, fraud checks..." },
+    ],
+  },
+  tidio: {
+    title: "Tidio AI Management",
+    eyebrow: "Customer Support",
+    description: "Keep third-party AI support configuration inside admin. Public customers only see the finished chat experience.",
+    icon: MessageSquare,
+    fields: [
+      { key: "tidio_status", label: "Tidio Status", type: "select", options: ["disabled", "enabled", "testing"] },
+      { key: "tidio_public_key", label: "Tidio Public Key", placeholder: "code.tidio.co public key" },
+      { key: "support_escalation_email", label: "Escalation Email", placeholder: "support@buildlevel.com" },
+    ],
+  },
+  inventory: {
+    title: "Inventory Management",
+    eyebrow: "Stock Control",
+    description: "Define stock behavior, low-stock alerts, and inventory rules used by product operations.",
+    icon: Boxes,
+    fields: [
+      { key: "inventory_policy", label: "Inventory Policy", type: "select", options: ["manual", "shopify_source", "printify_source"] },
+      { key: "low_stock_threshold", label: "Low Stock Threshold", placeholder: "5" },
+      { key: "out_of_stock_behavior", label: "Out-of-Stock Behavior", type: "select", options: ["hide", "show_sold_out", "continue_selling"] },
+    ],
+  },
+  orders: {
+    title: "Order Management",
+    eyebrow: "Fulfillment",
+    description: "Centralize order-routing decisions for Shopify, Printify, Stripe, and manual exceptions.",
+    icon: ShoppingBag,
+    fields: [
+      { key: "order_source_of_truth", label: "Order Source of Truth", type: "select", options: ["shopify", "stripe", "manual"] },
+      { key: "fulfillment_routing", label: "Fulfillment Routing", type: "select", options: ["printify_first", "manual_review", "shopify_apps"] },
+      { key: "order_exception_notes", label: "Exception Handling Notes", type: "textarea" },
+    ],
+  },
+  customers: {
+    title: "Customer Management",
+    eyebrow: "CRM",
+    description: "Control customer support and retention settings without adding CRM surfaces to the public website.",
+    icon: Users,
+    fields: [
+      { key: "customer_system", label: "Customer System", type: "select", options: ["shopify", "manual", "external_crm"] },
+      { key: "vip_segment_rule", label: "VIP Segment Rule", placeholder: "Orders > 3 or spend > $250" },
+      { key: "customer_notes", label: "Customer Operations Notes", type: "textarea" },
+    ],
+  },
+  analytics: {
+    title: "Analytics Overview",
+    eyebrow: "Performance",
+    description: "Define analytics sources and review the dashboard signals that should remain private to admins.",
+    icon: BarChart3,
+    fields: [
+      { key: "analytics_source", label: "Analytics Source", type: "select", options: ["cloudflare", "umami", "shopify", "manual"] },
+      { key: "kpi_focus", label: "KPI Focus", placeholder: "Conversion rate, AOV, returning customers" },
+      { key: "weekly_report_email", label: "Weekly Report Email", placeholder: "owner@buildlevel.com" },
+    ],
+  },
+  environment: {
+    title: "API / Environment Management",
+    eyebrow: "Secure Config",
+    description: "Track operational API status and environment ownership. Secret values stay in Render/Railway/Cloudflare, never in the customer UI.",
+    icon: Database,
+    fields: [
+      { key: "render_service_url", label: "Render Service URL", placeholder: "https://build-level.onrender.com" },
+      { key: "railway_database_status", label: "Railway Database Status", type: "select", options: ["connected", "maintenance", "not_configured"] },
+      { key: "api_change_log", label: "API Change Log", type: "textarea" },
+    ],
+  },
+  theme: {
+    title: "Theme / Branding Settings",
+    eyebrow: "Brand System",
+    description: "Keep storefront branding premium and controlled from admin-only settings.",
+    icon: Palette,
+    fields: [
+      { key: "brand_accent", label: "Accent Color", placeholder: "#FF6B00" },
+      { key: "hero_mood", label: "Hero Mood", type: "select", options: ["cinematic", "minimal", "launch_drop"] },
+      { key: "brand_notes", label: "Brand Notes", type: "textarea" },
+    ],
+  },
+  notifications: {
+    title: "Dashboard Notifications",
+    eyebrow: "Alerts",
+    description: "Configure internal admin alerts for orders, inventory, sync jobs, and support events.",
+    icon: Bell,
+    fields: [
+      { key: "admin_alert_email", label: "Admin Alert Email", placeholder: "ops@buildlevel.com" },
+      { key: "notify_low_stock", label: "Low-Stock Alerts", type: "select", options: ["enabled", "disabled"] },
+      { key: "notify_failed_sync", label: "Failed Sync Alerts", type: "select", options: ["enabled", "disabled"] },
+    ],
+  },
+  automation: {
+    title: "Automation Controls",
+    eyebrow: "Workflows",
+    description: "Centralize product sync, fulfillment, customer support, and reporting automation switches.",
+    icon: Workflow,
+    fields: [
+      { key: "product_sync_mode", label: "Product Sync Mode", type: "select", options: ["manual", "scheduled", "webhook"] },
+      { key: "auto_publish_imports", label: "Auto-Publish Imports", type: "select", options: ["no", "yes"] },
+      { key: "automation_notes", label: "Automation Notes", type: "textarea" },
+    ],
+  },
+};
+
+const overviewCards = [
+  { title: "Storefront", detail: "Public routes remain cinematic, mobile-first, and free of system tooling.", icon: ShieldCheck },
+  { title: "Products & Inventory", detail: "Manage products, visibility, stock posture, and collections from admin.", icon: Package },
+  { title: "Shopify + Printify", detail: "Sync products and fulfillment sources behind protected admin APIs.", icon: Printer },
+  { title: "Payments", detail: "Stripe and PayPal posture is tracked in admin-only payment controls.", icon: CreditCard },
+  { title: "Customers + Orders", detail: "Order routing, customer systems, and service rules stay private.", icon: Users },
+  { title: "Automation", detail: "Sync jobs, notifications, and workflow settings are centralized here.", icon: Workflow },
+];
+
+function OverviewTab({ onSelect }: { onSelect: (tab: AdminTab) => void }) {
+  return (
+    <div className="space-y-6">
+      <div className="relative overflow-hidden border border-white/10 bg-[#151515] p-6">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_right,rgba(255,107,0,0.18),transparent_35%)]" />
+        <div className="relative">
+          <p className="section-label">Admin Command Center</p>
+          <h1 className="font-display text-3xl md:text-4xl font-bold text-white tracking-widest">
+            BUILD LEVEL <span className="text-[#FF6B00]">OPERATIONS</span>
+          </h1>
+          <p className="font-body text-[#888] text-sm max-w-2xl mt-3">
+            This dashboard is the protected management layer for integrations, payments, inventory,
+            content, customers, analytics, settings, and automation. Customers only see the finished luxury storefront.
+          </p>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {overviewCards.map(({ title, detail, icon: Icon }) => (
+          <div key={title} className="group border border-white/10 bg-[#1A1A1A] p-5 transition-all hover:border-[#FF6B00]/50 hover:-translate-y-0.5">
+            <Icon size={18} className="text-[#FF6B00] mb-4" />
+            <p className="font-display text-white text-sm tracking-widest font-bold">{title}</p>
+            <p className="font-body text-[#666] text-xs leading-relaxed mt-2">{detail}</p>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {(["stripe", "inventory", "orders", "customers", "analytics", "environment", "theme", "automation"] as AdminTab[]).map((id) => (
+          <button key={id} onClick={() => onSelect(id)} className="admin-btn-secondary text-xs py-3 uppercase">
+            {id}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ControlCenterTab({ area }: { area: keyof typeof controlAreas }) {
+  const config = controlAreas[area];
+  const [form, setForm] = useState<Record<string, string>>({});
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    getSettings()
+      .then((settings) => {
+        const next: Record<string, string> = {};
+        config.fields.forEach((field) => { next[field.key] = settings[field.key] || ""; });
+        setForm(next);
+      })
+      .catch(() => {});
+  }, [config]);
+
+  const save = async () => {
+    setSaving(true);
+    try {
+      await saveSettings(form);
+      toast.success(`${config.title} saved`);
+    } catch {
+      toast.error("Failed to save controls");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const Icon = config.icon;
+
+  return (
+    <div className="space-y-6">
+      <div className="flex items-start justify-between gap-4">
+        <div>
+          <p className="section-label">{config.eyebrow}</p>
+          <h1 className="font-display text-white font-bold tracking-widest text-lg flex items-center gap-2">
+            <Icon size={16} className="text-[#FF6B00]" /> {config.title.toUpperCase()}
+          </h1>
+          <p className="font-body text-[#666] text-sm mt-2 max-w-2xl">{config.description}</p>
+        </div>
+        <button onClick={save} disabled={saving} className="admin-btn-primary flex items-center gap-2 text-xs">
+          {saving ? <Loader2 size={12} className="animate-spin" /> : <Save size={12} />}
+          SAVE
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {config.fields.map((field) => (
+          <div key={field.key} className={field.type === "textarea" ? "lg:col-span-2" : ""}>
+            <label className="font-display text-[#888] text-[10px] tracking-widest block mb-1.5">{field.label}</label>
+            {field.type === "select" ? (
+              <select
+                value={form[field.key] || ""}
+                onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                className="w-full bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2.5 outline-none focus:border-[#FF6B00]"
+              >
+                <option value="">Select...</option>
+                {field.options?.map((option) => <option key={option} value={option}>{option}</option>)}
+              </select>
+            ) : field.type === "textarea" ? (
+              <textarea
+                value={form[field.key] || ""}
+                onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                placeholder={field.placeholder}
+                rows={5}
+                className="w-full bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2.5 outline-none focus:border-[#FF6B00] resize-y"
+              />
+            ) : (
+              <input
+                value={form[field.key] || ""}
+                onChange={(event) => setForm((prev) => ({ ...prev, [field.key]: event.target.value }))}
+                placeholder={field.placeholder}
+                className="w-full bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2.5 outline-none focus:border-[#FF6B00]"
+              />
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
 export default function Admin() {
-  const [tab, setTab] = useState<"products" | "settings" | "integrations" | "blog" | "digital" | "videos" | "affiliate" | "membership" | "printify" | "shopify" | "aichat">("products");
+  const [tab, setTab] = useState<AdminTab>("overview");
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState<(ProductFormData & { id?: number }) | null>(null);
 
@@ -1465,9 +1518,14 @@ export default function Admin() {
         </div>
 
         {/* Tabs */}
-        <div className="border-b border-white/10 px-6 flex gap-0">
+        <div className="border-b border-white/10 px-6 flex gap-0 overflow-x-auto">
           {[
+            { id: "overview", label: "OVERVIEW", icon: BarChart3 },
             { id: "products", label: "PRODUCTS", icon: Package },
+            { id: "inventory", label: "INVENTORY", icon: Boxes },
+            { id: "orders", label: "ORDERS", icon: ShoppingBag },
+            { id: "customers", label: "CUSTOMERS", icon: Users },
+            { id: "analytics", label: "ANALYTICS", icon: BarChart3 },
             { id: "blog", label: "BLOG", icon: BookOpen },
             { id: "digital", label: "DIGITAL", icon: Download },
             { id: "videos", label: "AI VIDEOS", icon: Video },
@@ -1475,13 +1533,19 @@ export default function Admin() {
             { id: "membership", label: "MEMBERSHIP", icon: Users },
             { id: "printify", label: "PRINTIFY", icon: Printer },
             { id: "shopify", label: "SHOPIFY", icon: ShoppingBag },
+            { id: "stripe", label: "STRIPE", icon: CreditCard },
+            { id: "tidio", label: "TIDIO", icon: MessageSquare },
             { id: "aichat", label: "AI CHAT", icon: MessageSquare },
+            { id: "environment", label: "API/ENV", icon: Database },
+            { id: "theme", label: "THEME", icon: Palette },
+            { id: "notifications", label: "ALERTS", icon: Bell },
+            { id: "automation", label: "AUTOMATION", icon: Workflow },
             { id: "settings", label: "SETTINGS", icon: Settings },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id as any)}
-              className={`flex items-center gap-2 px-5 py-4 font-display text-xs font-bold tracking-widest border-b-2 transition-colors ${
+              onClick={() => setTab(id as AdminTab)}
+              className={`flex shrink-0 items-center gap-2 px-5 py-4 font-display text-xs font-bold tracking-widest border-b-2 transition-colors ${
                 tab === id
                   ? "border-[#FF6B00] text-white"
                   : "border-transparent text-[#555] hover:text-[#888]"
@@ -1495,6 +1559,8 @@ export default function Admin() {
 
         {/* Content */}
         <div className="p-6 max-w-6xl mx-auto">
+          {tab === "overview" && <OverviewTab onSelect={setTab} />}
+
           {tab === "products" && (
             <div>
               {/* Header */}
@@ -1646,8 +1712,11 @@ export default function Admin() {
             </div>
           )}
 
+          {tab === "inventory" && <ControlCenterTab area="inventory" />}
+          {tab === "orders" && <ControlCenterTab area="orders" />}
+          {tab === "customers" && <ControlCenterTab area="customers" />}
+          {tab === "analytics" && <ControlCenterTab area="analytics" />}
           {tab === "settings" && <SettingsTab />}
-          {tab === "integrations" && <IntegrationsTab />}
           {tab === "blog" && <BlogTab />}
           {tab === "digital" && <DigitalTab />}
           {tab === "videos" && <AIVideosTab />}
@@ -1655,7 +1724,13 @@ export default function Admin() {
           {tab === "membership" && <MembershipTab />}
           {tab === "printify" && <PrintifyTab />}
           {tab === "shopify" && <ShopifyTab />}
+          {tab === "stripe" && <ControlCenterTab area="stripe" />}
+          {tab === "tidio" && <ControlCenterTab area="tidio" />}
           {tab === "aichat" && <AIChatTab />}
+          {tab === "environment" && <ControlCenterTab area="environment" />}
+          {tab === "theme" && <ControlCenterTab area="theme" />}
+          {tab === "notifications" && <ControlCenterTab area="notifications" />}
+          {tab === "automation" && <ControlCenterTab area="automation" />}
         </div>
 
         {/* Add Product Modal */}

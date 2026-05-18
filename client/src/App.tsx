@@ -1,6 +1,7 @@
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import NotFound from "@/pages/NotFound";
+import { lazy, Suspense } from "react";
 import { Route, Switch } from "wouter";
 import ErrorBoundary from "./components/ErrorBoundary";
 import { ThemeProvider } from "./contexts/ThemeContext";
@@ -12,8 +13,6 @@ import Contact from "./pages/Contact";
 import FAQ from "./pages/FAQ";
 import Checkout from "./pages/Checkout";
 import OrderConfirmation from "./pages/OrderConfirmation";
-import Integrations from "./pages/Integrations";
-import Admin from "./pages/Admin";
 import Blog from "./pages/Blog";
 import BlogPost from "./pages/BlogPost";
 import Digital from "./pages/Digital";
@@ -22,7 +21,9 @@ import SocialProofNotification from "./components/SocialProofNotification";
 import AIChatWidget from "./components/AIChatWidget";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 
-function Router() {
+const Admin = lazy(() => import("./pages/Admin"));
+
+function PublicRouter() {
   return (
     <Switch>
       <Route path="/" component={Home} />
@@ -32,8 +33,6 @@ function Router() {
       <Route path="/faq" component={FAQ} />
       <Route path="/checkout" component={Checkout} />
       <Route path="/order-confirmation" component={OrderConfirmation} />
-      <Route path="/integrations" component={Integrations} />
-      <Route path="/admin" component={Admin} />
       <Route path="/blog" component={Blog} />
       <Route path="/blog/:slug" component={BlogPost} />
       <Route path="/digital" component={Digital} />
@@ -44,7 +43,26 @@ function Router() {
   );
 }
 
+function AdminApp() {
+  return (
+    <ErrorBoundary>
+      <ThemeProvider defaultTheme="dark">
+        <TooltipProvider>
+          <Toaster />
+          <Suspense fallback={<div className="min-h-screen bg-[#111] text-white flex items-center justify-center font-display tracking-widest">LOADING ADMIN</div>}>
+            <Admin />
+          </Suspense>
+        </TooltipProvider>
+      </ThemeProvider>
+    </ErrorBoundary>
+  );
+}
+
 function App() {
+  if (typeof window !== "undefined" && window.location.pathname.startsWith("/admin")) {
+    return <AdminApp />;
+  }
+
   return (
     <ErrorBoundary>
       <ThemeProvider defaultTheme="dark">
@@ -54,7 +72,7 @@ function App() {
             <SocialProofNotification />
             <AIChatWidget />
             <PWAInstallPrompt />
-            <Router />
+            <PublicRouter />
           </TooltipProvider>
         </CartProvider>
       </ThemeProvider>

@@ -191,6 +191,57 @@ export function registerAdminRestRoutes(app: Express) {
     res.json({ success: true });
   }));
 
+  app.get("/api/admin/printify/status", protectedRoute(async (req, res) => {
+    const status = await createCaller(req, res).integrations.getPrintifyStatus();
+    res.json(status);
+  }));
+  app.post("/api/admin/printify/credentials", protectedRoute(async (req, res) => {
+    await createCaller(req, res).integrations.savePrintifyCredentials(req.body as any);
+    res.json({ success: true });
+  }));
+  app.get("/api/admin/printify/products", protectedRoute(async (req, res) => {
+    const page = toRequiredNumber(req.query.page, 1);
+    const result = await createCaller(req, res).integrations.listPrintifyProducts({ page });
+    res.json({ ...result, data: result.products });
+  }));
+  app.get("/api/admin/printify/orders", protectedRoute(async (req, res) => {
+    const page = toRequiredNumber(req.query.page, 1);
+    const result = await createCaller(req, res).integrations.listPrintifyOrders({ page });
+    res.json({ ...result, data: result.orders });
+  }));
+  app.post("/api/admin/printify/import", protectedRoute(async (req, res) => {
+    const result = await createCaller(req, res).integrations.importPrintifyProduct({
+      printifyProductId: String(req.body?.printifyProductId || ""),
+    });
+    res.json(result);
+  }));
+
+  app.get("/api/admin/shopify/status", protectedRoute(async (req, res) => {
+    const status = await createCaller(req, res).integrations.getShopifyStatus();
+    res.json(status);
+  }));
+  app.post("/api/admin/shopify/credentials", protectedRoute(async (req, res) => {
+    await createCaller(req, res).integrations.saveShopifyCredentials(req.body as any);
+    res.json({ success: true });
+  }));
+  app.get("/api/admin/shopify/products", protectedRoute(async (req, res) => {
+    const limit = toRequiredNumber(req.query.limit, 20);
+    const products = await createCaller(req, res).integrations.listShopifyProducts({ limit });
+    res.json({ products });
+  }));
+  app.get("/api/admin/shopify/orders", protectedRoute(async (req, res) => {
+    const limit = toRequiredNumber(req.query.limit, 20);
+    const status = typeof req.query.status === "string" ? req.query.status : "any";
+    const orders = await createCaller(req, res).integrations.listShopifyOrders({ limit, status });
+    res.json({ orders });
+  }));
+  app.post("/api/admin/shopify/import", protectedRoute(async (req, res) => {
+    const result = await createCaller(req, res).integrations.importShopifyProduct({
+      shopifyProductId: String(req.body?.shopifyProductId || ""),
+    });
+    res.json(result);
+  }));
+
   app.get("/api/admin/ai-chat/config", protectedRoute(async (req, res) => {
     res.json(await createCaller(req, res).integrations.getAIChatConfig());
   }));

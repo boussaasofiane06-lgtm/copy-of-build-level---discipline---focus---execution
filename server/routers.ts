@@ -5,6 +5,7 @@ import { asc } from "drizzle-orm";
 import { COOKIE_NAME } from "@shared/const";
 import { getSessionCookieOptions } from "./_core/cookies";
 import { systemRouter } from "./_core/systemRouter";
+import { adminProcedure } from "./_core/adminProcedure";
 import { publicProcedure, router } from "./_core/trpc";
 // notifyOwner and invokeLLM removed — no Manus dependency
 import { adminRouter } from "./admin";
@@ -247,6 +248,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
           .from(products)
           .orderBy(asc(products.sortOrder), asc(products.createdAt));
         return rows
+          .filter((p: typeof rows[0]) => p.published === true && p.hidden !== true && p.delisted !== true)
           .filter((p: typeof rows[0]) => !input.category || p.category === input.category)
           .filter((p: typeof rows[0]) => !input.featuredOnly || p.featured === true)
           .map((p: typeof rows[0]) => ({
@@ -280,12 +282,12 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         return rows[0] || null;
       }),
     // Admin: list all (including unpublished)
-    adminList: publicProcedure.query(async () => {
+    adminList: adminProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(blogPosts).orderBy(desc(blogPosts.createdAt));
     }),
-    adminCreate: publicProcedure
+    adminCreate: adminProcedure
       .input(z.object({
         title: z.string().min(1),
         slug: z.string().min(1),
@@ -301,7 +303,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.insert(blogPosts).values(input);
         return { success: true };
       }),
-    adminUpdate: publicProcedure
+    adminUpdate: adminProcedure
       .input(z.object({
         id: z.number(),
         title: z.string().min(1).optional(),
@@ -319,7 +321,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.update(blogPosts).set(data).where(eq(blogPosts.id, id));
         return { success: true };
       }),
-    adminDelete: publicProcedure
+    adminDelete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -341,13 +343,13 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         .orderBy(desc(digitalProducts.sortOrder));
       return rows.map((p: typeof rows[0]) => ({ ...p, price: parseFloat(String(p.price)) }));
     }),
-    adminList: publicProcedure.query(async () => {
+    adminList: adminProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       const rows = await db.select().from(digitalProducts).orderBy(desc(digitalProducts.createdAt));
       return rows.map((p: typeof rows[0]) => ({ ...p, price: parseFloat(String(p.price)) }));
     }),
-    adminCreate: publicProcedure
+    adminCreate: adminProcedure
       .input(z.object({
         name: z.string().min(1),
         description: z.string().optional(),
@@ -367,7 +369,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.insert(digitalProducts).values({ ...input, price: String(input.price) });
         return { success: true };
       }),
-    adminUpdate: publicProcedure
+    adminUpdate: adminProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().optional(),
@@ -391,7 +393,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.update(digitalProducts).set(data).where(eq(digitalProducts.id, id));
         return { success: true };
       }),
-    adminDelete: publicProcedure
+    adminDelete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -489,12 +491,12 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       if (!db) return [];
       return db.select().from(aiVideos).where(eq(aiVideos.published, true)).orderBy(asc(aiVideos.sortOrder), desc(aiVideos.createdAt));
     }),
-    adminList: publicProcedure.query(async () => {
+    adminList: adminProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(aiVideos).orderBy(asc(aiVideos.sortOrder), desc(aiVideos.createdAt));
     }),
-    adminCreate: publicProcedure
+    adminCreate: adminProcedure
       .input(z.object({
         title: z.string().min(1),
         description: z.string().optional(),
@@ -512,7 +514,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.insert(aiVideos).values(input);
         return { success: true };
       }),
-    adminUpdate: publicProcedure
+    adminUpdate: adminProcedure
       .input(z.object({
         id: z.number(),
         title: z.string().min(1),
@@ -532,7 +534,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.update(aiVideos).set(data).where(eq(aiVideos.id, id));
         return { success: true };
       }),
-    adminDelete: publicProcedure
+    adminDelete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -548,12 +550,12 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       if (!db) return [];
       return db.select().from(affiliateProducts).where(eq(affiliateProducts.published, true)).orderBy(asc(affiliateProducts.sortOrder), desc(affiliateProducts.createdAt));
     }),
-    adminList: publicProcedure.query(async () => {
+    adminList: adminProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(affiliateProducts).orderBy(asc(affiliateProducts.sortOrder), desc(affiliateProducts.createdAt));
     }),
-    adminCreate: publicProcedure
+    adminCreate: adminProcedure
       .input(z.object({
         name: z.string().min(1),
         description: z.string().optional(),
@@ -573,7 +575,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.insert(affiliateProducts).values({ ...input, price: input.price?.toString() });
         return { success: true };
       }),
-    adminUpdate: publicProcedure
+    adminUpdate: adminProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().min(1),
@@ -595,7 +597,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.update(affiliateProducts).set({ ...data, price: price?.toString() }).where(eq(affiliateProducts.id, id));
         return { success: true };
       }),
-    adminDelete: publicProcedure
+    adminDelete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
@@ -611,12 +613,12 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       if (!db) return [];
       return db.select().from(membershipTiers).where(eq(membershipTiers.published, true)).orderBy(asc(membershipTiers.sortOrder));
     }),
-    adminList: publicProcedure.query(async () => {
+    adminList: adminProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
       return db.select().from(membershipTiers).orderBy(asc(membershipTiers.sortOrder));
     }),
-    adminCreate: publicProcedure
+    adminCreate: adminProcedure
       .input(z.object({
         name: z.string().min(1),
         description: z.string().optional(),
@@ -634,7 +636,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.insert(membershipTiers).values({ ...input, price: input.price.toString() });
         return { success: true };
       }),
-    adminUpdate: publicProcedure
+    adminUpdate: adminProcedure
       .input(z.object({
         id: z.number(),
         name: z.string().min(1),
@@ -654,7 +656,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         await db.update(membershipTiers).set({ ...data, price: price.toString() }).where(eq(membershipTiers.id, id));
         return { success: true };
       }),
-    adminDelete: publicProcedure
+    adminDelete: adminProcedure
       .input(z.object({ id: z.number() }))
       .mutation(async ({ input }) => {
         const db = await getDb();
