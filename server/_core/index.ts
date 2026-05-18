@@ -31,6 +31,7 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 }
 
 const ALLOWED_ORIGINS = [
+  "https://buildlevel.pages.dev",
   "https://build-level.pages.dev",
   "https://thebuildlevel.com",
   "https://www.thebuildlevel.com",
@@ -63,6 +64,7 @@ async function startServer() {
         }
       },
       credentials: true,
+      allowedHeaders: ["Content-Type", "Authorization", "x-admin-token"],
     })
   );
   // Configure body parser with larger size limit for file uploads

@@ -101,7 +101,8 @@ export function registerAdminAuthRoutes(app: Express) {
 
     const token = await signAdminToken();
     res.cookie(ADMIN_COOKIE, token, getAdminCookieOptions(req));
-    res.json({ success: true });
+    // Also return token in body so cross-origin frontends can use Authorization header
+    res.json({ success: true, token });
   });
 
   // POST /api/admin/logout — clear admin cookie

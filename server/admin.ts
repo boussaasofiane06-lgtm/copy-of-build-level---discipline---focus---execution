@@ -50,6 +50,14 @@ const adminProcedure = publicProcedure.use(async ({ ctx, next }) => {
   if (cookieToken && await verifyAdminJwt(cookieToken)) {
     return next({ ctx });
   }
+  // Check Authorization: Bearer <token> header (for cross-origin frontends)
+  const authHeader = req?.headers?.authorization as string | undefined;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    const bearerToken = authHeader.substring(7);
+    if (await verifyAdminJwt(bearerToken)) {
+      return next({ ctx });
+    }
+  }
   // Fallback: raw password in x-admin-token header
   const headerToken = req?.headers?.["x-admin-token"] as string | undefined;
   if (headerToken && verifyRawPassword(headerToken)) {

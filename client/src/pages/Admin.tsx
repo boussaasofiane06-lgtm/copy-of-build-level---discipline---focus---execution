@@ -82,27 +82,34 @@ function AdminPasswordLogin({ onSuccess }: { onSuccess: () => void }) {
     setLoading(true);
     setError("");
     try {
-      const ok = await checkPassword(password);
-      if (ok) {
-        // Also call backend login to set the JWT cookie (needed for file uploads)
-        try {
-          await fetch("/api/admin/login", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "include",
-            body: JSON.stringify({ password }),
-          });
-        } catch {
-          // Non-fatal: cookie login failed but local session still works
-        }
+      // Call backend login — it verifies the password server-side and returns a JWT token
+      const resp = await fetch("/api/admin/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({ password }),
+      });
+      const data = await resp.json();
+      if (data.success && data.token) {
+        // Store the JWT token — used as Authorization: Bearer header on all admin API calls
         sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
-        sessionStorage.setItem(ADMIN_TOKEN_KEY, password);
+        sessionStorage.setItem(ADMIN_TOKEN_KEY, data.token);
         onSuccess();
+      } else if (data.success && !data.token) {
+        // Backend returned success but no token — fallback: verify locally
+        const ok = await checkPassword(password);
+        if (ok) {
+          sessionStorage.setItem(ADMIN_SESSION_KEY, "1");
+          sessionStorage.setItem(ADMIN_TOKEN_KEY, password);
+          onSuccess();
+        } else {
+          setError("Incorrect password. Try again.");
+        }
       } else {
         setError("Incorrect password. Try again.");
       }
     } catch {
-      setError("Something went wrong. Try again.");
+      setError("Could not connect to server. Try again.");
     } finally {
       setLoading(false);
     }

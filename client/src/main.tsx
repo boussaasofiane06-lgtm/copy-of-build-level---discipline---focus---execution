@@ -50,7 +50,8 @@ const trpcClient = trpc.createClient({
       transformer: superjson,
       headers() {
         const token = sessionStorage.getItem(ADMIN_TOKEN_KEY);
-        return token ? { "x-admin-token": token } : {};
+        // Send as Authorization Bearer — backend adminProcedure accepts this
+        return token ? { "Authorization": `Bearer ${token}` } : {};
       },
       fetch(input, init) {
         return globalThis.fetch(input, {
