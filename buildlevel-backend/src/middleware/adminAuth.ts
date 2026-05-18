@@ -27,7 +27,14 @@ export function signAdminToken(): string {
 }
 
 export function requireAdmin(req: Request, res: Response, next: NextFunction) {
-  const token = req.cookies?.[ADMIN_COOKIE];
+  // Accept token from cookie OR Authorization header (for cross-origin frontends)
+  let token = req.cookies?.[ADMIN_COOKIE];
+  if (!token) {
+    const authHeader = req.headers.authorization;
+    if (authHeader && authHeader.startsWith("Bearer ")) {
+      token = authHeader.substring(7);
+    }
+  }
   if (!token) {
     res.status(401).json({ error: "Unauthorized" });
     return;

@@ -24,7 +24,7 @@ router.post("/login", (req: Request, res: Response) => {
     sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
     maxAge: 7 * 24 * 60 * 60 * 1000,
   });
-  res.json({ success: true });
+  res.json({ success: true, token });
 });
 
 router.post("/logout", (req: Request, res: Response) => {
