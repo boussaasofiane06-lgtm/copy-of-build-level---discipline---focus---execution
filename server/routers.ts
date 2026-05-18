@@ -14,9 +14,20 @@ import { products, blogPosts, digitalProducts, digitalPurchases, aiVideos, affil
 import { eq, desc, and } from "drizzle-orm";
 import crypto from "crypto";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
-  apiVersion: "2026-04-22.dahlia",
-});
+let stripe: Stripe | null = null;
+
+function getStripe() {
+  if (!stripe) {
+    const apiKey = process.env.STRIPE_SECRET_KEY;
+    if (!apiKey && process.env.NODE_ENV !== "test" && !process.env.VITEST) {
+      throw new Error("STRIPE_SECRET_KEY is required for Stripe checkout");
+    }
+    stripe = new Stripe(apiKey || "sk_test_local", {
+      apiVersion: "2026-04-22.dahlia",
+    });
+  }
+  return stripe;
+}
 
 // PayPal client
 const paypalClient = new Client({
@@ -73,7 +84,7 @@ export const appRouter = router({
           quantity: item.quantity,
         }));
 
-        const session = await stripe.checkout.sessions.create({
+        const session = await getStripe().checkout.sessions.create({
           line_items: lineItems,
           mode: "payment",
           customer_email: input.customerEmail || undefined,
@@ -408,7 +419,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
           email: input.customerEmail,
           downloadToken,
         });
-        const session = await stripe.checkout.sessions.create({
+        const session = await getStripe().checkout.sessions.create({
           line_items: [{
             price_data: {
               currency: "usd",

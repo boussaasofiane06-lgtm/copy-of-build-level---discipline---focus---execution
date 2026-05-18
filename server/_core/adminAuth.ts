@@ -31,7 +31,7 @@ const ONE_YEAR_S = 365 * 24 * 60 * 60;
 
 // ─── Password verification ────────────────────────────────────────────────────
 
-function verifyPassword(input: string, stored: string): boolean {
+export function verifyAdminPassword(input: string, stored: string): boolean {
   try {
     const [salt, hash] = stored.split(":");
     if (!salt || !hash) return false;
@@ -94,7 +94,7 @@ export function registerAdminAuthRoutes(app: Express) {
       return;
     }
 
-    if (!password || !verifyPassword(password, storedHash)) {
+    if (!password || !verifyAdminPassword(password, storedHash)) {
       res.status(401).json({ error: "Invalid password" });
       return;
     }
@@ -132,15 +132,7 @@ export function registerAdminAuthRoutes(app: Express) {
       if (headerToken) {
         // Verify via scrypt (raw password sent as header token)
         const storedHash = process.env.ADMIN_PASSWORD_HASH || "";
-        if (storedHash) {
-          const [salt, hash] = storedHash.split(":");
-          if (salt && hash) {
-            try {
-              const derived = crypto.scryptSync(headerToken, salt, 64).toString("hex");
-              isAdmin = crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
-            } catch { /* ignore */ }
-          }
-        }
+        isAdmin = verifyAdminPassword(headerToken, storedHash);
       }
       if (!isAdmin && cookieToken) {
         isAdmin = await verifyAdminToken(cookieToken);
