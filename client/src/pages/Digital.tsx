@@ -141,7 +141,7 @@ export default function Digital() {
     typeof window !== "undefined" &&
     new URLSearchParams(window.location.search).get("success") === "1";
 
-  const filtered = (products || []).filter((p) => {
+  const filtered = (products || []).filter((p: any) => {
     if (filter === "all") return true;
     if (filter === "guide") return !p.category || p.category === "guide";
     if (filter === "audiobook") return p.category === "audiobook";
@@ -222,7 +222,7 @@ export default function Digital() {
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {filtered.map((product) => (
+            {filtered.map((product: any) => (
               <ProductCard key={product.id} product={product} />
             ))}
           </div>

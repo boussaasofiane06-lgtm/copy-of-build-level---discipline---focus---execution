@@ -35,7 +35,7 @@ export default function Shop() {
   // Pre-select first size for each product on load
   useEffect(() => {
     const defaults: Record<number, string> = {};
-    allProducts.forEach((p) => {
+    allProducts.forEach((p: any) => {
       const sizes = (p.sizes as string[]) || SIZES;
       if (sizes.length > 0) defaults[p.id] = sizes[0];
     });
@@ -44,7 +44,7 @@ export default function Shop() {
 
   const filtered = activeCategory === "All"
     ? allProducts
-    : allProducts.filter((p) => p.category.toLowerCase() === activeCategory.toLowerCase());
+    : allProducts.filter((p: any) => p.category.toLowerCase() === activeCategory.toLowerCase());
 
   const handleSizeSelect = (productId: number, size: string) => {
     setSelectedSizes((prev) => ({ ...prev, [productId]: size }));
@@ -130,7 +130,7 @@ export default function Shop() {
           )}
           {!productsLoading && allProducts.length > 0 && (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-            {filtered.map((product, i) => (
+            {filtered.map((product: any, i: number) => (
               <div
                 key={product.id}
                 className="product-card scroll-reveal"

@@ -65,7 +65,7 @@ export default function Blog() {
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {posts.map((post) => (
+              {posts.map((post: any) => (
                 <Link key={post.id} href={`/blog/${post.slug}`}>
                   <article className="group bg-[#111] border border-white/10 hover:border-[#FF6B00]/50 transition-all duration-300 cursor-pointer overflow-hidden">
                     {post.imageUrl ? (

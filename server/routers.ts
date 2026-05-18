@@ -8,6 +8,7 @@ import { systemRouter } from "./_core/systemRouter";
 import { publicProcedure, router } from "./_core/trpc";
 // notifyOwner and invokeLLM removed — no Manus dependency
 import { adminRouter } from "./admin";
+import { integrationsRouter, publicChatRouter } from "./integrations";
 import { getDb } from "./db";
 import { products, blogPosts, digitalProducts, digitalPurchases, aiVideos, affiliateProducts, membershipTiers } from "../drizzle/schema";
 import { eq, desc, and } from "drizzle-orm";
@@ -29,6 +30,8 @@ const paypalOrders = new OrdersController(paypalClient);
 
 export const appRouter = router({
   system: systemRouter,
+  integrations: integrationsRouter,
+  publicChat: publicChatRouter,
   auth: router({
     me: publicProcedure.query(opts => opts.ctx.user),
     logout: publicProcedure.mutation(({ ctx }) => {

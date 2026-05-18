@@ -177,3 +177,13 @@ export const digitalProductTranslations = mysqlTable("digital_product_translatio
 });
 export type DigitalProductTranslation = typeof digitalProductTranslations.$inferSelect;
 export type InsertDigitalProductTranslation = typeof digitalProductTranslations.$inferInsert;
+
+export const chatMessages = mysqlTable("chat_messages", {
+  id: serial("id").primaryKey(),
+  sessionId: varchar("sessionId", { length: 128 }).notNull(),
+  role: mysqlEnum("role", ["user", "assistant"]).notNull(),
+  content: text("content").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ChatMessage = typeof chatMessages.$inferSelect;
+export type InsertChatMessage = typeof chatMessages.$inferInsert;

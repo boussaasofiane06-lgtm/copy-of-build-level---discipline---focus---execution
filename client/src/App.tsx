@@ -19,7 +19,7 @@ import BlogPost from "./pages/BlogPost";
 import Digital from "./pages/Digital";
 import DigitalDownload from "./pages/DigitalDownload";
 import SocialProofNotification from "./components/SocialProofNotification";
-import ChatWidget from "./components/ChatWidget";
+import AIChatWidget from "./components/AIChatWidget";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
 
 function Router() {
@@ -52,7 +52,7 @@ function App() {
           <TooltipProvider>
             <Toaster />
             <SocialProofNotification />
-            <ChatWidget />
+            <AIChatWidget />
             <PWAInstallPrompt />
             <Router />
           </TooltipProvider>

@@ -13,8 +13,11 @@ import {
   Plus, Pencil, Trash2, Upload, Save, X, Package, Settings,
   ShoppingBag, ToggleLeft, ToggleRight, Star, StarOff, ChevronLeft,
   Loader2, Image as ImageIcon, ExternalLink, BookOpen, Download,
-  Video, Link2, Users
+  Video, Link2, Users, Printer, MessageSquare
 } from "lucide-react";
+import PrintifyTab from "./admin/PrintifyTab";
+import ShopifyTab from "./admin/ShopifyTab";
+import AIChatTab from "./admin/AIChatTab";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -802,7 +805,7 @@ function BlogTab() {
         </div>
       ) : (
         <div className="space-y-3">
-          {posts.map(post => (
+          {posts.map((post: any) => (
             <div key={post.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
@@ -1007,7 +1010,7 @@ function DigitalTab() {
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map(item => (
+          {items.map((item: any) => (
             <div key={item.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
@@ -1297,7 +1300,7 @@ function MembershipTab() {
 // ─── Main Admin Panel ─────────────────────────────────────────────────────────
 
 export default function Admin() {
-  const [tab, setTab] = useState<"products" | "settings" | "integrations" | "blog" | "digital" | "videos" | "affiliate" | "membership">("products");
+  const [tab, setTab] = useState<"products" | "settings" | "integrations" | "blog" | "digital" | "videos" | "affiliate" | "membership" | "printify" | "shopify" | "aichat">("products");
   const [showModal, setShowModal] = useState(false);
   const [editProduct, setEditProduct] = useState<(ProductFormData & { id?: number }) | null>(null);
 
@@ -1405,11 +1408,14 @@ export default function Admin() {
             { id: "videos", label: "AI VIDEOS", icon: Video },
             { id: "affiliate", label: "AFFILIATE", icon: Link2 },
             { id: "membership", label: "MEMBERSHIP", icon: Users },
+            { id: "printify", label: "PRINTIFY", icon: Printer },
+            { id: "shopify", label: "SHOPIFY", icon: ShoppingBag },
+            { id: "aichat", label: "AI CHAT", icon: MessageSquare },
             { id: "settings", label: "SETTINGS", icon: Settings },
           ].map(({ id, label, icon: Icon }) => (
             <button
               key={id}
-              onClick={() => setTab(id as "products" | "settings" | "integrations" | "blog" | "digital" | "videos" | "affiliate" | "membership")}
+              onClick={() => setTab(id as any)}
               className={`flex items-center gap-2 px-5 py-4 font-display text-xs font-bold tracking-widest border-b-2 transition-colors ${
                 tab === id
                   ? "border-[#FF6B00] text-white"
@@ -1451,7 +1457,7 @@ export default function Admin() {
 
               {/* Product Grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {productList.map((p) => {
+                {productList.map((p: any) => {
                   const pAny = p as any;
                   const isPublished = pAny.published ?? false;
                   const isHidden = pAny.hidden ?? false;
@@ -1584,6 +1590,9 @@ export default function Admin() {
           {tab === "videos" && <AIVideosTab />}
           {tab === "affiliate" && <AffiliateTab />}
           {tab === "membership" && <MembershipTab />}
+          {tab === "printify" && <PrintifyTab />}
+          {tab === "shopify" && <ShopifyTab />}
+          {tab === "aichat" && <AIChatTab />}
         </div>
 
         {/* Add Product Modal */}
