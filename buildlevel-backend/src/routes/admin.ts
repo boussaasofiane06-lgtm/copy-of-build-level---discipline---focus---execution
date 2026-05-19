@@ -487,20 +487,42 @@ router.get("/videos", requireAdmin, async (req: Request, res: Response) => {
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+const videoSchema = z.object({
+  title: z.string().min(1),
+  description: z.string().optional(),
+  videoUrl: z.string().url(),
+  thumbnailUrl: z.string().optional(),
+  category: z.string().optional(),
+  duration: z.string().optional(),
+  published: z.boolean().optional(),
+  sortOrder: z.number().optional(),
+});
+
+type VideoInput = {
+  title: string;
+  videoUrl: string;
+  description?: string;
+  thumbnailUrl?: string;
+  category?: string;
+  duration?: string;
+  published?: boolean;
+  sortOrder?: number;
+};
+
 router.post("/videos", requireAdmin, async (req: Request, res: Response) => {
   try {
     const db = await getDb();
-    const data = z.object({
-      title: z.string().min(1),
-      description: z.string().optional(),
-      videoUrl: z.string().url(),
-      thumbnailUrl: z.string().optional(),
-      category: z.string().optional(),
-      duration: z.string().optional(),
-      published: z.boolean().optional(),
-      sortOrder: z.number().optional(),
-    }).parse(req.body);
-    const [row] = await db.insert(aiVideos).values({ ...data, updatedAt: new Date() }).$returningId();
+    const data = videoSchema.parse(req.body) as VideoInput;
+    const [row] = await db.insert(aiVideos).values({
+      title: data.title,
+      description: data.description,
+      videoUrl: data.videoUrl,
+      thumbnailUrl: data.thumbnailUrl,
+      category: data.category,
+      duration: data.duration,
+      published: data.published,
+      sortOrder: data.sortOrder,
+    }).$returningId();
     const [created] = await db.select().from(aiVideos).where(eq(aiVideos.id, row.id));
     res.json(created);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
@@ -510,7 +532,11 @@ router.put("/videos/:id", requireAdmin, async (req: Request, res: Response) => {
   try {
     const db = await getDb();
     const id = Number(req.params.id);
-    await db.update(aiVideos).set({ ...req.body, updatedAt: new Date() }).where(eq(aiVideos.id, id));
+    const data = videoSchema.partial().parse(req.body) as Partial<VideoInput>;
+    await db.update(aiVideos).set({
+      ...data,
+      updatedAt: new Date(),
+    }).where(eq(aiVideos.id, id));
     const [row] = await db.select().from(aiVideos).where(eq(aiVideos.id, id));
     res.json(row);
   } catch (e: any) { res.status(400).json({ error: e.message }); }
