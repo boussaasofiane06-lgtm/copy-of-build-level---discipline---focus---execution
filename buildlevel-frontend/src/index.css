@@ -134,6 +134,7 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
   height: 100%;
   border: 0;
   background: rgba(0, 0, 0, 0.72);
+  cursor: pointer;
   animation: fadeIn 0.18s ease;
 }
 

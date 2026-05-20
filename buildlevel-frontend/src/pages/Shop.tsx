@@ -81,10 +81,9 @@ export default function Shop() {
 
   const cartDrawer = cartOpen ? createPortal(
     <div className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title">
-      <button
-        type="button"
+      <div
         className="cart-drawer__backdrop"
-        aria-label="Close cart"
+        aria-hidden="true"
         onClick={() => setCartOpen(false)}
       />
       <aside className="cart-drawer__panel">
