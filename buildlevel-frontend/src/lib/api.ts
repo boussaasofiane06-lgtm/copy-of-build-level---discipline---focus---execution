@@ -8,6 +8,13 @@ export const api = axios.create({
   headers: { "Content-Type": "application/json" },
 });
 
+const expectArray = <T>(data: unknown, endpoint: string): T[] => {
+  if (Array.isArray(data)) return data as T[];
+
+  console.warn(`[API] Expected an array from ${endpoint}, received ${typeof data}.`);
+  return [];
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface Product {
   id: number;
@@ -61,11 +68,11 @@ export interface DigitalProduct {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
-  getProducts: () => api.get<Product[]>("/products").then(r => r.data),
+  getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
   getProduct: (id: number) => api.get<Product>(`/products/${id}`).then(r => r.data),
-  getBlogPosts: () => api.get<BlogPost[]>("/blog").then(r => r.data),
+  getBlogPosts: () => api.get<unknown>("/blog").then(r => expectArray<BlogPost>(r.data, "/blog")),
   getBlogPost: (slug: string) => api.get<BlogPost>(`/blog/${slug}`).then(r => r.data),
-  getDigitalProducts: () => api.get<DigitalProduct[]>("/digital").then(r => r.data),
+  getDigitalProducts: () => api.get<unknown>("/digital").then(r => expectArray<DigitalProduct>(r.data, "/digital")),
   createCheckout: (items: any[], currency?: string, customerEmail?: string) =>
     api.post<{ url: string }>("/stripe/checkout", { items, currency, customerEmail }).then(r => r.data),
   createDigitalCheckout: (productId: number, customerEmail?: string) =>
@@ -79,7 +86,7 @@ export const adminApi = {
   me: () => api.get("/admin/me").then(r => r.data),
 
   // Products
-  getProducts: () => api.get<Product[]>("/admin/products").then(r => r.data),
+  getProducts: () => api.get<unknown>("/admin/products").then(r => expectArray<Product>(r.data, "/admin/products")),
   createProduct: (data: Partial<Product> & { price: number }) =>
     api.post("/admin/products", data).then(r => r.data),
   updateProduct: (id: number, data: Partial<Product>) =>
@@ -87,14 +94,14 @@ export const adminApi = {
   deleteProduct: (id: number) => api.delete(`/admin/products/${id}`).then(r => r.data),
 
   // Blog
-  getBlogPosts: () => api.get<BlogPost[]>("/admin/blog").then(r => r.data),
+  getBlogPosts: () => api.get<unknown>("/admin/blog").then(r => expectArray<BlogPost>(r.data, "/admin/blog")),
   createBlogPost: (data: Partial<BlogPost>) => api.post("/admin/blog", data).then(r => r.data),
   updateBlogPost: (id: number, data: Partial<BlogPost>) =>
     api.put(`/admin/blog/${id}`, data).then(r => r.data),
   deleteBlogPost: (id: number) => api.delete(`/admin/blog/${id}`).then(r => r.data),
 
   // Digital
-  getDigitalProducts: () => api.get<DigitalProduct[]>("/admin/digital").then(r => r.data),
+  getDigitalProducts: () => api.get<unknown>("/admin/digital").then(r => expectArray<DigitalProduct>(r.data, "/admin/digital")),
   createDigitalProduct: (data: Partial<DigitalProduct> & { price: number }) =>
     api.post("/admin/digital", data).then(r => r.data),
   updateDigitalProduct: (id: number, data: Partial<DigitalProduct>) =>
