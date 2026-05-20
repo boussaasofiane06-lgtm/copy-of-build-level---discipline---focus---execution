@@ -73,7 +73,7 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
       mode: "payment",
       customer_email: customerEmail || undefined,
       metadata: { productId: String(productId), type: "digital" },
-      success_url: `${origin}/digital?purchased=true`,
+      success_url: `${origin}/digital?purchased=true&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/digital`,
     });
 

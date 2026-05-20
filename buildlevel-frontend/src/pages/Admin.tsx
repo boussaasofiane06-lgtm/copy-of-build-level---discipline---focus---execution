@@ -36,7 +36,11 @@ export default function Admin() {
   // Digital form
   const [showDigitalForm, setShowDigitalForm] = useState(false);
   const [editDigital, setEditDigital] = useState<Partial<DigitalProduct> | null>(null);
-  const [digitalForm, setDigitalForm] = useState({ name: "", description: "", price: "", category: "mindset", productType: "pdf" as "pdf"|"audiobook"|"video"|"other", imageUrl: "", badge: "", stripePaymentLink: "", duration: "", published: true });
+  const [digitalForm, setDigitalForm] = useState({ name: "", description: "", price: "", category: "mindset", productType: "pdf" as "pdf"|"audiobook"|"video"|"other", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", published: true });
+  const [digitalUploadProgress, setDigitalUploadProgress] = useState(0);
+  const [thumbnailUploadProgress, setThumbnailUploadProgress] = useState(0);
+  const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
+  const [digitalFileInfo, setDigitalFileInfo] = useState<{ name: string; size: number; mimeType: string } | null>(null);
 
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
@@ -119,19 +123,73 @@ export default function Admin() {
   // Digital CRUD
   const saveDigital = async (e: React.FormEvent) => {
     e.preventDefault();
-    const data = { ...digitalForm, price: parseFloat(digitalForm.price) };
+    const { version: _version, downloadLimit: _downloadLimit, ...digitalPayload } = digitalForm;
+    const data = { ...digitalPayload, price: parseFloat(digitalForm.price) };
     try {
       if (editDigital?.id) await adminApi.updateDigitalProduct(editDigital.id, data as any);
       else await adminApi.createDigitalProduct(data as any);
       showToast(editDigital?.id ? "Updated!" : "Created!");
-      setShowDigitalForm(false); setEditDigital(null); loadData();
+      setShowDigitalForm(false); setEditDigital(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setThumbnailPreviews([]); setDigitalFileInfo(null); loadData();
     } catch { showToast("Error saving"); }
   };
 
   const openEditDigital = (p: DigitalProduct) => {
     setEditDigital(p);
-    setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", published: p.published });
+    setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", fileKey: p.fileKey || "", fileUrl: p.fileUrl || "", fileName: p.fileName || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", version: "1.0", downloadLimit: "5", published: p.published });
+    setThumbnailPreviews(p.imageUrl ? [p.imageUrl] : []);
+    setDigitalFileInfo(p.fileName ? { name: p.fileName, size: 0, mimeType: "Stored file" } : null);
     setShowDigitalForm(true);
+  };
+
+  const formatBytes = (bytes: number) => {
+    if (!bytes) return "Stored";
+    const units = ["B", "KB", "MB", "GB"];
+    let size = bytes;
+    let unit = 0;
+    while (size >= 1024 && unit < units.length - 1) {
+      size /= 1024;
+      unit += 1;
+    }
+    return `${size.toFixed(size >= 10 || unit === 0 ? 0 : 1)} ${units[unit]}`;
+  };
+
+  const uploadDigitalFile = async (file: File) => {
+    setDigitalUploadProgress(1);
+    try {
+      const uploaded = await adminApi.uploadDigitalAsset(file, "digital", setDigitalUploadProgress);
+      setDigitalForm(f => ({ ...f, fileKey: uploaded.key, fileUrl: uploaded.url, fileName: uploaded.fileName }));
+      setDigitalFileInfo({ name: uploaded.fileName, size: uploaded.size, mimeType: uploaded.mimeType });
+      setDigitalUploadProgress(100);
+      showToast("Digital file uploaded");
+    } catch {
+      setDigitalUploadProgress(0);
+      showToast("Upload storage needs configuration");
+    }
+  };
+
+  const uploadThumbnails = async (files: FileList | File[]) => {
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
+    if (imageFiles.length === 0) return;
+
+    setThumbnailUploadProgress(1);
+    const previews: string[] = [];
+    try {
+      for (let index = 0; index < imageFiles.length; index += 1) {
+        const uploaded = await adminApi.uploadDigitalAsset(imageFiles[index], "thumbnail", progress => {
+          const weighted = Math.round(((index + progress / 100) / imageFiles.length) * 100);
+          setThumbnailUploadProgress(weighted);
+        });
+        const preview = uploaded.url || URL.createObjectURL(imageFiles[index]);
+        previews.push(preview);
+        if (index === 0) setDigitalForm(f => ({ ...f, imageUrl: preview }));
+      }
+      setThumbnailPreviews(previews);
+      setThumbnailUploadProgress(100);
+      showToast("Thumbnails uploaded");
+    } catch {
+      setThumbnailUploadProgress(0);
+      showToast("Thumbnail upload needs storage configuration");
+    }
   };
 
   // Blog CRUD
@@ -302,26 +360,75 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Digital Products ({digital.length})</h3>
-                  <button onClick={() => { setEditDigital(null); setDigitalForm({ name: "", description: "", price: "", category: "mindset", productType: "pdf", imageUrl: "", badge: "", stripePaymentLink: "", duration: "", published: true }); setShowDigitalForm(true); }} className="btn btn-primary btn-sm">+ Add Digital</button>
+                  <button onClick={() => { setEditDigital(null); setDigitalForm({ name: "", description: "", price: "", category: "mindset", productType: "pdf", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", published: true }); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setShowDigitalForm(true); }} className="btn btn-primary btn-sm">+ Add Digital</button>
                 </div>
 
                 {showDigitalForm && (
                   <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 24, marginBottom: 24 }}>
                     <h4 style={{ marginBottom: 20, fontSize: "0.9rem" }}>{editDigital?.id ? "Edit Digital Product" : "New Digital Product"}</h4>
-                    <form onSubmit={saveDigital} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <form onSubmit={saveDigital} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
                       <div><label style={labelStyle}>Name *</label><input style={inputStyle} required value={digitalForm.name} onChange={e => setDigitalForm(f => ({ ...f, name: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Type</label><select style={inputStyle} value={digitalForm.productType} onChange={e => setDigitalForm(f => ({ ...f, productType: e.target.value as any }))}><option value="pdf">PDF Guide</option><option value="audiobook">Audiobook</option><option value="video">Video Course</option><option value="other">Other</option></select></div>
                       <div><label style={labelStyle}>Price *</label><input style={inputStyle} type="number" step="0.01" required value={digitalForm.price} onChange={e => setDigitalForm(f => ({ ...f, price: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Category</label><input style={inputStyle} value={digitalForm.category} onChange={e => setDigitalForm(f => ({ ...f, category: e.target.value }))} /></div>
+                      <div><label style={labelStyle}>Version</label><input style={inputStyle} value={digitalForm.version} onChange={e => setDigitalForm(f => ({ ...f, version: e.target.value }))} placeholder="1.0" /></div>
+                      <div><label style={labelStyle}>Download Limit</label><input style={inputStyle} type="number" min="1" value={digitalForm.downloadLimit} onChange={e => setDigitalForm(f => ({ ...f, downloadLimit: e.target.value }))} placeholder="5" /></div>
                       <div><label style={labelStyle}>Duration</label><input style={inputStyle} value={digitalForm.duration} onChange={e => setDigitalForm(f => ({ ...f, duration: e.target.value }))} placeholder="2h 30m" /></div>
                       <div><label style={labelStyle}>Badge</label><input style={inputStyle} value={digitalForm.badge} onChange={e => setDigitalForm(f => ({ ...f, badge: e.target.value }))} /></div>
-                      <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Image URL</label><input style={inputStyle} value={digitalForm.imageUrl} onChange={e => setDigitalForm(f => ({ ...f, imageUrl: e.target.value }))} /></div>
+                      <div
+                        style={{ gridColumn: "1/-1", border: "1px dashed var(--border)", borderRadius: 10, padding: 18, background: "rgba(255,255,255,0.025)" }}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files?.[0]; if (file) uploadDigitalFile(file); }}
+                      >
+                        <label style={labelStyle}>Digital File Upload</label>
+                        <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop a PDF, ZIP, video, image, DOCX, PPTX, or XLSX file here, or tap to select from mobile/desktop.</p>
+                        <input
+                          style={inputStyle}
+                          type="file"
+                          accept=".pdf,.zip,.mp4,.mov,.png,.jpg,.jpeg,.webp,.docx,.pptx,.xlsx"
+                          onChange={e => { const file = e.target.files?.[0]; if (file) uploadDigitalFile(file); }}
+                        />
+                        {digitalUploadProgress > 0 && (
+                          <div style={{ marginTop: 12, height: 8, borderRadius: 99, background: "var(--bg3)", overflow: "hidden" }}>
+                            <div style={{ width: `${digitalUploadProgress}%`, height: "100%", background: "var(--red)", transition: "width 0.2s ease" }} />
+                          </div>
+                        )}
+                        {digitalFileInfo && (
+                          <p style={{ color: "var(--text2)", fontSize: "0.8rem", marginTop: 10 }}>
+                            File: {digitalFileInfo.name} · {formatBytes(digitalFileInfo.size)} · {digitalFileInfo.mimeType}
+                          </p>
+                        )}
+                        {digitalForm.fileUrl && <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>Secure file attached. Saving this product will use the uploaded file for delivery.</p>}
+                      </div>
+                      <div
+                        style={{ gridColumn: "1/-1", border: "1px dashed var(--border)", borderRadius: 10, padding: 18, background: "rgba(255,255,255,0.025)" }}
+                        onDragOver={e => e.preventDefault()}
+                        onDrop={e => { e.preventDefault(); if (e.dataTransfer.files) uploadThumbnails(e.dataTransfer.files); }}
+                      >
+                        <label style={labelStyle}>Product Thumbnails</label>
+                        <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Upload one or more thumbnails. Click a preview to choose the featured storefront thumbnail.</p>
+                        <input style={inputStyle} type="file" accept="image/png,image/jpeg,image/webp" multiple onChange={e => e.target.files && uploadThumbnails(e.target.files)} />
+                        {thumbnailUploadProgress > 0 && (
+                          <div style={{ marginTop: 12, height: 8, borderRadius: 99, background: "var(--bg3)", overflow: "hidden" }}>
+                            <div style={{ width: `${thumbnailUploadProgress}%`, height: "100%", background: "var(--red)", transition: "width 0.2s ease" }} />
+                          </div>
+                        )}
+                        {thumbnailPreviews.length > 0 && (
+                          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
+                            {thumbnailPreviews.map((src, index) => (
+                              <button key={`${src.slice(0, 24)}-${index}`} type="button" onClick={() => setDigitalForm(f => ({ ...f, imageUrl: src }))} style={{ padding: 0, border: digitalForm.imageUrl === src ? "2px solid var(--red)" : "1px solid var(--border)", borderRadius: 8, background: "transparent" }}>
+                                <img src={src} alt={`Thumbnail ${index + 1}`} style={{ width: 86, height: 64, objectFit: "cover", borderRadius: 6 }} />
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Stripe Payment Link (optional)</label><input style={inputStyle} value={digitalForm.stripePaymentLink} onChange={e => setDigitalForm(f => ({ ...f, stripePaymentLink: e.target.value }))} placeholder="https://buy.stripe.com/..." /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Description</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={3} value={digitalForm.description} onChange={e => setDigitalForm(f => ({ ...f, description: e.target.value }))} /></div>
                       <div><label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={digitalForm.published} onChange={e => setDigitalForm(f => ({ ...f, published: e.target.checked }))} /> Published</label></div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
                         <button type="submit" className="btn btn-primary btn-sm">Save</button>
-                        <button type="button" onClick={() => { setShowDigitalForm(false); setEditDigital(null); }} className="btn btn-outline btn-sm">Cancel</button>
+                        <button type="button" onClick={() => { setShowDigitalForm(false); setEditDigital(null); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); }} className="btn btn-outline btn-sm">Cancel</button>
                       </div>
                     </form>
                   </div>

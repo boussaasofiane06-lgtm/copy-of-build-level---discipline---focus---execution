@@ -1,7 +1,8 @@
 import { Router } from "express";
 import { eq, asc, and } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { products, blogPosts, digitalProducts, affiliateProducts, membershipTiers, siteSettings } from "../db/schema.js";
+import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings } from "../db/schema.js";
+import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 
 const router = Router();
 
@@ -67,6 +68,41 @@ router.get("/digital", async (req, res) => {
       .where(eq(digitalProducts.published, true))
       .orderBy(asc(digitalProducts.sortOrder), asc(digitalProducts.createdAt));
     res.json(rows);
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/digital/download/:token", async (req, res) => {
+  try {
+    const db = await getDb();
+    const [purchase] = await db
+      .select()
+      .from(digitalPurchases)
+      .where(eq(digitalPurchases.downloadToken, req.params.token))
+      .limit(1);
+
+    if (!purchase) { res.status(404).json({ error: "Download not found" }); return; }
+
+    const [product] = await db
+      .select()
+      .from(digitalProducts)
+      .where(eq(digitalProducts.id, purchase.productId))
+      .limit(1);
+
+    if (!product) { res.status(404).json({ error: "Product not found" }); return; }
+
+    let url = product.fileUrl || "";
+    if (product.fileKey) url = await getProtectedDownloadUrl(product.fileKey);
+    if (!url) { res.status(404).json({ error: "No downloadable file configured" }); return; }
+
+    await db.update(digitalPurchases).set({ downloadedAt: new Date() }).where(eq(digitalPurchases.id, purchase.id));
+    res.json({
+      url,
+      fileName: product.fileName,
+      productName: product.name,
+      expiresInSeconds: Number(process.env.DOWNLOAD_URL_TTL_SECONDS || 900),
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

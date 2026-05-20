@@ -2,14 +2,20 @@ import { Router, Request, Response } from "express";
 import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
 import Stripe from "stripe";
+import multer from "multer";
 import { getDb } from "../db/index.js";
 import {
   products, blogPosts, digitalProducts, affiliateProducts,
   membershipTiers, siteSettings, aiVideos
 } from "../db/schema.js";
 import { requireAdmin, verifyAdminPassword, signAdminToken, ADMIN_COOKIE } from "../middleware/adminAuth.js";
+import { ALLOWED_IMAGE_EXTENSIONS, ALLOWED_UPLOAD_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, uploadObject } from "../storage/objectStorage.js";
 
 const router = Router();
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: MAX_DIGITAL_FILE_SIZE_BYTES },
+});
 
 const SHOPIFY_API_VERSION = "2024-01";
 
@@ -264,6 +270,7 @@ const digitalSchema = z.object({
   category: z.string().default("guide"),
   productType: z.enum(["pdf", "audiobook", "video", "other"]).default("pdf"),
   imageUrl: z.string().optional().nullable(),
+  fileKey: z.string().optional().nullable(),
   fileUrl: z.string().optional().nullable(),
   fileName: z.string().optional().nullable(),
   audioUrl: z.string().optional().nullable(),
@@ -285,6 +292,7 @@ router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
       category: data.category,
       productType: data.productType,
       imageUrl: data.imageUrl,
+      fileKey: data.fileKey,
       fileUrl: data.fileUrl,
       fileName: data.fileName,
       audioUrl: data.audioUrl,
@@ -297,6 +305,29 @@ router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
     const [inserted] = await db.select({ id: digitalProducts.id }).from(digitalProducts).orderBy(asc(digitalProducts.createdAt)).limit(1);
     res.json({ success: true, id: inserted?.id ?? 0 });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
+});
+
+router.get("/digital/upload-config", requireAdmin, (req: Request, res: Response) => {
+  res.json({
+    maxDigitalFileSizeBytes: MAX_DIGITAL_FILE_SIZE_BYTES,
+    allowedFileTypes: ALLOWED_UPLOAD_EXTENSIONS,
+    allowedThumbnailTypes: ALLOWED_IMAGE_EXTENSIONS,
+    storage: {
+      configured: !!(process.env.UPLOAD_BUCKET || process.env.R2_BUCKET || process.env.S3_BUCKET),
+      provider: process.env.UPLOAD_ENDPOINT || process.env.R2_ENDPOINT ? "s3-compatible" : "s3",
+    },
+  });
+});
+
+router.post("/digital/upload", requireAdmin, upload.single("file"), async (req: Request, res: Response) => {
+  try {
+    if (!req.file) { res.status(400).json({ error: "No file uploaded" }); return; }
+    const kind = req.body.kind === "thumbnail" ? "thumbnail" : "digital";
+    const uploaded = await uploadObject(req.file, kind);
+    res.json({ success: true, kind, ...uploaded });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 router.put("/digital/:id", requireAdmin, async (req: Request, res: Response) => {

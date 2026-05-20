@@ -70,6 +70,8 @@ export interface DigitalProduct {
   category: string;
   productType: "pdf" | "audiobook" | "video" | "other";
   imageUrl?: string;
+  fileKey?: string;
+  fileName?: string;
   fileUrl?: string;
   audioUrl?: string;
   duration?: string;
@@ -203,6 +205,36 @@ export const adminApi = {
   updateDigitalProduct: (id: number, data: Partial<DigitalProduct>) =>
     api.put(`/admin/digital/${id}`, data).then(r => r.data),
   deleteDigitalProduct: (id: number) => api.delete(`/admin/digital/${id}`).then(r => r.data),
+  getDigitalUploadConfig: () => api.get<{
+    maxDigitalFileSizeBytes: number;
+    allowedFileTypes: string[];
+    allowedThumbnailTypes: string[];
+    storage: { configured: boolean; provider: string };
+  }>("/admin/digital/upload-config").then(r => r.data),
+  uploadDigitalAsset: (
+    file: File,
+    kind: "digital" | "thumbnail",
+    onProgress?: (progress: number) => void
+  ) => {
+    const formData = new FormData();
+    formData.append("file", file);
+    formData.append("kind", kind);
+    return api.post<{
+      success: true;
+      kind: "digital" | "thumbnail";
+      key: string;
+      url: string;
+      fileName: string;
+      size: number;
+      mimeType: string;
+    }>("/admin/digital/upload", formData, {
+      headers: { "Content-Type": "multipart/form-data" },
+      onUploadProgress: (event) => {
+        if (!event.total || !onProgress) return;
+        onProgress(Math.round((event.loaded / event.total) * 100));
+      },
+    }).then(r => r.data);
+  },
 
   // Settings
   getSettings: () => api.get<Record<string, string>>("/admin/settings").then(r => r.data),
