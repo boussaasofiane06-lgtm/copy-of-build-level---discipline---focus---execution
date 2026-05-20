@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { publicApi, Product } from "../lib/api";
 
 interface CartItem { product: Product; quantity: number; size: string; }
@@ -11,16 +12,37 @@ export default function Shop() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
   const [category, setCategory] = useState("all");
+  const closeCartButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     publicApi.getProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 
+  useEffect(() => {
+    if (!cartOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeCartButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setCartOpen(false);
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [cartOpen]);
+
   const categories = ["all", ...Array.from(new Set(products.map(p => p.category)))];
   const filtered = category === "all" ? products : products.filter(p => p.category === category);
 
   const addToCart = (product: Product) => {
-    const size = selectedSizes[product.id] || (product.sizes[0] ?? "");
+    const sizes = Array.isArray(product.sizes) ? product.sizes : [];
+    const size = selectedSizes[product.id] || (sizes[0] ?? "");
     setCart(prev => {
       const existing = prev.find(i => i.product.id === product.id && i.size === size);
       if (existing) return prev.map(i => i.product.id === product.id && i.size === size ? { ...i, quantity: i.quantity + 1 } : i);
@@ -31,19 +53,96 @@ export default function Shop() {
 
   const cartTotal = cart.reduce((sum, i) => sum + parseFloat(i.product.price) * i.quantity, 0);
 
+  const updateCartItemQuantity = (productId: number, size: string, quantity: number) => {
+    setCart(prev => prev.map(item =>
+      item.product.id === productId && item.size === size
+        ? { ...item, quantity: Math.max(1, quantity) }
+        : item
+    ));
+  };
+
+  const removeCartItem = (productId: number, size: string) => {
+    setCart(prev => prev.filter(item => !(item.product.id === productId && item.size === size)));
+  };
+
   const checkout = async () => {
     if (!cart.length) return;
     setCheckingOut(true);
     try {
       const items = cart.map(i => ({ name: `${i.product.name}${i.size ? ` (${i.size})` : ""}`, priceUSD: parseFloat(i.product.price), quantity: i.quantity, image: i.product.imageUrl || undefined }));
       const { url } = await publicApi.createCheckout(items);
-      window.open(url, "_blank");
+      window.location.assign(url);
     } catch (e) {
       alert("Checkout failed. Please try again.");
     } finally {
       setCheckingOut(false);
     }
   };
+
+  const cartDrawer = cartOpen ? createPortal(
+    <div className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="cart-drawer-title">
+      <button
+        type="button"
+        className="cart-drawer__backdrop"
+        aria-label="Close cart"
+        onClick={() => setCartOpen(false)}
+      />
+      <aside className="cart-drawer__panel">
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <h3 id="cart-drawer-title" style={{ fontSize: "1rem" }}>Your Cart</h3>
+          <button ref={closeCartButtonRef} onClick={() => setCartOpen(false)} aria-label="Close cart" style={{ background: "none", border: "none", color: "var(--text2)", fontSize: "1.2rem" }}>✕</button>
+        </div>
+        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          {cart.length === 0 ? (
+            <p style={{ color: "var(--text2)", textAlign: "center", marginTop: 40 }}>Your cart is empty.</p>
+          ) : cart.map((item) => (
+            <div key={`${item.product.id}-${item.size || "default"}`} style={{ display: "flex", gap: 16, marginBottom: 20, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
+              <div style={{ width: 64, height: 64, background: "var(--bg3)", flexShrink: 0, overflow: "hidden", borderRadius: 2 }}>
+                {item.product.imageUrl && <img src={item.product.imageUrl} alt={item.product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+              </div>
+              <div style={{ flex: 1 }}>
+                <p style={{ fontSize: "0.9rem", marginBottom: 4 }}>{item.product.name}</p>
+                {item.size && <p style={{ fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4 }}>Size: {item.size}</p>}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: "0.9rem" }}>${(parseFloat(item.product.price) * item.quantity).toFixed(2)}</span>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button
+                      onClick={() => updateCartItemQuantity(item.product.id, item.size, item.quantity - 1)}
+                      aria-label={`Decrease quantity for ${item.product.name}`}
+                      className="cart-drawer__quantity-button"
+                    >
+                      -
+                    </button>
+                    <span style={{ fontSize: "0.85rem", minWidth: 18, textAlign: "center" }}>{item.quantity}</span>
+                    <button
+                      onClick={() => updateCartItemQuantity(item.product.id, item.size, item.quantity + 1)}
+                      aria-label={`Increase quantity for ${item.product.name}`}
+                      className="cart-drawer__quantity-button"
+                    >
+                      +
+                    </button>
+                    <button onClick={() => removeCartItem(item.product.id, item.size)} aria-label={`Remove ${item.product.name} from cart`} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", marginLeft: 4 }}>✕</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+        {cart.length > 0 && (
+          <div style={{ padding: 24, paddingBottom: "max(24px, env(safe-area-inset-bottom))", borderTop: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+              <span style={{ color: "var(--text2)" }}>Total</span>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem" }}>${cartTotal.toFixed(2)}</span>
+            </div>
+            <button onClick={checkout} disabled={checkingOut} className="btn btn-primary" style={{ width: "100%" }}>
+              {checkingOut ? "Redirecting..." : "Checkout with Stripe"}
+            </button>
+          </div>
+        )}
+      </aside>
+    </div>,
+    document.body
+  ) : null;
 
   return (
     <div>
@@ -98,9 +197,9 @@ export default function Shop() {
                     <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>${parseFloat(p.price).toFixed(2)}</span>
                     {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
                   </div>
-                  {p.sizes.length > 0 && (
+                  {(Array.isArray(p.sizes) ? p.sizes : []).length > 0 && (
                     <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-                      {p.sizes.map(s => (
+                      {(Array.isArray(p.sizes) ? p.sizes : []).map(s => (
                         <button key={s} onClick={() => setSelectedSizes(prev => ({ ...prev, [p.id]: s }))}
                           style={{ padding: "4px 10px", fontSize: "0.7rem", fontFamily: "var(--font-display)", letterSpacing: "0.05em",
                             background: selectedSizes[p.id] === s ? "var(--red)" : "var(--bg3)",
@@ -121,53 +220,7 @@ export default function Shop() {
         )}
       </div>
 
-      {/* Cart Drawer */}
-      {cartOpen && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 200 }}>
-          <div onClick={() => setCartOpen(false)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)" }} />
-          <div style={{ position: "absolute", right: 0, top: 0, bottom: 0, width: "min(420px, 100vw)", background: "var(--bg2)", borderLeft: "1px solid var(--border)", display: "flex", flexDirection: "column" }}>
-            <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <h3 style={{ fontSize: "1rem" }}>Your Cart</h3>
-              <button onClick={() => setCartOpen(false)} style={{ background: "none", border: "none", color: "var(--text2)", fontSize: "1.2rem" }}>✕</button>
-            </div>
-            <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-              {cart.length === 0 ? (
-                <p style={{ color: "var(--text2)", textAlign: "center", marginTop: 40 }}>Your cart is empty.</p>
-              ) : cart.map((item, i) => (
-                <div key={i} style={{ display: "flex", gap: 16, marginBottom: 20, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
-                  <div style={{ width: 64, height: 64, background: "var(--bg3)", flexShrink: 0, overflow: "hidden", borderRadius: 2 }}>
-                    {item.product.imageUrl && <img src={item.product.imageUrl} alt={item.product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
-                  </div>
-                  <div style={{ flex: 1 }}>
-                    <p style={{ fontSize: "0.9rem", marginBottom: 4 }}>{item.product.name}</p>
-                    {item.size && <p style={{ fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4 }}>Size: {item.size}</p>}
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                      <span style={{ fontFamily: "var(--font-display)", fontSize: "0.9rem" }}>${(parseFloat(item.product.price) * item.quantity).toFixed(2)}</span>
-                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <button onClick={() => setCart(prev => prev.map(x => x === item ? { ...x, quantity: Math.max(1, x.quantity - 1) } : x))} style={{ background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text)", width: 24, height: 24, borderRadius: 2, cursor: "pointer" }}>-</button>
-                        <span style={{ fontSize: "0.85rem" }}>{item.quantity}</span>
-                        <button onClick={() => setCart(prev => prev.map(x => x === item ? { ...x, quantity: x.quantity + 1 } : x))} style={{ background: "var(--bg3)", border: "1px solid var(--border)", color: "var(--text)", width: 24, height: 24, borderRadius: 2, cursor: "pointer" }}>+</button>
-                        <button onClick={() => setCart(prev => prev.filter(x => x !== item))} style={{ background: "none", border: "none", color: "var(--text3)", cursor: "pointer", marginLeft: 4 }}>✕</button>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-            {cart.length > 0 && (
-              <div style={{ padding: 24, borderTop: "1px solid var(--border)" }}>
-                <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
-                  <span style={{ color: "var(--text2)" }}>Total</span>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem" }}>${cartTotal.toFixed(2)}</span>
-                </div>
-                <button onClick={checkout} disabled={checkingOut} className="btn btn-primary" style={{ width: "100%" }}>
-                  {checkingOut ? "Redirecting..." : "Checkout with Stripe"}
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {cartDrawer}
     </div>
   );
 }

@@ -4,21 +4,27 @@ import { publicApi, DigitalProduct } from "../lib/api";
 export default function Digital() {
   const [products, setProducts] = useState<DigitalProduct[]>([]);
   const [loading, setLoading] = useState(true);
+  const [pendingProductId, setPendingProductId] = useState<number | null>(null);
 
   useEffect(() => {
     publicApi.getDigitalProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 
   const handleBuy = async (product: DigitalProduct) => {
+    if (pendingProductId !== null) return;
+    setPendingProductId(product.id);
+
     if (product.stripePaymentLink) {
-      window.open(product.stripePaymentLink, "_blank");
+      window.location.assign(product.stripePaymentLink);
       return;
     }
+
     try {
       const { url } = await publicApi.createDigitalCheckout(product.id);
-      window.open(url, "_blank");
+      window.location.assign(url);
     } catch {
       alert("Checkout failed. Please try again.");
+      setPendingProductId(null);
     }
   };
 
@@ -65,7 +71,9 @@ export default function Digital() {
                   {p.description && <p style={{ color: "var(--text2)", fontSize: "0.85rem", lineHeight: 1.6, marginBottom: 16, flex: 1 }}>{p.description}</p>}
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem" }}>${parseFloat(p.price).toFixed(2)}</span>
-                    <button onClick={() => handleBuy(p)} className="btn btn-primary btn-sm">Get Access</button>
+                    <button onClick={() => handleBuy(p)} disabled={pendingProductId !== null} className="btn btn-primary btn-sm">
+                      {pendingProductId === p.id ? "Redirecting..." : "Get Access"}
+                    </button>
                   </div>
                 </div>
               </div>
