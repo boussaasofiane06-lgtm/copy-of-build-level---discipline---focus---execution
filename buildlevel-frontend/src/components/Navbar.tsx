@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 
 const links = [
@@ -12,6 +12,7 @@ const links = [
 
 export default function Navbar() {
   const [open, setOpen] = useState(false);
+  const navRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
 
   useEffect(() => {
@@ -25,12 +26,23 @@ export default function Navbar() {
       if (event.key === "Escape") setOpen(false);
     };
 
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!navRef.current?.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    };
+
     document.addEventListener("keydown", handleKeyDown);
-    return () => document.removeEventListener("keydown", handleKeyDown);
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
   }, [open]);
 
   return (
-    <nav style={{
+    <nav ref={navRef} style={{
       position: "sticky", top: 0, zIndex: "var(--z-nav)",
       background: "rgba(10,10,10,0.95)", backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)",
       borderBottom: "1px solid var(--border)",
@@ -71,7 +83,21 @@ export default function Navbar() {
 
       {/* Mobile menu */}
       {open && (
-        <div id="mobile-menu" style={{ background: "var(--bg2)", borderTop: "1px solid var(--border)", padding: "16px 0" }}>
+        <div
+          id="mobile-menu"
+          style={{
+            position: "absolute",
+            top: "100%",
+            left: 0,
+            right: 0,
+            zIndex: "var(--z-nav)",
+            background: "var(--bg2)",
+            borderTop: "1px solid var(--border)",
+            borderBottom: "1px solid var(--border)",
+            boxShadow: "0 18px 40px rgba(0,0,0,0.45)",
+            padding: "16px 0",
+          }}
+        >
           {links.map(l => (
             <Link key={l.to} to={l.to} onClick={() => setOpen(false)} style={{
               display: "block", padding: "12px 24px",

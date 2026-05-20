@@ -18,7 +18,7 @@ export default function Home() {
         position: "relative", overflow: "hidden",
       }}>
         <div style={{
-          position: "absolute", inset: 0, opacity: 0.03,
+          position: "absolute", inset: 0, opacity: 0.03, pointerEvents: "none",
           backgroundImage: "repeating-linear-gradient(0deg, transparent, transparent 40px, #fff 40px, #fff 41px), repeating-linear-gradient(90deg, transparent, transparent 40px, #fff 40px, #fff 41px)",
         }} />
         <div className="container" style={{ position: "relative", zIndex: 1 }}>
