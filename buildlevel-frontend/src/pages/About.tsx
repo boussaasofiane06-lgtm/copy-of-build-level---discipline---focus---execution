@@ -1,3 +1,6 @@
+import { GymMotivationSection } from "../components/PromoVisualSections";
+import { Reveal } from "../components/Motion";
+
 export default function About() {
   return (
     <div>
@@ -9,23 +12,29 @@ export default function About() {
       </div>
 
       <div className="container" style={{ maxWidth: 800, padding: "64px 24px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 32 }}>
+        <Reveal style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 32 }}>
           <div style={{ width: 40, height: 2, background: "var(--red)" }} />
           <span style={{ fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.2em", color: "var(--red)", textTransform: "uppercase" }}>Our Story</span>
-        </div>
+        </Reveal>
 
-        <h2 style={{ marginBottom: 24 }}>Built for Builders</h2>
-        <p style={{ color: "var(--text2)", lineHeight: 1.9, fontSize: "1.05rem", marginBottom: 32 }}>
-          BUILD LEVEL was created for one type of person: the builder. The one who shows up every day, does the work without applause, and understands that discipline is the foundation of everything worth having.
-        </p>
-        <p style={{ color: "var(--text2)", lineHeight: 1.9, fontSize: "1.05rem", marginBottom: 32 }}>
-          We don't make clothes for spectators. Every piece in our collection is designed as a statement of intent — a reminder that you are here to build, not to watch.
-        </p>
-        <p style={{ color: "var(--text2)", lineHeight: 1.9, fontSize: "1.05rem", marginBottom: 48 }}>
-          Our digital resources extend that philosophy into your work and mindset. Frameworks, guides, and tools built by builders, for builders.
-        </p>
+        <Reveal>
+          <h2 style={{ marginBottom: 24 }}>Built for Builders</h2>
+          <p style={{ color: "var(--text2)", lineHeight: 1.9, fontSize: "1.05rem", marginBottom: 32 }}>
+            BUILD LEVEL was created for one type of person: the builder. The one who shows up every day, does the work without applause, and understands that discipline is the foundation of everything worth having.
+          </p>
+          <p style={{ color: "var(--text2)", lineHeight: 1.9, fontSize: "1.05rem", marginBottom: 32 }}>
+            We don't make clothes for spectators. Every piece in our collection is designed as a statement of intent — a reminder that you are here to build, not to watch.
+          </p>
+          <p style={{ color: "var(--text2)", lineHeight: 1.9, fontSize: "1.05rem", marginBottom: 48 }}>
+            Our digital resources extend that philosophy into your work and mindset. Frameworks, guides, and tools built by builders, for builders.
+          </p>
+        </Reveal>
+      </div>
 
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24, borderTop: "1px solid var(--border)", paddingTop: 48 }}>
+      <GymMotivationSection compact />
+
+      <div className="container" style={{ maxWidth: 800, padding: "64px 24px" }}>
+        <div className="about-values-grid" style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 24, borderTop: "1px solid var(--border)", paddingTop: 48 }}>
           {[
             { label: "Discipline", desc: "The foundation of every achievement worth having." },
             { label: "Focus", desc: "The tool that separates builders from dreamers." },

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { GymMotivationSection } from "../components/PromoVisualSections";
 import { publicApi, Product } from "../lib/api";
 import {
   APPAREL_AUDIENCES,
@@ -166,6 +167,8 @@ export default function Shop() {
           <p style={{ color: "var(--text2)" }}>Premium apparel built for builders.</p>
         </div>
       </div>
+
+      <GymMotivationSection compact />
 
       <div className="container section-sm">
         {/* Filters + Cart button */}

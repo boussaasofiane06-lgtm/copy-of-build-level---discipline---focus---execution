@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { MountainLegacySection } from "../components/PromoVisualSections";
 import { publicApi, DigitalProduct } from "../lib/api";
 
 export default function Digital() {
@@ -38,6 +39,8 @@ export default function Digital() {
           <p style={{ color: "var(--text2)" }}>Guides, frameworks, and tools to level up your execution.</p>
         </div>
       </div>
+
+      <MountainLegacySection title="Stay Focused." />
 
       <div className="container section-sm">
         {loading ? (

@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
-import { motion, useReducedMotion } from "framer-motion";
-import { AmbientBackground, Reveal } from "../components/Motion";
+import { useReducedMotion } from "framer-motion";
+import { Reveal } from "../components/Motion";
+import { BuildLevelHero, GymMotivationSection, MountainLegacySection } from "../components/PromoVisualSections";
 import { publicApi, Product } from "../lib/api";
 
 export default function Home() {
@@ -15,51 +16,7 @@ export default function Home() {
   return (
     <div className="page-chrome">
       {/* Hero */}
-      <section style={{
-        minHeight: "90vh", display: "flex", alignItems: "center",
-        background: "linear-gradient(135deg, #0a0a0a 0%, #1a0a0a 50%, #0a0a0a 100%)",
-        position: "relative", overflow: "hidden",
-      }}>
-        <AmbientBackground />
-        <motion.div
-          className="cinematic-grid"
-          animate={reduceMotion ? undefined : { backgroundPosition: ["0px 0px", "42px 42px"] }}
-          transition={{ duration: 18, repeat: Infinity, ease: "linear" }}
-        />
-        <div className="container" style={{ position: "relative", zIndex: 1 }}>
-          <Reveal style={{ maxWidth: 720 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 24 }}>
-              <motion.div
-                style={{ width: 40, height: 2, background: "var(--red)", transformOrigin: "left" }}
-                initial={reduceMotion ? undefined : { scaleX: 0 }}
-                animate={reduceMotion ? undefined : { scaleX: 1 }}
-                transition={{ duration: 0.65, ease: [0.22, 1, 0.36, 1] }}
-              />
-              <span style={{ fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.2em", color: "var(--red)", textTransform: "uppercase" }}>
-                The Standard
-              </span>
-            </div>
-            <h1 style={{ marginBottom: 24, lineHeight: 1 }}>
-              Build With<br />
-              <motion.span
-                className="hero-title-accent"
-                animate={reduceMotion ? undefined : { textShadow: ["0 0 16px rgba(192,57,43,0.12)", "0 0 34px rgba(192,57,43,0.34)", "0 0 16px rgba(192,57,43,0.12)"] }}
-                transition={{ duration: 4.8, repeat: Infinity, ease: "easeInOut" }}
-              >
-                Discipline.
-              </motion.span><br />
-              Execute With<br />Purpose.
-            </h1>
-            <p style={{ color: "var(--text2)", fontSize: "1.1rem", maxWidth: 480, marginBottom: 40, lineHeight: 1.7 }}>
-              Premium streetwear and digital resources for those who refuse to settle. Every piece is built for the builder.
-            </p>
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap" }}>
-              <Link to="/shop" className="btn btn-primary btn-lg">Shop Collection</Link>
-              <Link to="/digital" className="btn btn-outline btn-lg">Digital Resources</Link>
-            </div>
-          </Reveal>
-        </div>
-      </section>
+      <BuildLevelHero />
 
       {/* Ticker */}
       <div style={{ background: "var(--red)", padding: "12px 0", overflow: "hidden" }}>
@@ -109,6 +66,8 @@ export default function Home() {
         </section>
       )}
 
+      <GymMotivationSection />
+
       {/* Mission */}
       <section className="section" style={{ background: "var(--bg2)" }}>
         <div className="container">
@@ -122,6 +81,8 @@ export default function Home() {
           </Reveal>
         </div>
       </section>
+
+      <MountainLegacySection />
 
       {/* CTA */}
       <section className="section">

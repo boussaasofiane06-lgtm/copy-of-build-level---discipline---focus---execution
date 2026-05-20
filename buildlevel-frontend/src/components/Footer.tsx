@@ -1,9 +1,18 @@
 import { Link } from "react-router-dom";
+import { PROMO_IMAGES } from "./PromoVisualSections";
 
 export default function Footer() {
   return (
     <footer style={{ background: "var(--bg2)", borderTop: "1px solid var(--border)", padding: "48px 0 24px" }}>
       <div className="container">
+        <div className="footer-legacy-card">
+          <img src={PROMO_IMAGES.mountain} alt="Build Level mountain legacy" loading="lazy" decoding="async" />
+          <div className="footer-legacy-card__shade" aria-hidden="true" />
+          <div>
+            <div style={{ fontFamily: "var(--font-display)", color: "var(--red)", letterSpacing: "0.18em", fontSize: "0.72rem", textTransform: "uppercase", marginBottom: 8 }}>Built Different</div>
+            <h2 style={{ marginBottom: 8 }}>Stay Focused. Execute Daily.</h2>
+          </div>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 40, marginBottom: 40 }}>
           <div>
             <div style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 12 }}>
