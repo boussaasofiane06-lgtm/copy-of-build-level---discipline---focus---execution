@@ -35,6 +35,29 @@ export default function Navbar() {
     setMenuOpen(false);
   }, [location]);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMenuOpen(false);
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [menuOpen]);
+
+  const handleOpenCart = () => {
+    setMenuOpen(false);
+    openCart();
+  };
+
   return (
     <>
       <div className="fixed top-0 left-0 right-0 z-[60]">
@@ -61,6 +84,7 @@ export default function Navbar() {
                   className={`nav-link text-[11px] ${
                     location === link.href ? "text-[#FF6B00]" : ""
                   }`}
+                  aria-current={location === link.href ? "page" : undefined}
                 >
                   {link.label}
                 </span>
@@ -72,7 +96,8 @@ export default function Navbar() {
           <div className="flex items-center gap-4">
             {/* Cart Icon */}
             <button
-              onClick={openCart}
+              type="button"
+              onClick={handleOpenCart}
               className="relative text-white hover:text-[#FF6B00] transition-colors"
               aria-label="Open cart"
             >
@@ -90,9 +115,12 @@ export default function Navbar() {
               </span>
             </Link>
             <button
+              type="button"
               className="md:hidden text-white"
               onClick={() => setMenuOpen(!menuOpen)}
-              aria-label="Toggle menu"
+              aria-label={menuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={menuOpen}
+              aria-controls="mobile-menu"
             >
               {menuOpen ? <X size={22} /> : <Menu size={22} />}
             </button>
@@ -102,6 +130,8 @@ export default function Navbar() {
 
       {/* Mobile Menu */}
       <div
+        id="mobile-menu"
+        aria-hidden={!menuOpen}
         className={`fixed inset-0 z-40 bg-[#2A2A2A] flex flex-col items-center justify-center transition-all duration-300 ${
           menuOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
         }`}

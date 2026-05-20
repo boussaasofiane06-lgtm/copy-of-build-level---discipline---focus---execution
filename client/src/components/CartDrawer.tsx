@@ -2,10 +2,14 @@ import { X, Plus, Minus, ShoppingBag } from "lucide-react";
 import { useCart, CURRENCY_SYMBOLS, type Currency } from "@/contexts/CartContext";
 import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
+import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 
 const CURRENCIES: Currency[] = ["USD", "GBP", "EUR", "CAD", "AUD"];
 
 export default function CartDrawer() {
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
+  const closeCartRef = useRef<() => void>(() => {});
   const {
     items,
     isOpen,
@@ -19,7 +23,28 @@ export default function CartDrawer() {
     setCurrency,
   } = useCart();
 
-  return (
+  closeCartRef.current = closeCart;
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    closeButtonRef.current?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeCartRef.current();
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [isOpen]);
+
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <>
@@ -28,7 +53,8 @@ export default function CartDrawer() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/70 z-50"
+            className="fixed inset-0 bg-black/70 z-[80]"
+            aria-hidden="true"
             onClick={closeCart}
           />
 
@@ -38,19 +64,24 @@ export default function CartDrawer() {
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
             transition={{ type: "tween", duration: 0.3 }}
-            className="fixed right-0 top-0 h-full w-full max-w-md bg-[#1A1A1A] z-50 flex flex-col"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="cart-drawer-title"
+            className="fixed right-0 top-0 h-full w-full max-w-md bg-[#1A1A1A] z-[90] flex flex-col shadow-[-24px_0_60px_rgba(0,0,0,0.45)]"
           >
             {/* Header */}
             <div className="flex items-center justify-between px-6 py-5 border-b border-white/10">
               <div className="flex items-center gap-3">
                 <ShoppingBag size={20} className="text-[#FF6B00]" />
-                <span className="font-display text-sm tracking-widest text-white">
+                <span id="cart-drawer-title" className="font-display text-sm tracking-widest text-white">
                   YOUR CART ({totalItems})
                 </span>
               </div>
               <button
+                ref={closeButtonRef}
                 onClick={closeCart}
                 className="text-[#888] hover:text-white transition-colors"
+                aria-label="Close cart"
               >
                 <X size={20} />
               </button>
@@ -123,6 +154,7 @@ export default function CartDrawer() {
                                 updateQuantity(item.id, item.size, item.quantity - 1)
                               }
                               className="w-7 h-7 border border-white/20 flex items-center justify-center text-[#888] hover:border-[#FF6B00] hover:text-white transition-all"
+                              aria-label={`Decrease quantity for ${item.name}`}
                             >
                               <Minus size={12} />
                             </button>
@@ -134,6 +166,7 @@ export default function CartDrawer() {
                                 updateQuantity(item.id, item.size, item.quantity + 1)
                               }
                               className="w-7 h-7 border border-white/20 flex items-center justify-center text-[#888] hover:border-[#FF6B00] hover:text-white transition-all"
+                              aria-label={`Increase quantity for ${item.name}`}
                             >
                               <Plus size={12} />
                             </button>
@@ -145,6 +178,7 @@ export default function CartDrawer() {
                             <button
                               onClick={() => removeItem(item.id, item.size)}
                               className="text-[#555] hover:text-red-400 transition-colors"
+                              aria-label={`Remove ${item.name} from cart`}
                             >
                               <X size={14} />
                             </button>
@@ -185,6 +219,7 @@ export default function CartDrawer() {
           </motion.div>
         </>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 }
