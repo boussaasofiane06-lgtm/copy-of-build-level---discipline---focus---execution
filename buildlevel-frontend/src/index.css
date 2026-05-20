@@ -207,8 +207,9 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 }
 
 .promo-hero__image {
-  object-position: center 35%;
+  object-position: 72% center;
   transform: scale(1.02);
+  filter: brightness(0.92) contrast(1.05) saturate(1.04);
 }
 
 .promo-hero__shade,
@@ -221,8 +222,9 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 
 .promo-hero__shade {
   background:
-    linear-gradient(90deg, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.58) 44%, rgba(0,0,0,0.22) 100%),
-    linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.72));
+    linear-gradient(90deg, rgba(0,0,0,0.92) 0%, rgba(0,0,0,0.68) 38%, rgba(0,0,0,0.22) 76%, rgba(0,0,0,0.38) 100%),
+    linear-gradient(180deg, rgba(0,0,0,0.18), rgba(0,0,0,0.76)),
+    radial-gradient(circle at 18% 48%, rgba(192,57,43,0.2), transparent 42%);
 }
 
 .promo-hero__content {
@@ -244,8 +246,8 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 .promo-hero__headline {
   max-width: 860px;
   margin-bottom: 24px;
-  color: var(--text);
-  text-shadow: 0 0 34px rgba(192,57,43,0.22);
+  color: #fff;
+  text-shadow: 0 3px 22px rgba(0,0,0,0.72), 0 0 34px rgba(192,57,43,0.22);
 }
 
 .promo-hero__headline span {
@@ -254,10 +256,39 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 
 .promo-hero__copy {
   max-width: 560px;
-  color: var(--text2);
+  color: rgba(240,237,232,0.88);
   font-size: 1.08rem;
   line-height: 1.75;
   margin-bottom: 38px;
+  text-shadow: 0 2px 16px rgba(0,0,0,0.66);
+}
+
+.promo-readable-panel {
+  position: relative;
+  border: 1px solid rgba(255,255,255,0.08);
+  background:
+    linear-gradient(135deg, rgba(8,8,8,0.68), rgba(8,8,8,0.38)),
+    radial-gradient(circle at 12% 12%, rgba(192,57,43,0.12), transparent 42%);
+  box-shadow: 0 22px 70px rgba(0,0,0,0.32);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.promo-readable-panel--hero {
+  max-width: 760px;
+  padding: clamp(22px, 4vw, 42px);
+  border-radius: 18px;
+}
+
+.promo-readable-panel--split {
+  padding: clamp(18px, 3vw, 30px);
+  border-radius: 16px;
+}
+
+.promo-readable-panel--legacy {
+  max-width: 760px;
+  padding: clamp(22px, 4vw, 38px);
+  border-radius: 18px;
 }
 
 .promo-hero__actions {
@@ -320,7 +351,19 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   height: 100%;
   min-height: 360px;
   object-fit: cover;
+  object-position: 58% center;
+  filter: brightness(0.9) contrast(1.07) saturate(1.06);
   transition: transform 0.7s ease, filter 0.7s ease;
+}
+
+.promo-split__media::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(180deg, rgba(0,0,0,0.04), rgba(0,0,0,0.24)),
+    radial-gradient(circle at 78% 70%, rgba(192,57,43,0.18), transparent 42%);
 }
 
 .promo-split__glow {
@@ -336,10 +379,12 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 
 .promo-split__content h2 {
   margin-bottom: 18px;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0,0,0,0.42);
 }
 
 .promo-split__content p {
-  color: var(--text2);
+  color: rgba(240,237,232,0.78);
   line-height: 1.8;
   margin-bottom: 24px;
 }
@@ -371,8 +416,14 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 
 .legacy-banner__shade {
   background:
-    linear-gradient(180deg, rgba(0,0,0,0.35), rgba(0,0,0,0.78)),
-    radial-gradient(circle at center, rgba(192,57,43,0.18), transparent 55%);
+    linear-gradient(90deg, rgba(0,0,0,0.62), rgba(0,0,0,0.36), rgba(0,0,0,0.68)),
+    linear-gradient(180deg, rgba(0,0,0,0.28), rgba(0,0,0,0.78)),
+    radial-gradient(circle at center, rgba(192,57,43,0.16), transparent 58%);
+}
+
+.legacy-banner__image {
+  object-position: center 44%;
+  filter: brightness(0.86) contrast(1.08) saturate(1.02);
 }
 
 .legacy-banner__content {
@@ -383,6 +434,8 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 
 .legacy-banner__content h2 {
   margin-bottom: 20px;
+  color: #fff;
+  text-shadow: 0 2px 18px rgba(0,0,0,0.66);
 }
 
 .legacy-banner__lines {
@@ -393,7 +446,7 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 }
 
 .legacy-banner__lines span {
-  color: var(--text2);
+  color: rgba(240,237,232,0.84);
   font-family: var(--font-display);
   letter-spacing: 0.16em;
   text-transform: uppercase;
@@ -424,12 +477,14 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
 
 .footer-legacy-card img {
   object-fit: cover;
+  object-position: 50% 46%;
+  filter: brightness(0.86) contrast(1.05);
 }
 
 .footer-legacy-card__shade {
   background:
-    linear-gradient(90deg, rgba(0,0,0,0.84), rgba(0,0,0,0.36)),
-    linear-gradient(180deg, transparent, rgba(0,0,0,0.78));
+    linear-gradient(90deg, rgba(0,0,0,0.86), rgba(0,0,0,0.42), rgba(0,0,0,0.72)),
+    linear-gradient(180deg, transparent, rgba(0,0,0,0.82));
 }
 
 .footer-legacy-card > div:not(.footer-legacy-card__shade) {
@@ -571,18 +626,31 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
   }
   .promo-hero { min-height: 78vh; }
   .promo-hero__content { padding-top: 72px; padding-bottom: 72px; }
+  .promo-hero__image {
+    object-position: 64% center;
+    filter: brightness(0.82) contrast(1.08) saturate(1.04);
+  }
   .promo-hero__shade {
     background:
-      linear-gradient(180deg, rgba(0,0,0,0.72), rgba(0,0,0,0.84)),
-      linear-gradient(90deg, rgba(0,0,0,0.72), rgba(0,0,0,0.28));
+      linear-gradient(180deg, rgba(0,0,0,0.64), rgba(0,0,0,0.86)),
+      linear-gradient(90deg, rgba(0,0,0,0.82), rgba(0,0,0,0.34)),
+      radial-gradient(circle at 28% 44%, rgba(192,57,43,0.16), transparent 48%);
   }
   .promo-hero__copy { font-size: 0.98rem; }
+  .promo-readable-panel--hero {
+    background:
+      linear-gradient(135deg, rgba(8,8,8,0.78), rgba(8,8,8,0.48)),
+      radial-gradient(circle at 12% 12%, rgba(192,57,43,0.14), transparent 42%);
+  }
   .promo-split { padding: 56px 0; }
   .promo-split__grid { grid-template-columns: 1fr; }
   .promo-split__media,
   .promo-split__media img { min-height: 280px; }
+  .promo-split__media img { object-position: 62% center; }
   .legacy-banner { min-height: 340px; }
+  .legacy-banner__image { object-position: 52% center; filter: brightness(0.78) contrast(1.08); }
   .footer-legacy-card { min-height: 260px; padding: 22px; }
+  .footer-legacy-card img { object-position: 56% center; }
   .about-values-grid { grid-template-columns: 1fr !important; }
 }
 
