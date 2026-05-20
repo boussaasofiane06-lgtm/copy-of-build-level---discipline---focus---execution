@@ -1,6 +1,7 @@
 import { Router, Request, Response } from "express";
 import { eq, asc } from "drizzle-orm";
 import { z } from "zod";
+import Stripe from "stripe";
 import { getDb } from "../db/index.js";
 import {
   products, blogPosts, digitalProducts, affiliateProducts,
@@ -9,6 +10,76 @@ import {
 import { requireAdmin, verifyAdminPassword, signAdminToken, ADMIN_COOKIE } from "../middleware/adminAuth.js";
 
 const router = Router();
+
+const SHOPIFY_API_VERSION = "2024-01";
+
+const SOCIAL_PLATFORMS = [
+  "instagram",
+  "facebook",
+  "tiktok",
+  "youtube",
+  "x",
+  "pinterest",
+] as const;
+
+type SocialPlatform = typeof SOCIAL_PLATFORMS[number];
+
+const integrationSettingKeys = [
+  "tidio_enabled",
+  "tidio_public_key",
+  "tidio_chat_controls",
+  "tidio_chatbot_settings",
+  "social_scheduler_enabled",
+  "social_campaign_name",
+  "social_sharing_enabled",
+  ...SOCIAL_PLATFORMS.flatMap((platform) => [
+    `social_${platform}_enabled`,
+    `social_${platform}_handle`,
+    `social_${platform}_url`,
+    `social_${platform}_analytics_enabled`,
+  ]),
+];
+
+async function getSettingsMap(keys?: string[]) {
+  const db = await getDb();
+  const rows = await db.select().from(siteSettings);
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    if (!keys || keys.includes(row.key)) map[row.key] = row.value ?? "";
+  }
+  return map;
+}
+
+async function saveSetting(key: string, value: string) {
+  const db = await getDb();
+  const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).limit(1);
+  if (existing.length > 0) {
+    await db.update(siteSettings).set({ value, updatedAt: new Date() }).where(eq(siteSettings.key, key));
+  } else {
+    await db.insert(siteSettings).values({ key, value, updatedAt: new Date() });
+  }
+}
+
+function maskSecret(value?: string | null) {
+  if (!value) return "";
+  if (value.length <= 8) return "configured";
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+function getStripeClient() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return null;
+  return new Stripe(key, { apiVersion: "2025-01-27.acacia" as any });
+}
+
+function socialEnvStatus(platform: SocialPlatform) {
+  const upper = platform === "x" ? "X" : platform.toUpperCase();
+  return {
+    clientIdConfigured: !!process.env[`${upper}_CLIENT_ID`],
+    clientSecretConfigured: !!process.env[`${upper}_CLIENT_SECRET`],
+    accessTokenConfigured: !!process.env[`${upper}_ACCESS_TOKEN`],
+  };
+}
 
 // ─── Login ────────────────────────────────────────────────────────────────────
 router.post("/login", (req: Request, res: Response) => {
@@ -292,6 +363,260 @@ router.post("/settings/bulk", requireAdmin, async (req: Request, res: Response) 
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Integration Management ───────────────────────────────────────────────────
+router.get("/integrations/overview", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const settings = await getSettingsMap(integrationSettingKeys);
+    const { storeUrl, apiKey: shopifyApiKey } = await getShopifyCredentials();
+    const { apiKey: printifyApiKey, shopId: printifyShopId } = await getPrintifyCredentials();
+    const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+    const stripeWebhookConfigured = !!process.env.STRIPE_WEBHOOK_SECRET;
+
+    res.json({
+      generatedAt: new Date().toISOString(),
+      integrations: {
+        shopify: {
+          connected: !!(storeUrl && shopifyApiKey),
+          storeUrl,
+          token: maskSecret(shopifyApiKey),
+          capabilities: ["products", "inventory", "orders", "customers", "webhooks"],
+        },
+        printify: {
+          connected: !!(printifyApiKey && printifyShopId),
+          shopId: printifyShopId,
+          token: maskSecret(printifyApiKey),
+          capabilities: ["publishing", "fulfillment", "orders", "inventory"],
+        },
+        stripe: {
+          connected: stripeConfigured,
+          webhookConfigured: stripeWebhookConfigured,
+          key: maskSecret(process.env.STRIPE_SECRET_KEY),
+          capabilities: ["payments", "transactions", "webhooks", "financial reporting"],
+        },
+        tidio: {
+          enabled: settings.tidio_enabled === "true",
+          configured: !!settings.tidio_public_key,
+          publicKey: maskSecret(settings.tidio_public_key),
+          capabilities: ["chat controls", "chatbot settings", "support analytics"],
+        },
+        social: SOCIAL_PLATFORMS.map((platform) => ({
+          platform,
+          enabled: settings[`social_${platform}_enabled`] === "true",
+          handle: settings[`social_${platform}_handle`] || "",
+          url: settings[`social_${platform}_url`] || "",
+          analyticsEnabled: settings[`social_${platform}_analytics_enabled`] === "true",
+          oauth: socialEnvStatus(platform),
+        })),
+      },
+      automation: {
+        socialSchedulerEnabled: settings.social_scheduler_enabled === "true",
+        campaignName: settings.social_campaign_name || "",
+        socialSharingEnabled: settings.social_sharing_enabled === "true",
+      },
+      system: {
+        cloudflarePagesCompatible: true,
+        renderApiCompatible: true,
+        railwayDatabaseCompatible: true,
+        publicStorefrontExposure: false,
+      },
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/integrations/stripe/dashboard", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const stripe = getStripeClient();
+    if (!stripe) {
+      res.json({
+        connected: false,
+        balance: null,
+        payments: [],
+        sessions: [],
+        message: "STRIPE_SECRET_KEY is not configured",
+      });
+      return;
+    }
+
+    const [balance, payments, sessions] = await Promise.all([
+      stripe.balance.retrieve(),
+      stripe.paymentIntents.list({ limit: 10 }),
+      stripe.checkout.sessions.list({ limit: 10 }),
+    ]);
+
+    res.json({
+      connected: true,
+      webhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
+      balance,
+      payments: payments.data.map((payment) => ({
+        id: payment.id,
+        amount: payment.amount,
+        currency: payment.currency,
+        status: payment.status,
+        created: payment.created,
+        customer: payment.customer,
+      })),
+      sessions: sessions.data.map((session) => ({
+        id: session.id,
+        amountTotal: session.amount_total,
+        currency: session.currency,
+        paymentStatus: session.payment_status,
+        customerEmail: session.customer_details?.email || session.customer_email,
+        created: session.created,
+      })),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/integrations/tidio/config", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const settings = await getSettingsMap(integrationSettingKeys);
+    res.json({
+      enabled: settings.tidio_enabled === "true",
+      publicKey: settings.tidio_public_key || "",
+      chatControls: settings.tidio_chat_controls || "manual",
+      chatbotSettings: settings.tidio_chatbot_settings || "",
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/integrations/tidio/config", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const schema = z.object({
+      enabled: z.boolean().default(false),
+      publicKey: z.string().optional().default(""),
+      chatControls: z.string().optional().default("manual"),
+      chatbotSettings: z.string().optional().default(""),
+    });
+    const data = schema.parse(req.body);
+    await saveSetting("tidio_enabled", String(data.enabled));
+    await saveSetting("tidio_public_key", data.publicKey);
+    await saveSetting("tidio_chat_controls", data.chatControls);
+    await saveSetting("tidio_chatbot_settings", data.chatbotSettings);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.get("/integrations/social/settings", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const settings = await getSettingsMap(integrationSettingKeys);
+    res.json({
+      schedulerEnabled: settings.social_scheduler_enabled === "true",
+      campaignName: settings.social_campaign_name || "",
+      socialSharingEnabled: settings.social_sharing_enabled === "true",
+      platforms: SOCIAL_PLATFORMS.map((platform) => ({
+        platform,
+        enabled: settings[`social_${platform}_enabled`] === "true",
+        handle: settings[`social_${platform}_handle`] || "",
+        url: settings[`social_${platform}_url`] || "",
+        analyticsEnabled: settings[`social_${platform}_analytics_enabled`] === "true",
+        oauth: socialEnvStatus(platform),
+      })),
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/integrations/social/settings", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const schema = z.object({
+      schedulerEnabled: z.boolean().default(false),
+      campaignName: z.string().optional().default(""),
+      socialSharingEnabled: z.boolean().default(false),
+      platforms: z.array(z.object({
+        platform: z.enum(SOCIAL_PLATFORMS),
+        enabled: z.boolean().default(false),
+        handle: z.string().optional().default(""),
+        url: z.string().optional().default(""),
+        analyticsEnabled: z.boolean().default(false),
+      })).default([]),
+    });
+    const data = schema.parse(req.body);
+    await saveSetting("social_scheduler_enabled", String(data.schedulerEnabled));
+    await saveSetting("social_campaign_name", data.campaignName);
+    await saveSetting("social_sharing_enabled", String(data.socialSharingEnabled));
+    for (const platform of data.platforms) {
+      await saveSetting(`social_${platform.platform}_enabled`, String(platform.enabled));
+      await saveSetting(`social_${platform.platform}_handle`, platform.handle);
+      await saveSetting(`social_${platform.platform}_url`, platform.url);
+      await saveSetting(`social_${platform.platform}_analytics_enabled`, String(platform.analyticsEnabled));
+    }
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+router.get("/integrations/social/oauth/:platform", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const platform = req.params.platform as SocialPlatform;
+    if (!SOCIAL_PLATFORMS.includes(platform)) {
+      res.status(404).json({ error: "Unsupported platform" });
+      return;
+    }
+
+    const env = socialEnvStatus(platform);
+    res.json({
+      platform,
+      configured: env.clientIdConfigured && env.clientSecretConfigured,
+      setupRequired: !(env.clientIdConfigured && env.clientSecretConfigured),
+      message: env.clientIdConfigured && env.clientSecretConfigured
+        ? "OAuth credentials are configured. Add provider-specific redirect URL handling before connecting live accounts."
+        : "Set provider CLIENT_ID and CLIENT_SECRET environment variables before connecting this account.",
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/integrations/test/:provider", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const provider = req.params.provider;
+    if (provider === "shopify") {
+      const { storeUrl, apiKey } = await getShopifyCredentials();
+      if (!storeUrl || !apiKey) { res.json({ ok: false, message: "Shopify credentials not configured" }); return; }
+      const url = storeUrl.startsWith("http") ? storeUrl : `https://${storeUrl}`;
+      const response = await fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/shop.json`, {
+        headers: { "X-Shopify-Access-Token": apiKey },
+      });
+      res.json({ ok: response.ok, status: response.status, message: response.ok ? "Shopify connected" : "Shopify connection failed" });
+      return;
+    }
+    if (provider === "printify") {
+      const { apiKey } = await getPrintifyCredentials();
+      if (!apiKey) { res.json({ ok: false, message: "Printify API key not configured" }); return; }
+      const response = await fetch("https://api.printify.com/v1/shops.json", {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      });
+      res.json({ ok: response.ok, status: response.status, message: response.ok ? "Printify connected" : "Printify connection failed" });
+      return;
+    }
+    if (provider === "stripe") {
+      const stripe = getStripeClient();
+      if (!stripe) { res.json({ ok: false, message: "STRIPE_SECRET_KEY not configured" }); return; }
+      await stripe.balance.retrieve();
+      res.json({ ok: true, message: "Stripe connected" });
+      return;
+    }
+    if (provider === "tidio") {
+      const settings = await getSettingsMap(["tidio_public_key"]);
+      res.json({ ok: !!settings.tidio_public_key, message: settings.tidio_public_key ? "Tidio public key configured" : "Tidio public key missing" });
+      return;
+    }
+    res.status(404).json({ error: "Unsupported provider" });
+  } catch (e: any) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
 // ─── Printify Proxy ───────────────────────────────────────────────────────────
 // Proxies requests to Printify API using stored credentials
 async function getPrintifyCredentials() {
@@ -301,8 +626,8 @@ async function getPrintifyCredentials() {
   const shopRows = await db.select().from(siteSettings)
     .where(eq(siteSettings.key, 'printify_shop_id'));
   return {
-    apiKey: rows[0]?.value || '',
-    shopId: shopRows[0]?.value || '',
+    apiKey: process.env.PRINTIFY_API_KEY || rows[0]?.value || '',
+    shopId: process.env.PRINTIFY_SHOP_ID || shopRows[0]?.value || '',
   };
 }
 
@@ -374,8 +699,8 @@ async function getShopifyCredentials() {
   const urlRows = await db.select().from(siteSettings).where(eq(siteSettings.key, 'shopify_store_url'));
   const keyRows = await db.select().from(siteSettings).where(eq(siteSettings.key, 'shopify_api_key'));
   return {
-    storeUrl: urlRows[0]?.value || '',
-    apiKey: keyRows[0]?.value || '',
+    storeUrl: process.env.SHOPIFY_STORE_URL || urlRows[0]?.value || '',
+    apiKey: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || keyRows[0]?.value || '',
   };
 }
 

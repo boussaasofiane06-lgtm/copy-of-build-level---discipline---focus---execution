@@ -79,6 +79,71 @@ export interface DigitalProduct {
   createdAt: string;
 }
 
+export interface IntegrationOverview {
+  generatedAt: string;
+  integrations: {
+    shopify: { connected: boolean; storeUrl: string; token: string; capabilities: string[] };
+    printify: { connected: boolean; shopId: string; token: string; capabilities: string[] };
+    stripe: { connected: boolean; webhookConfigured: boolean; key: string; capabilities: string[] };
+    tidio: { enabled: boolean; configured: boolean; publicKey: string; capabilities: string[] };
+    social: SocialPlatformSetting[];
+  };
+  automation: {
+    socialSchedulerEnabled: boolean;
+    campaignName: string;
+    socialSharingEnabled: boolean;
+  };
+  system: {
+    cloudflarePagesCompatible: boolean;
+    renderApiCompatible: boolean;
+    railwayDatabaseCompatible: boolean;
+    publicStorefrontExposure: boolean;
+  };
+}
+
+export interface SocialPlatformSetting {
+  platform: "instagram" | "facebook" | "tiktok" | "youtube" | "x" | "pinterest";
+  enabled: boolean;
+  handle: string;
+  url: string;
+  analyticsEnabled: boolean;
+  oauth?: {
+    clientIdConfigured: boolean;
+    clientSecretConfigured: boolean;
+    accessTokenConfigured: boolean;
+  };
+}
+
+export interface TidioConfig {
+  enabled: boolean;
+  publicKey: string;
+  chatControls: string;
+  chatbotSettings: string;
+}
+
+export interface StripeDashboard {
+  connected: boolean;
+  webhookConfigured?: boolean;
+  balance?: unknown;
+  payments: Array<{
+    id: string;
+    amount: number;
+    currency: string;
+    status: string;
+    created: number;
+    customer?: unknown;
+  }>;
+  sessions: Array<{
+    id: string;
+    amountTotal: number | null;
+    currency: string | null;
+    paymentStatus: string;
+    customerEmail?: string | null;
+    created: number;
+  }>;
+  message?: string;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -134,4 +199,23 @@ export const adminApi = {
   getSettings: () => api.get<Record<string, string>>("/admin/settings").then(r => r.data),
   setSetting: (key: string, value: string) =>
     api.post("/admin/settings", { key, value }).then(r => r.data),
+
+  // Integrations
+  getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),
+  testIntegration: (provider: string) => api.post<{ ok: boolean; message?: string; status?: number; error?: string }>(`/admin/integrations/test/${provider}`).then(r => r.data),
+  getStripeDashboard: () => api.get<StripeDashboard>("/admin/integrations/stripe/dashboard").then(r => r.data),
+  getTidioConfig: () => api.get<TidioConfig>("/admin/integrations/tidio/config").then(r => r.data),
+  saveTidioConfig: (data: TidioConfig) => api.post<{ success: true }>("/admin/integrations/tidio/config", data).then(r => r.data),
+  getSocialSettings: () => api.get<{
+    schedulerEnabled: boolean;
+    campaignName: string;
+    socialSharingEnabled: boolean;
+    platforms: SocialPlatformSetting[];
+  }>("/admin/integrations/social/settings").then(r => r.data),
+  saveSocialSettings: (data: {
+    schedulerEnabled: boolean;
+    campaignName: string;
+    socialSharingEnabled: boolean;
+    platforms: SocialPlatformSetting[];
+  }) => api.post<{ success: true }>("/admin/integrations/social/settings", data).then(r => r.data),
 };
