@@ -144,6 +144,15 @@ export interface StripeDashboard {
   message?: string;
 }
 
+export interface ExternalSyncResponse {
+  success?: boolean;
+  summary?: Record<string, number>;
+  products?: unknown;
+  orders?: unknown;
+  customers?: unknown;
+  webhooks?: unknown;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -203,6 +212,19 @@ export const adminApi = {
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),
   testIntegration: (provider: string) => api.post<{ ok: boolean; message?: string; status?: number; error?: string }>(`/admin/integrations/test/${provider}`).then(r => r.data),
+  saveShopifyCredentials: (data: { storeUrl: string; apiKey: string }) => api.post<{ success: true }>("/admin/shopify/credentials", data).then(r => r.data),
+  getShopifyProducts: () => api.get<unknown>("/admin/shopify/products").then(r => r.data),
+  getShopifyOrders: () => api.get<unknown>("/admin/shopify/orders").then(r => r.data),
+  getShopifyCustomers: () => api.get<unknown>("/admin/shopify/customers").then(r => r.data),
+  getShopifyInventory: () => api.get<unknown>("/admin/shopify/inventory").then(r => r.data),
+  getShopifyWebhooks: () => api.get<unknown>("/admin/shopify/webhooks").then(r => r.data),
+  syncShopify: () => api.get<ExternalSyncResponse>("/admin/shopify/sync").then(r => r.data),
+  savePrintifyCredentials: (data: { apiKey: string; shopId: string }) => api.post<{ success: true }>("/admin/printify/credentials", data).then(r => r.data),
+  getPrintifyProducts: () => api.get<unknown>("/admin/printify/products").then(r => r.data),
+  getPrintifyOrders: () => api.get<unknown>("/admin/printify/orders").then(r => r.data),
+  getPrintifyInventory: () => api.get<unknown>("/admin/printify/inventory").then(r => r.data),
+  syncPrintify: () => api.get<ExternalSyncResponse>("/admin/printify/sync").then(r => r.data),
+  publishPrintifyProduct: (printifyProductId: string) => api.post<{ success: boolean; data?: unknown }>("/admin/printify/publish", { printifyProductId }).then(r => r.data),
   getStripeDashboard: () => api.get<StripeDashboard>("/admin/integrations/stripe/dashboard").then(r => r.data),
   getTidioConfig: () => api.get<TidioConfig>("/admin/integrations/tidio/config").then(r => r.data),
   saveTidioConfig: (data: TidioConfig) => api.post<{ success: true }>("/admin/integrations/tidio/config", data).then(r => r.data),

@@ -127,6 +127,10 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
   const [stripeDashboard, setStripeDashboard] = useState<StripeDashboard | null>(null);
   const [tidio, setTidio] = useState<TidioConfig>(defaultTidio);
   const [social, setSocial] = useState(defaultSocial);
+  const [shopifyCredentials, setShopifyCredentials] = useState({ storeUrl: "", apiKey: "" });
+  const [printifyCredentials, setPrintifyCredentials] = useState({ apiKey: "", shopId: "" });
+  const [shopifySnapshot, setShopifySnapshot] = useState<Record<string, unknown>>({});
+  const [printifySnapshot, setPrintifySnapshot] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState<string>("");
 
@@ -149,6 +153,8 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
       setStripeDashboard(stripeData);
       setTidio(tidioData);
       setSocial(socialData);
+      setShopifyCredentials((current) => ({ ...current, storeUrl: overviewData.integrations.shopify.storeUrl || current.storeUrl }));
+      setPrintifyCredentials((current) => ({ ...current, shopId: overviewData.integrations.printify.shopId || current.shopId }));
     } catch {
       showToast("Error loading integrations");
     } finally {
@@ -183,6 +189,76 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     }
   };
 
+  const saveShopify = async () => {
+    try {
+      await adminApi.saveShopifyCredentials(shopifyCredentials);
+      showToast("Shopify credentials saved");
+      loadIntegrations();
+    } catch {
+      showToast("Error saving Shopify credentials");
+    }
+  };
+
+  const savePrintify = async () => {
+    try {
+      await adminApi.savePrintifyCredentials(printifyCredentials);
+      showToast("Printify credentials saved");
+      loadIntegrations();
+    } catch {
+      showToast("Error saving Printify credentials");
+    }
+  };
+
+  const runShopifyAction = async (action: "products" | "orders" | "customers" | "inventory" | "webhooks" | "sync") => {
+    setTesting(`shopify-${action}`);
+    try {
+      const data =
+        action === "products" ? await adminApi.getShopifyProducts() :
+        action === "orders" ? await adminApi.getShopifyOrders() :
+        action === "customers" ? await adminApi.getShopifyCustomers() :
+        action === "inventory" ? await adminApi.getShopifyInventory() :
+        action === "webhooks" ? await adminApi.getShopifyWebhooks() :
+        await adminApi.syncShopify();
+      setShopifySnapshot((current) => ({ ...current, [action]: data }));
+      showToast(`Shopify ${action} loaded`);
+    } catch {
+      showToast(`Shopify ${action} needs configuration`);
+    } finally {
+      setTesting("");
+    }
+  };
+
+  const runPrintifyAction = async (action: "products" | "orders" | "inventory" | "sync") => {
+    setTesting(`printify-${action}`);
+    try {
+      const data =
+        action === "products" ? await adminApi.getPrintifyProducts() :
+        action === "orders" ? await adminApi.getPrintifyOrders() :
+        action === "inventory" ? await adminApi.getPrintifyInventory() :
+        await adminApi.syncPrintify();
+      setPrintifySnapshot((current) => ({ ...current, [action]: data }));
+      showToast(`Printify ${action} loaded`);
+    } catch {
+      showToast(`Printify ${action} needs configuration`);
+    } finally {
+      setTesting("");
+    }
+  };
+
+  const publishPrintify = async () => {
+    const printifyProductId = prompt("Printify product ID to publish");
+    if (!printifyProductId) return;
+    setTesting("printify-publish");
+    try {
+      const result = await adminApi.publishPrintifyProduct(printifyProductId);
+      showToast(result.success ? "Printify product publish requested" : "Printify publish failed");
+    } catch {
+      showToast("Printify publish needs configuration");
+    } finally {
+      setTesting("");
+    }
+  };
+
   const saveSocial = async () => {
     try {
       await adminApi.saveSocialSettings(social);
@@ -199,6 +275,26 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
       platforms: current.platforms.map((item) => item.platform === platform ? { ...item, ...patch } : item),
     }));
   };
+
+  const countRecords = (data: unknown, keys: string[]) => {
+    if (!data || typeof data !== "object") return 0;
+    for (const key of keys) {
+      const value = (data as Record<string, unknown>)[key];
+      if (Array.isArray(value)) return value.length;
+      if (value && typeof value === "object") {
+        const nested = (value as Record<string, unknown>).data;
+        if (Array.isArray(nested)) return nested.length;
+      }
+    }
+    const summary = (data as Record<string, unknown>).summary;
+    if (summary && typeof summary === "object") {
+      return Object.values(summary as Record<string, unknown>).reduce<number>((total, value) => total + (typeof value === "number" ? value : 0), 0);
+    }
+    return 0;
+  };
+
+  const countSnapshotRecords = (snapshot: Record<string, unknown>, keys: string[]) =>
+    Object.values(snapshot).reduce<number>((total, data) => total + countRecords(data, keys), 0);
 
   if (loading) {
     return <div style={{ display: "flex", justifyContent: "center", padding: 60 }}><div className="spinner" /></div>;
@@ -254,6 +350,71 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             />
           </>
         )}
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: 16 }}>
+        <div style={panelStyle}>
+          <h4 style={{ fontSize: "1rem", marginBottom: 12 }}>Shopify Management</h4>
+          <p style={{ color: "var(--text2)", fontSize: "0.84rem", marginBottom: 14 }}>
+            Save Admin API credentials, validate connection, and sync products, inventory, orders, customers, and webhooks.
+          </p>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>Store URL</label>
+              <input style={inputStyle} value={shopifyCredentials.storeUrl} onChange={(e) => setShopifyCredentials((current) => ({ ...current, storeUrl: e.target.value }))} placeholder="your-store.myshopify.com" />
+            </div>
+            <div>
+              <label style={labelStyle}>Admin Access Token</label>
+              <input style={inputStyle} type="password" value={shopifyCredentials.apiKey} onChange={(e) => setShopifyCredentials((current) => ({ ...current, apiKey: e.target.value }))} placeholder="shpat_..." />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={saveShopify} className="btn btn-primary btn-sm">Save Shopify</button>
+              <button type="button" onClick={() => testProvider("shopify")} className="btn btn-outline btn-sm">Validate</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(["products", "inventory", "orders", "customers", "webhooks", "sync"] as const).map((action) => (
+                <button key={action} type="button" onClick={() => runShopifyAction(action)} className="btn btn-outline btn-sm" disabled={testing === `shopify-${action}`}>
+                  {action}
+                </button>
+              ))}
+            </div>
+            <p style={{ color: "var(--text2)", fontSize: "0.78rem" }}>
+              Loaded records: {countSnapshotRecords(shopifySnapshot, ["products", "orders", "customers", "webhooks"])}
+            </p>
+          </div>
+        </div>
+
+        <div style={panelStyle}>
+          <h4 style={{ fontSize: "1rem", marginBottom: 12 }}>Printify Management</h4>
+          <p style={{ color: "var(--text2)", fontSize: "0.84rem", marginBottom: 14 }}>
+            Save API credentials, sync products/orders/inventory, and trigger product publishing/fulfillment workflows.
+          </p>
+          <div style={{ display: "grid", gap: 12 }}>
+            <div>
+              <label style={labelStyle}>API Key</label>
+              <input style={inputStyle} type="password" value={printifyCredentials.apiKey} onChange={(e) => setPrintifyCredentials((current) => ({ ...current, apiKey: e.target.value }))} placeholder="Printify API token" />
+            </div>
+            <div>
+              <label style={labelStyle}>Shop ID</label>
+              <input style={inputStyle} value={printifyCredentials.shopId} onChange={(e) => setPrintifyCredentials((current) => ({ ...current, shopId: e.target.value }))} placeholder="Printify shop ID" />
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={savePrintify} className="btn btn-primary btn-sm">Save Printify</button>
+              <button type="button" onClick={() => testProvider("printify")} className="btn btn-outline btn-sm">Validate</button>
+              <button type="button" onClick={publishPrintify} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish Product</button>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              {(["products", "inventory", "orders", "sync"] as const).map((action) => (
+                <button key={action} type="button" onClick={() => runPrintifyAction(action)} className="btn btn-outline btn-sm" disabled={testing === `printify-${action}`}>
+                  {action}
+                </button>
+              ))}
+            </div>
+            <p style={{ color: "var(--text2)", fontSize: "0.78rem" }}>
+              Loaded records: {countSnapshotRecords(printifySnapshot, ["data", "products", "orders"])}
+            </p>
+          </div>
+        </div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 16 }}>

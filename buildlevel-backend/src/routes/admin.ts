@@ -680,6 +680,83 @@ router.get("/printify/orders", requireAdmin, async (req: Request, res: Response)
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.get("/printify/inventory", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { apiKey, shopId } = await getPrintifyCredentials();
+    if (!apiKey || !shopId) { res.status(400).json({ error: 'Printify not configured' }); return; }
+    const r = await fetch(`https://api.printify.com/v1/shops/${shopId}/products.json?page=1&limit=20`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    const data = await r.json();
+    const productsList = Array.isArray(data?.data) ? data.data : [];
+    res.json({
+      products: productsList.map((product: any) => ({
+        id: product.id,
+        title: product.title,
+        visible: product.visible,
+        variants: (product.variants || []).map((variant: any) => ({
+          id: variant.id,
+          title: variant.title,
+          enabled: variant.is_enabled,
+          inStock: variant.is_available,
+        })),
+      })),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/printify/publish", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { printifyProductId } = req.body;
+    const { apiKey, shopId } = await getPrintifyCredentials();
+    if (!apiKey || !shopId) { res.status(400).json({ error: 'Printify not configured' }); return; }
+    if (!printifyProductId) { res.status(400).json({ error: 'printifyProductId is required' }); return; }
+    const r = await fetch(`https://api.printify.com/v1/shops/${shopId}/products/${printifyProductId}/publish.json`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        title: true,
+        description: true,
+        images: true,
+        variants: true,
+        tags: true,
+        keyFeatures: true,
+        shipping_template: true,
+      }),
+    });
+    const data = await r.json().catch(() => ({}));
+    res.status(r.ok ? 200 : r.status).json({ success: r.ok, data });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/printify/sync", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { apiKey, shopId } = await getPrintifyCredentials();
+    if (!apiKey || !shopId) { res.status(400).json({ error: 'Printify not configured' }); return; }
+    const [productsResponse, ordersResponse] = await Promise.all([
+      fetch(`https://api.printify.com/v1/shops/${shopId}/products.json?page=1&limit=20`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }),
+      fetch(`https://api.printify.com/v1/shops/${shopId}/orders.json?page=1&limit=20`, {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      }),
+    ]);
+    const [productsData, ordersData] = await Promise.all([
+      productsResponse.json(),
+      ordersResponse.json(),
+    ]);
+    res.json({
+      success: productsResponse.ok && ordersResponse.ok,
+      products: productsData,
+      orders: ordersData,
+      summary: {
+        products: productsData?.data?.length ?? 0,
+        orders: ordersData?.data?.length ?? 0,
+      },
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
 router.post("/printify/import", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { printifyProductId, name, description, price, imageUrl } = req.body;
@@ -702,6 +779,10 @@ async function getShopifyCredentials() {
     storeUrl: process.env.SHOPIFY_STORE_URL || urlRows[0]?.value || '',
     apiKey: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || keyRows[0]?.value || '',
   };
+}
+
+function normalizeShopifyUrl(storeUrl: string) {
+  return storeUrl.startsWith('http') ? storeUrl : `https://${storeUrl}`;
 }
 
 router.get("/shopify/status", requireAdmin, async (req: Request, res: Response) => {
@@ -731,8 +812,8 @@ router.get("/shopify/products", requireAdmin, async (req: Request, res: Response
   try {
     const { storeUrl, apiKey } = await getShopifyCredentials();
     if (!storeUrl || !apiKey) { res.status(400).json({ error: 'Shopify not configured' }); return; }
-    const url = storeUrl.startsWith('http') ? storeUrl : `https://${storeUrl}`;
-    const r = await fetch(`${url}/admin/api/2024-01/products.json?limit=20`, {
+    const url = normalizeShopifyUrl(storeUrl);
+    const r = await fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/products.json?limit=20`, {
       headers: { 'X-Shopify-Access-Token': apiKey },
     });
     const data = await r.json();
@@ -744,12 +825,99 @@ router.get("/shopify/orders", requireAdmin, async (req: Request, res: Response) 
   try {
     const { storeUrl, apiKey } = await getShopifyCredentials();
     if (!storeUrl || !apiKey) { res.status(400).json({ error: 'Shopify not configured' }); return; }
-    const url = storeUrl.startsWith('http') ? storeUrl : `https://${storeUrl}`;
-    const r = await fetch(`${url}/admin/api/2024-01/orders.json?limit=20&status=any`, {
+    const url = normalizeShopifyUrl(storeUrl);
+    const r = await fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=20&status=any`, {
       headers: { 'X-Shopify-Access-Token': apiKey },
     });
     const data = await r.json();
     res.json(data);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/shopify/customers", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { storeUrl, apiKey } = await getShopifyCredentials();
+    if (!storeUrl || !apiKey) { res.status(400).json({ error: 'Shopify not configured' }); return; }
+    const url = normalizeShopifyUrl(storeUrl);
+    const r = await fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/customers.json?limit=20`, {
+      headers: { 'X-Shopify-Access-Token': apiKey },
+    });
+    const data = await r.json();
+    res.json(data);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/shopify/inventory", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { storeUrl, apiKey } = await getShopifyCredentials();
+    if (!storeUrl || !apiKey) { res.status(400).json({ error: 'Shopify not configured' }); return; }
+    const url = normalizeShopifyUrl(storeUrl);
+    const r = await fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/products.json?limit=20&fields=id,title,variants`, {
+      headers: { 'X-Shopify-Access-Token': apiKey },
+    });
+    const data = await r.json();
+    const productsList = Array.isArray(data?.products) ? data.products : [];
+    res.json({
+      products: productsList.map((product: any) => ({
+        id: product.id,
+        title: product.title,
+        variants: (product.variants || []).map((variant: any) => ({
+          id: variant.id,
+          title: variant.title,
+          sku: variant.sku,
+          inventoryQuantity: variant.inventory_quantity,
+          inventoryPolicy: variant.inventory_policy,
+          inventoryManagement: variant.inventory_management,
+        })),
+      })),
+    });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/shopify/webhooks", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { storeUrl, apiKey } = await getShopifyCredentials();
+    if (!storeUrl || !apiKey) { res.status(400).json({ error: 'Shopify not configured' }); return; }
+    const url = normalizeShopifyUrl(storeUrl);
+    const r = await fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json?limit=50`, {
+      headers: { 'X-Shopify-Access-Token': apiKey },
+    });
+    const data = await r.json();
+    res.json(data);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/shopify/sync", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const { storeUrl, apiKey } = await getShopifyCredentials();
+    if (!storeUrl || !apiKey) { res.status(400).json({ error: 'Shopify not configured' }); return; }
+    const url = normalizeShopifyUrl(storeUrl);
+    const headers = { 'X-Shopify-Access-Token': apiKey };
+    const [productsResponse, ordersResponse, customersResponse, webhooksResponse] = await Promise.all([
+      fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/products.json?limit=20`, { headers }),
+      fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/orders.json?limit=20&status=any`, { headers }),
+      fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/customers.json?limit=20`, { headers }),
+      fetch(`${url}/admin/api/${SHOPIFY_API_VERSION}/webhooks.json?limit=50`, { headers }),
+    ]);
+    const [productsData, ordersData, customersData, webhooksData] = await Promise.all([
+      productsResponse.json(),
+      ordersResponse.json(),
+      customersResponse.json(),
+      webhooksResponse.json(),
+    ]);
+    res.json({
+      success: productsResponse.ok && ordersResponse.ok && customersResponse.ok && webhooksResponse.ok,
+      products: productsData,
+      orders: ordersData,
+      customers: customersData,
+      webhooks: webhooksData,
+      summary: {
+        products: productsData?.products?.length ?? 0,
+        orders: ordersData?.orders?.length ?? 0,
+        customers: customersData?.customers?.length ?? 0,
+        webhooks: webhooksData?.webhooks?.length ?? 0,
+      },
+    });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
