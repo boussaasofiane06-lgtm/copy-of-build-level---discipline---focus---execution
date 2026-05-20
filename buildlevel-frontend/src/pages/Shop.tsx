@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { publicApi, Product } from "../lib/api";
+import {
+  APPAREL_AUDIENCES,
+  getAudienceLabel,
+  getCategoriesForAudience,
+  getCategoryAudienceLabel,
+  getCategoryLabel,
+  getKnownAudienceForCategory,
+  type ApparelAudience,
+} from "../lib/apparelCategories";
 
 interface CartItem { product: Product; quantity: number; size: string; }
 
@@ -11,6 +20,7 @@ export default function Shop() {
   const [cartOpen, setCartOpen] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
+  const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -37,8 +47,13 @@ export default function Shop() {
     };
   }, [cartOpen]);
 
-  const categories = ["all", ...Array.from(new Set(products.map(p => p.category)))];
-  const filtered = category === "all" ? products : products.filter(p => p.category === category);
+  const audienceFiltered = audience === "all"
+    ? products
+    : products.filter(p => getKnownAudienceForCategory(p.category) === audience);
+  const availableCategories = audience === "all"
+    ? Array.from(new Set(products.map(p => p.category).filter(Boolean)))
+    : getCategoriesForAudience(audience).map(category => category.slug);
+  const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => p.category === category);
 
   const addToCart = (product: Product) => {
     const sizes = Array.isArray(product.sizes) ? product.sizes : [];
@@ -154,20 +169,38 @@ export default function Shop() {
 
       <div className="container section-sm">
         {/* Filters + Cart button */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 32, flexWrap: "wrap", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", marginBottom: 32, gap: 14 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button onClick={() => { setAudience("all"); setCategory("all"); }} className="btn btn-sm"
+                style={{ background: audience === "all" ? "var(--red)" : "var(--bg3)", color: audience === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
+                All Apparel
+              </button>
+              {APPAREL_AUDIENCES.map(a => (
+                <button key={a.value} onClick={() => { setAudience(a.value); setCategory("all"); }} className="btn btn-sm"
+                  style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
+                  {a.label}
+                </button>
+              ))}
+            </div>
+            {cart.length > 0 && (
+              <button onClick={() => setCartOpen(true)} className="btn btn-primary">
+                Cart ({cart.reduce((s, i) => s + i.quantity, 0)}) — ${cartTotal.toFixed(2)}
+              </button>
+            )}
+          </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            {categories.map(c => (
+            <button onClick={() => setCategory("all")} className="btn btn-sm"
+              style={{ background: category === "all" ? "var(--red)" : "transparent", color: category === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
+              {audience === "all" ? "All Categories" : `All ${getAudienceLabel(audience)}`}
+            </button>
+            {availableCategories.map(c => (
               <button key={c} onClick={() => setCategory(c)} className="btn btn-sm"
-                style={{ background: category === c ? "var(--red)" : "var(--bg3)", color: category === c ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-                {c.charAt(0).toUpperCase() + c.slice(1)}
+                style={{ background: category === c ? "var(--red)" : "transparent", color: category === c ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
+                {getCategoryLabel(c)}
               </button>
             ))}
           </div>
-          {cart.length > 0 && (
-            <button onClick={() => setCartOpen(true)} className="btn btn-primary">
-              Cart ({cart.reduce((s, i) => s + i.quantity, 0)}) — ${cartTotal.toFixed(2)}
-            </button>
-          )}
         </div>
 
         {loading ? (
@@ -191,6 +224,9 @@ export default function Shop() {
                   {!p.inStock && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#fff", fontFamily: "var(--font-display)", letterSpacing: "0.1em" }}>SOLD OUT</span></div>}
                 </div>
                 <div style={{ padding: 16 }}>
+                  <div style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>
+                    {getCategoryAudienceLabel(p.category)} / {getCategoryLabel(p.category)}
+                  </div>
                   <h3 style={{ fontSize: "0.95rem", marginBottom: 6 }}>{p.name}</h3>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>${parseFloat(p.price).toFixed(2)}</span>

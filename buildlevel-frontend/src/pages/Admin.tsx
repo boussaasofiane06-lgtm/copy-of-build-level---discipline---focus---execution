@@ -1,6 +1,16 @@
 import { useState, useEffect } from "react";
 import { adminApi, Product, BlogPost, DigitalProduct } from "../lib/api";
 import AdminIntegrationsPanel from "../components/AdminIntegrationsPanel";
+import {
+  APPAREL_AUDIENCES,
+  DEFAULT_AUDIENCE,
+  DEFAULT_CATEGORY,
+  getAudienceForCategory,
+  getCategoriesForAudience,
+  getCategoryAudienceLabel,
+  getCategoryLabel,
+  type ApparelAudience,
+} from "../lib/apparelCategories";
 
 type Tab = "products" | "digital" | "blog" | "integrations";
 
@@ -20,7 +30,8 @@ export default function Admin() {
   // Product form
   const [showProductForm, setShowProductForm] = useState(false);
   const [editProduct, setEditProduct] = useState<Partial<Product> | null>(null);
-  const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", category: "apparel", sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false });
+  const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as ApparelAudience, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false });
+  const [productImagePreviews, setProductImagePreviews] = useState<string[]>([]);
 
   // Digital form
   const [showDigitalForm, setShowDigitalForm] = useState(false);
@@ -67,14 +78,29 @@ export default function Admin() {
   // Product CRUD
   const saveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
-    const data = { ...productForm, price: parseFloat(productForm.price), compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined, sizes: productForm.sizes.split(",").map(s => s.trim()).filter(Boolean) };
+    const { audience: _audience, ...productPayload } = productForm;
+    const data = { ...productPayload, price: parseFloat(productForm.price), compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined, sizes: productForm.sizes.split(",").map(s => s.trim()).filter(Boolean) };
     try {
       if (editProduct?.id) await adminApi.updateProduct(editProduct.id, data as any);
       else await adminApi.createProduct(data as any);
       showToast(editProduct?.id ? "Product updated!" : "Product created!");
       setShowProductForm(false); setEditProduct(null);
+      setProductImagePreviews([]);
       loadData();
     } catch { showToast("Error saving product"); }
+  };
+
+  const handleProductImageFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
+    const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
+    const dataUrls = await Promise.all(imageFiles.map(file => new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(file);
+    })));
+    setProductImagePreviews(dataUrls);
+    if (dataUrls[0]) setProductForm(f => ({ ...f, imageUrl: dataUrls[0] }));
   };
 
   const deleteProduct = async (id: number) => {
@@ -83,8 +109,10 @@ export default function Admin() {
   };
 
   const openEditProduct = (p: Product) => {
+    const audience = getAudienceForCategory(p.category);
     setEditProduct(p);
-    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", category: p.category, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", inStock: p.inStock, published: p.published, featured: p.featured });
+    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", inStock: p.inStock, published: p.published, featured: p.featured });
+    setProductImagePreviews(p.imageUrl ? [p.imageUrl] : []);
     setShowProductForm(true);
   };
 
@@ -177,20 +205,64 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Apparel Products ({products.length})</h3>
-                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", category: "apparel", sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false }); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
+                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false }); setProductImagePreviews([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
                 </div>
 
                 {showProductForm && (
                   <div style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 8, padding: 24, marginBottom: 24 }}>
                     <h4 style={{ marginBottom: 20, fontSize: "0.9rem" }}>{editProduct?.id ? "Edit Product" : "New Product"}</h4>
-                    <form onSubmit={saveProduct} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                    <form onSubmit={saveProduct} style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 16 }}>
                       <div><label style={labelStyle}>Name *</label><input style={inputStyle} required value={productForm.name} onChange={e => setProductForm(f => ({ ...f, name: e.target.value }))} /></div>
-                      <div><label style={labelStyle}>Category</label><select style={inputStyle} value={productForm.category} onChange={e => setProductForm(f => ({ ...f, category: e.target.value }))}><option value="apparel">Apparel</option><option value="accessories">Accessories</option><option value="headwear">Headwear</option></select></div>
+                      <div>
+                        <label style={labelStyle}>Audience</label>
+                        <select
+                          style={inputStyle}
+                          value={productForm.audience}
+                          onChange={e => {
+                            const audience = e.target.value as ApparelAudience;
+                            setProductForm(f => ({
+                              ...f,
+                              audience,
+                              category: getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY,
+                            }));
+                          }}
+                        >
+                          {APPAREL_AUDIENCES.map(audience => <option key={audience.value} value={audience.value}>{audience.label}</option>)}
+                        </select>
+                      </div>
+                      <div>
+                        <label style={labelStyle}>Category</label>
+                        <select style={inputStyle} value={productForm.category} onChange={e => setProductForm(f => ({ ...f, category: e.target.value }))}>
+                          {getCategoriesForAudience(productForm.audience).map(category => (
+                            <option key={category.slug} value={category.slug}>{category.label}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div><label style={labelStyle}>Price *</label><input style={inputStyle} type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm(f => ({ ...f, price: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Compare At Price</label><input style={inputStyle} type="number" step="0.01" value={productForm.compareAtPrice} onChange={e => setProductForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Sizes (comma-separated)</label><input style={inputStyle} value={productForm.sizes} onChange={e => setProductForm(f => ({ ...f, sizes: e.target.value }))} placeholder="S, M, L, XL" /></div>
                       <div><label style={labelStyle}>Badge</label><input style={inputStyle} value={productForm.badge} onChange={e => setProductForm(f => ({ ...f, badge: e.target.value }))} placeholder="NEW, SALE, etc." /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Image URL</label><input style={inputStyle} value={productForm.imageUrl} onChange={e => setProductForm(f => ({ ...f, imageUrl: e.target.value }))} placeholder="https://..." /></div>
+                      <div style={{ gridColumn: "1/-1" }}>
+                        <label style={labelStyle}>Upload Images From Device</label>
+                        <input
+                          style={inputStyle}
+                          type="file"
+                          accept="image/*"
+                          multiple
+                          onChange={e => handleProductImageFiles(e.target.files).catch(() => showToast("Error reading image files"))}
+                        />
+                        <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>
+                          Select one or more images from mobile, laptop, or desktop. The first image is used as the storefront cover.
+                        </p>
+                        {productImagePreviews.length > 0 && (
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                            {productImagePreviews.map((src, index) => (
+                              <img key={`${src.slice(0, 24)}-${index}`} src={src} alt={`Product upload ${index + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Description</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={3} value={productForm.description} onChange={e => setProductForm(f => ({ ...f, description: e.target.value }))} /></div>
                       <div style={{ display: "flex", gap: 20, gridColumn: "1/-1" }}>
                         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={productForm.published} onChange={e => setProductForm(f => ({ ...f, published: e.target.checked }))} /> Published</label>
@@ -199,7 +271,7 @@ export default function Admin() {
                       </div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
                         <button type="submit" className="btn btn-primary btn-sm">Save</button>
-                        <button type="button" onClick={() => { setShowProductForm(false); setEditProduct(null); }} className="btn btn-outline btn-sm">Cancel</button>
+                        <button type="button" onClick={() => { setShowProductForm(false); setEditProduct(null); setProductImagePreviews([]); }} className="btn btn-outline btn-sm">Cancel</button>
                       </div>
                     </form>
                   </div>
@@ -212,7 +284,7 @@ export default function Admin() {
                         {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.name}</div>
-                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {p.category} · {p.published ? "Published" : "Draft"} · {p.inStock ? "In Stock" : "Out of Stock"}</div>
+                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {getCategoryAudienceLabel(p.category)} · {getCategoryLabel(p.category)} · {p.published ? "Published" : "Draft"} · {p.inStock ? "In Stock" : "Out of Stock"}</div>
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => openEditProduct(p)} className="btn btn-outline btn-sm">Edit</button>
