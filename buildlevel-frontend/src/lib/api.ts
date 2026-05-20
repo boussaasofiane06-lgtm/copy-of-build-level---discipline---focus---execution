@@ -15,6 +15,19 @@ const expectArray = <T>(data: unknown, endpoint: string): T[] => {
   return [];
 };
 
+const isRecord = (data: unknown): data is Record<string, unknown> =>
+  typeof data === "object" && data !== null && !Array.isArray(data);
+
+const expectSuccess = <T extends Record<string, unknown>>(
+  data: unknown,
+  endpoint: string,
+  predicate: (value: Record<string, unknown>) => boolean
+): T => {
+  if (isRecord(data) && predicate(data)) return data as T;
+
+  throw new Error(`Invalid response from ${endpoint}`);
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 export interface Product {
   id: number;
@@ -81,9 +94,18 @@ export const publicApi = {
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
 export const adminApi = {
-  login: (password: string) => api.post("/admin/login", { password }).then(r => r.data),
-  logout: () => api.post("/admin/logout").then(r => r.data),
-  me: () => api.get("/admin/me").then(r => r.data),
+  login: (password: string) =>
+    api.post<unknown>("/admin/login", { password }).then(r =>
+      expectSuccess<{ success: true; token?: string }>(r.data, "/admin/login", data => data.success === true)
+    ),
+  logout: () =>
+    api.post<unknown>("/admin/logout").then(r =>
+      expectSuccess<{ success: true }>(r.data, "/admin/logout", data => data.success === true)
+    ),
+  me: () =>
+    api.get<unknown>("/admin/me").then(r =>
+      expectSuccess<{ admin: true }>(r.data, "/admin/me", data => data.admin === true)
+    ),
 
   // Products
   getProducts: () => api.get<unknown>("/admin/products").then(r => expectArray<Product>(r.data, "/admin/products")),

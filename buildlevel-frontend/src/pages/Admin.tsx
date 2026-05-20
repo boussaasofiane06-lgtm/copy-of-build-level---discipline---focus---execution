@@ -36,7 +36,8 @@ export default function Admin() {
   const login = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      await adminApi.login(password);
+      const result = await adminApi.login(password);
+      if (result.success !== true) throw new Error("Invalid login response");
       setAuthed(true);
       loadData();
     } catch {
@@ -54,7 +55,12 @@ export default function Admin() {
   };
 
   useEffect(() => {
-    adminApi.me().then(() => { setAuthed(true); loadData(); }).catch(() => {});
+    adminApi.me().then((result) => {
+      if (result.admin === true) {
+        setAuthed(true);
+        loadData();
+      }
+    }).catch(() => setAuthed(false));
   }, []);
 
   // Product CRUD
