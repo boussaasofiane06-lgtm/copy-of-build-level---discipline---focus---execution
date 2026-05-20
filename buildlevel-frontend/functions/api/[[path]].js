@@ -24,6 +24,9 @@ export async function onRequest({ request }) {
   const targetUrl = new URL(url.pathname + url.search, BACKEND_URL);
   const headers = new Headers(request.headers);
   headers.set("Host", new URL(BACKEND_URL).hostname);
+  // The Pages Function owns browser CORS. Do not forward the browser Origin to
+  // Render because the backend CORS allowlist can reject custom domains.
+  headers.delete("Origin");
   headers.set("X-Forwarded-Host", url.hostname);
   headers.set("X-Forwarded-Proto", url.protocol.replace(":", ""));
 
