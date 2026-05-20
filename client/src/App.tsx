@@ -21,6 +21,7 @@ import DigitalDownload from "./pages/DigitalDownload";
 import SocialProofNotification from "./components/SocialProofNotification";
 import AIChatWidget from "./components/AIChatWidget";
 import PWAInstallPrompt from "./components/PWAInstallPrompt";
+import CartDrawer from "./components/CartDrawer";
 
 function Router() {
   return (
@@ -55,6 +56,7 @@ function App() {
             <AIChatWidget />
             <PWAInstallPrompt />
             <Router />
+            <CartDrawer />
           </TooltipProvider>
         </CartProvider>
       </ThemeProvider>

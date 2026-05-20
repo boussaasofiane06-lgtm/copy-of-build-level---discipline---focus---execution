@@ -7,8 +7,9 @@ import { useState, useEffect } from "react";
 import { Link, useLocation } from "wouter";
 import { Menu, X, ShoppingBag } from "lucide-react";
 import { useCart } from "@/contexts/CartContext";
-import CartDrawer from "./CartDrawer";
 import AnnouncementBanner from "./AnnouncementBanner";
+import { AnimatePresence, motion } from "framer-motion";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 const navLinks = [
   { label: "Home", href: "/" },
@@ -25,6 +26,8 @@ export default function Navbar() {
   const [location] = useLocation();
   const { totalItems, openCart } = useCart();
 
+  useBodyScrollLock(menuOpen);
+
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 40);
     window.addEventListener("scroll", handleScroll);
@@ -38,19 +41,13 @@ export default function Navbar() {
   useEffect(() => {
     if (!menuOpen) return;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMenuOpen(false);
     };
 
     document.addEventListener("keydown", handleKeyDown);
 
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [menuOpen]);
 
   const handleOpenCart = () => {
@@ -129,30 +126,32 @@ export default function Navbar() {
       </header>
 
       {/* Mobile Menu */}
-      <div
-        id="mobile-menu"
-        aria-hidden={!menuOpen}
-        className={`fixed inset-0 z-40 bg-[#2A2A2A] flex flex-col items-center justify-center transition-all duration-300 ${
-          menuOpen ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"
-        }`}
-      >
-        <nav className="flex flex-col items-center gap-8">
-          {navLinks.map((link) => (
-            <Link key={link.href} href={link.href}>
-              <span className="font-display text-3xl font-bold tracking-widest text-white hover:text-[#FF6B00] transition-colors">
-                {link.label}
-              </span>
-            </Link>
-          ))}
-          <Link href="/shop">
-            <span className="btn-primary mt-4 text-sm">Shop Now</span>
-          </Link>
-        </nav>
-
-      </div>
-
-      {/* Cart Drawer */}
-      <CartDrawer />
+      <AnimatePresence>
+        {menuOpen && (
+          <motion.div
+            id="mobile-menu"
+            key="mobile-menu"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.18 }}
+            className="fixed inset-0 z-40 bg-[#2A2A2A] flex flex-col items-center justify-center"
+          >
+            <nav className="flex flex-col items-center gap-8">
+              {navLinks.map((link) => (
+                <Link key={link.href} href={link.href} onClick={() => setMenuOpen(false)}>
+                  <span className="font-display text-3xl font-bold tracking-widest text-white hover:text-[#FF6B00] transition-colors">
+                    {link.label}
+                  </span>
+                </Link>
+              ))}
+              <Link href="/shop" onClick={() => setMenuOpen(false)}>
+                <span className="btn-primary mt-4 text-sm">Shop Now</span>
+              </Link>
+            </nav>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </>
   );
 }

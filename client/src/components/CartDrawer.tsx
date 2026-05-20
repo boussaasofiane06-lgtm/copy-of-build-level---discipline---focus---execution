@@ -4,12 +4,16 @@ import { Link } from "wouter";
 import { motion, AnimatePresence } from "framer-motion";
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useLocation } from "wouter";
+import { useBodyScrollLock } from "@/hooks/useBodyScrollLock";
 
 const CURRENCIES: Currency[] = ["USD", "GBP", "EUR", "CAD", "AUD"];
 
 export default function CartDrawer() {
   const closeButtonRef = useRef<HTMLButtonElement>(null);
   const closeCartRef = useRef<() => void>(() => {});
+  const [location] = useLocation();
+  const previousLocationRef = useRef(location);
   const {
     items,
     isOpen,
@@ -24,12 +28,11 @@ export default function CartDrawer() {
   } = useCart();
 
   closeCartRef.current = closeCart;
+  useBodyScrollLock(isOpen);
 
   useEffect(() => {
     if (!isOpen) return;
 
-    const previousOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
     closeButtonRef.current?.focus();
 
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -38,11 +41,15 @@ export default function CartDrawer() {
 
     document.addEventListener("keydown", handleKeyDown);
 
-    return () => {
-      document.body.style.overflow = previousOverflow;
-      document.removeEventListener("keydown", handleKeyDown);
-    };
+    return () => document.removeEventListener("keydown", handleKeyDown);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (previousLocationRef.current === location) return;
+
+    previousLocationRef.current = location;
+    if (isOpen) closeCartRef.current();
+  }, [isOpen, location]);
 
   return createPortal(
     <AnimatePresence>
@@ -50,6 +57,7 @@ export default function CartDrawer() {
         <>
           {/* Backdrop */}
           <motion.div
+            key="cart-backdrop"
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
@@ -60,6 +68,7 @@ export default function CartDrawer() {
 
           {/* Drawer */}
           <motion.div
+            key="cart-drawer"
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}
