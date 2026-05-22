@@ -1,4 +1,4 @@
-const BACKEND_URL = "https://copy-of-build-level-discipline-focus.onrender.com";
+const BACKEND_URL = "https://build-level-backend.onrender.com";
 
 const corsHeaders = (origin) => ({
   "Access-Control-Allow-Origin": origin,
