@@ -72,6 +72,14 @@ function maskSecret(value?: string | null) {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function normalizeTidioPublicKey(value?: string | null) {
+  if (!value) return "";
+  const trimmed = value.trim();
+  const match = trimmed.match(/code\.tidio\.co\/([^"'\s/]+)\.js/i);
+  if (match?.[1]) return match[1];
+  return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
+}
+
 function getStripeClient() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return null;
@@ -426,8 +434,8 @@ router.get("/integrations/overview", requireAdmin, async (req: Request, res: Res
         },
         tidio: {
           enabled: settings.tidio_enabled === "true",
-          configured: !!settings.tidio_public_key,
-          publicKey: maskSecret(settings.tidio_public_key),
+          configured: !!normalizeTidioPublicKey(settings.tidio_public_key),
+          publicKey: maskSecret(normalizeTidioPublicKey(settings.tidio_public_key)),
           capabilities: ["chat controls", "chatbot settings", "support analytics"],
         },
         social: SOCIAL_PLATFORMS.map((platform) => ({
@@ -507,7 +515,7 @@ router.get("/integrations/tidio/config", requireAdmin, async (req: Request, res:
     const settings = await getSettingsMap(integrationSettingKeys);
     res.json({
       enabled: settings.tidio_enabled === "true",
-      publicKey: settings.tidio_public_key || "",
+      publicKey: normalizeTidioPublicKey(settings.tidio_public_key || ""),
       chatControls: settings.tidio_chat_controls || "manual",
       chatbotSettings: settings.tidio_chatbot_settings || "",
     });
@@ -526,7 +534,7 @@ router.post("/integrations/tidio/config", requireAdmin, async (req: Request, res
     });
     const data = schema.parse(req.body);
     await saveSetting("tidio_enabled", String(data.enabled));
-    await saveSetting("tidio_public_key", data.publicKey);
+    await saveSetting("tidio_public_key", normalizeTidioPublicKey(data.publicKey));
     await saveSetting("tidio_chat_controls", data.chatControls);
     await saveSetting("tidio_chatbot_settings", data.chatbotSettings);
     res.json({ success: true });
@@ -639,7 +647,8 @@ router.post("/integrations/test/:provider", requireAdmin, async (req: Request, r
     }
     if (provider === "tidio") {
       const settings = await getSettingsMap(["tidio_public_key"]);
-      res.json({ ok: !!settings.tidio_public_key, message: settings.tidio_public_key ? "Tidio public key configured" : "Tidio public key missing" });
+      const publicKey = normalizeTidioPublicKey(settings.tidio_public_key);
+      res.json({ ok: !!publicKey, message: publicKey ? "Tidio public key configured" : "Tidio public key missing" });
       return;
     }
     res.status(404).json({ error: "Unsupported provider" });

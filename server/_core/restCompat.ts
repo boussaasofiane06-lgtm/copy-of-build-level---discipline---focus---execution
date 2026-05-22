@@ -79,6 +79,14 @@ function maskSecret(value?: string | null) {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function normalizeTidioPublicKey(value?: string | null) {
+  if (!value) return "";
+  const trimmed = value.trim();
+  const match = trimmed.match(/code\.tidio\.co\/([^"'\s/]+)\.js/i);
+  if (match?.[1]) return match[1];
+  return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
+}
+
 async function getShopifyCredentials() {
   const settings = await getSettingsMap(["shopify_store_url", "shopify_api_key"]);
   return {
@@ -175,8 +183,8 @@ export function registerRestCompatRoutes(app: Express) {
           },
           tidio: {
             enabled: settings.tidio_enabled === "true",
-            configured: !!(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
-            publicKey: maskSecret(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
+            configured: !!normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
+            publicKey: maskSecret(normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY)),
             capabilities: ["chat controls", "chatbot settings", "support analytics"],
           },
           social: SOCIAL_PLATFORMS.map((platform) => ({
@@ -248,7 +256,7 @@ export function registerRestCompatRoutes(app: Express) {
       const settings = await getSettingsMap();
       res.json({
         enabled: settings.tidio_enabled === "true",
-        publicKey: settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "",
+        publicKey: normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || ""),
         chatControls: settings.tidio_chat_controls || "manual",
         chatbotSettings: settings.tidio_chatbot_settings || "",
       });
@@ -267,7 +275,7 @@ export function registerRestCompatRoutes(app: Express) {
       });
       const data = schema.parse(req.body);
       await saveSetting("tidio_enabled", String(data.enabled));
-      await saveSetting("tidio_public_key", data.publicKey);
+      await saveSetting("tidio_public_key", normalizeTidioPublicKey(data.publicKey));
       await saveSetting("tidio_chat_controls", data.chatControls);
       await saveSetting("tidio_chatbot_settings", data.chatbotSettings);
       res.json({ success: true });
@@ -296,7 +304,7 @@ export function registerRestCompatRoutes(app: Express) {
   app.get("/api/tidio/config", async (_req, res) => {
     try {
       const settings = await getSettingsMap();
-      const publicKey = settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "";
+      const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "");
       res.json({
         enabled: settings.tidio_enabled === "true" && !!publicKey,
         publicKey,
@@ -413,7 +421,8 @@ export function registerRestCompatRoutes(app: Express) {
       }
       if (provider === "tidio") {
         const settings = await getSettingsMap(["tidio_public_key"]);
-        res.json({ ok: !!(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY), message: settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY ? "Tidio public key configured" : "Tidio public key missing" });
+        const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY);
+        res.json({ ok: !!publicKey, message: publicKey ? "Tidio public key configured" : "Tidio public key missing" });
         return;
       }
       res.status(404).json({ error: "Unsupported provider" });

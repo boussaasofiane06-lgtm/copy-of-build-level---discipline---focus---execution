@@ -9,6 +9,14 @@ import { BUSINESS_EMAIL, isEmailConfigured, sendBusinessEmail, sendCustomerEmail
 const router = Router();
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
 
+function normalizeTidioPublicKey(value?: string | null) {
+  if (!value) return "";
+  const trimmed = value.trim();
+  const match = trimmed.match(/code\.tidio\.co\/([^"'\s/]+)\.js/i);
+  if (match?.[1]) return match[1];
+  return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
+}
+
 function isValidHttpUrl(value: string) {
   try {
     const url = new URL(value);
@@ -146,7 +154,7 @@ router.get("/tidio/config", async (req, res) => {
     const rows = await db.select().from(siteSettings);
     const settings: Record<string, string> = {};
     for (const row of rows) settings[row.key] = row.value ?? "";
-    const publicKey = settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "";
+    const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "");
     res.json({
       enabled: settings.tidio_enabled === "true" && !!publicKey,
       publicKey,
