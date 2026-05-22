@@ -13,14 +13,6 @@ export function BuildLevelHero() {
 
   return (
     <section className="promo-hero">
-      <img
-        className="promo-hero__image"
-        src={PROMO_IMAGES.athlete}
-        alt="Build Level athlete focused before execution"
-        loading="eager"
-        decoding="async"
-      />
-      <div className="promo-hero__shade" aria-hidden="true" />
       <div className="promo-particles" aria-hidden="true">
         <span />
         <span />
@@ -55,15 +47,6 @@ export function GymMotivationSection({ compact = false }: { compact?: boolean })
   return (
     <section className={`promo-split ${compact ? "promo-split--compact" : ""}`}>
       <div className="container promo-split__grid">
-        <Reveal className="promo-split__media">
-          <img
-            src={PROMO_IMAGES.gym}
-            alt="Build Level luxury gym motivation"
-            loading="lazy"
-            decoding="async"
-          />
-          <div className="promo-split__glow" aria-hidden="true" />
-        </Reveal>
         <Reveal className="promo-split__content promo-readable-panel promo-readable-panel--split" delay={0.08}>
           <div className="promo-kicker">Apparel Energy</div>
           <h2>Built in the Gym. Worn Everywhere.</h2>
@@ -84,14 +67,6 @@ export function GymMotivationSection({ compact = false }: { compact?: boolean })
 export function MountainLegacySection({ title = "Built Different." }: { title?: string }) {
   return (
     <section className="legacy-banner">
-      <img
-        className="legacy-banner__image"
-        src={PROMO_IMAGES.mountain}
-        alt="Mountain legacy discipline landscape"
-        loading="lazy"
-        decoding="async"
-      />
-      <div className="legacy-banner__shade" aria-hidden="true" />
       <Reveal className="legacy-banner__content promo-readable-panel promo-readable-panel--legacy">
         <div className="promo-kicker">Legacy Mindset</div>
         <h2>{title}</h2>

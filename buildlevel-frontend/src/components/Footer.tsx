@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import { PROMO_IMAGES } from "./PromoVisualSections";
 import SocialLinks from "./SocialLinks";
 
 export default function Footer() {
@@ -7,8 +6,6 @@ export default function Footer() {
     <footer style={{ background: "var(--bg2)", borderTop: "1px solid var(--border)", padding: "48px 0 24px" }}>
       <div className="container">
         <div className="footer-legacy-card">
-          <img src={PROMO_IMAGES.mountain} alt="Build Level mountain legacy" loading="lazy" decoding="async" />
-          <div className="footer-legacy-card__shade" aria-hidden="true" />
           <div>
             <div style={{ fontFamily: "var(--font-display)", color: "var(--red)", letterSpacing: "0.18em", fontSize: "0.72rem", textTransform: "uppercase", marginBottom: 8 }}>Built Different</div>
             <h2 style={{ marginBottom: 8 }}>Stay Focused. Execute Daily.</h2>
