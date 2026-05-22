@@ -35,7 +35,8 @@ function verifyPassword(input: string, stored: string): boolean {
   try {
     const [salt, hash] = stored.split(":");
     if (!salt || !hash) return false;
-    const derived = crypto.scryptSync(input, salt, 64).toString("hex");
+    const keyLength = Math.max(1, hash.length / 2);
+    const derived = crypto.scryptSync(input, salt, keyLength).toString("hex");
     return crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
   } catch {
     return false;
@@ -136,7 +137,8 @@ export function registerAdminAuthRoutes(app: Express) {
           const [salt, hash] = storedHash.split(":");
           if (salt && hash) {
             try {
-              const derived = crypto.scryptSync(headerToken, salt, 64).toString("hex");
+              const keyLength = Math.max(1, hash.length / 2);
+              const derived = crypto.scryptSync(headerToken, salt, keyLength).toString("hex");
               isAdmin = crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
             } catch { /* ignore */ }
           }
