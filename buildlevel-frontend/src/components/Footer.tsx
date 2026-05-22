@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import { PROMO_IMAGES } from "./PromoVisualSections";
+import SocialLinks from "./SocialLinks";
 
 export default function Footer() {
   return (
@@ -22,6 +23,9 @@ export default function Footer() {
               Discipline. Focus. Execution.<br />
               Built for those who build.
             </p>
+            <div style={{ marginTop: 16 }}>
+              <SocialLinks />
+            </div>
           </div>
           <div>
             <div style={{ fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.15em", color: "var(--text2)", marginBottom: 16, textTransform: "uppercase" }}>Shop</div>
@@ -43,6 +47,7 @@ export default function Footer() {
                   onMouseLeave={e => (e.currentTarget.style.color = "var(--text3)")}
                 >{label}</Link>
               ))}
+              <a href="mailto:info@thebuildlevel.com" style={{ color: "var(--text3)", fontSize: "0.85rem", transition: "color 0.2s" }}>info@thebuildlevel.com</a>
             </div>
           </div>
         </div>

@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
+import TidioWidget from "./components/TidioWidget";
 import { PageTransition } from "./components/Motion";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
@@ -54,6 +55,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <RouteInteractionCleanup />
+      <TidioWidget />
       <Routes>
         {/* Admin route — no navbar/footer */}
         <Route path="/admin" element={<Admin />} />

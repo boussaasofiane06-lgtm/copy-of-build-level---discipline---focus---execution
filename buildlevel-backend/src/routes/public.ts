@@ -1,10 +1,22 @@
 import { Router } from "express";
 import { eq, asc, and } from "drizzle-orm";
+import { z } from "zod";
 import { getDb } from "../db/index.js";
 import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
+import { BUSINESS_EMAIL, isEmailConfigured, sendBusinessEmail, sendCustomerEmail } from "../services/email.js";
 
 const router = Router();
+const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
+
+function isValidHttpUrl(value: string) {
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" || url.protocol === "http:";
+  } catch {
+    return false;
+  }
+}
 
 // ─── Products ─────────────────────────────────────────────────────────────────
 router.get("/products", async (req, res) => {
@@ -105,6 +117,75 @@ router.get("/digital/download/:token", async (req, res) => {
     });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/social-links", async (req, res) => {
+  try {
+    const db = await getDb();
+    const rows = await db.select().from(siteSettings);
+    const settings: Record<string, string> = {};
+    for (const row of rows) settings[row.key] = row.value ?? "";
+    const links = SOCIAL_PLATFORMS
+      .map((platform) => ({
+        platform,
+        handle: settings[`social_${platform}_handle`] || "",
+        url: settings[`social_${platform}_url`] || "",
+        enabled: settings[`social_${platform}_enabled`] === "true",
+      }))
+      .filter((link) => link.enabled && link.url && isValidHttpUrl(link.url));
+    res.json({ email: BUSINESS_EMAIL, links });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/tidio/config", async (req, res) => {
+  try {
+    const db = await getDb();
+    const rows = await db.select().from(siteSettings);
+    const settings: Record<string, string> = {};
+    for (const row of rows) settings[row.key] = row.value ?? "";
+    const publicKey = settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "";
+    res.json({
+      enabled: settings.tidio_enabled === "true" && !!publicKey,
+      publicKey,
+      chatControls: settings.tidio_chat_controls || "manual",
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/contact", async (req, res) => {
+  try {
+    const schema = z.object({
+      name: z.string().min(1).max(120),
+      email: z.string().email().max(320),
+      message: z.string().min(5).max(5000),
+    });
+    const data = schema.parse(req.body);
+
+    await sendBusinessEmail({
+      subject: `Build Level contact: ${data.name}`,
+      replyTo: data.email,
+      text: `Name: ${data.name}\nEmail: ${data.email}\n\n${data.message}`,
+      html: `<p><strong>Name:</strong> ${data.name}</p><p><strong>Email:</strong> ${data.email}</p><p>${data.message.replace(/\n/g, "<br />")}</p>`,
+    });
+
+    await sendCustomerEmail({
+      to: data.email,
+      subject: "We received your Build Level message",
+      text: `Thanks ${data.name},\n\nWe received your message and will reply from ${BUSINESS_EMAIL} soon.\n\nDiscipline. Focus. Execution.\nBUILD LEVEL`,
+      html: `<p>Thanks ${data.name},</p><p>We received your message and will reply from <a href="mailto:${BUSINESS_EMAIL}">${BUSINESS_EMAIL}</a> soon.</p><p>Discipline. Focus. Execution.<br />BUILD LEVEL</p>`,
+    }).catch(() => undefined);
+
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({
+      success: false,
+      error: isEmailConfigured() ? e.message : "Email delivery is not configured",
+    });
   }
 });
 

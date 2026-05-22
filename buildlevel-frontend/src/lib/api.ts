@@ -155,6 +155,13 @@ export interface ExternalSyncResponse {
   webhooks?: unknown;
 }
 
+export interface PublicSocialLink {
+  platform: "instagram" | "facebook" | "tiktok" | "youtube" | "x" | "pinterest";
+  handle: string;
+  url: string;
+  enabled: boolean;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -166,6 +173,10 @@ export const publicApi = {
     api.post<{ url: string }>("/stripe/checkout", { items, currency, customerEmail }).then(r => r.data),
   createDigitalCheckout: (productId: number, customerEmail?: string) =>
     api.post<{ url: string }>("/stripe/digital-checkout", { productId, customerEmail }).then(r => r.data),
+  getSocialLinks: () => api.get<{ email: string; links: PublicSocialLink[] }>("/social-links").then(r => r.data),
+  getTidioConfig: () => api.get<{ enabled: boolean; publicKey: string; chatControls: string }>("/tidio/config").then(r => r.data),
+  sendContact: (data: { name: string; email: string; message: string }) =>
+    api.post<{ success: true }>("/contact", data).then(r => r.data),
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────

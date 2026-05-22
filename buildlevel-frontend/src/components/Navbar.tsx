@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
+import SocialLinks from "./SocialLinks";
 
 const links = [
   { to: "/", label: "Home" },
@@ -108,6 +109,9 @@ export default function Navbar() {
               {l.label}
             </Link>
           ))}
+          <div style={{ padding: "12px 24px" }}>
+            <SocialLinks compact />
+          </div>
         </div>
       )}
 
