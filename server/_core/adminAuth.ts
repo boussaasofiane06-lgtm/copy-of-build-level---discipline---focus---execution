@@ -33,10 +33,11 @@ const ONE_YEAR_S = 365 * 24 * 60 * 60;
 
 function verifyPassword(input: string, stored: string): boolean {
   try {
-    const [salt, hash] = stored.split(":");
+    const [salt, hashValue] = stored.trim().split(":");
+    const hash = hashValue?.trim();
     if (!salt || !hash) return false;
     const keyLength = Math.max(1, hash.length / 2);
-    const derived = crypto.scryptSync(input, salt, keyLength).toString("hex");
+    const derived = crypto.scryptSync(input.trim(), salt, keyLength).toString("hex");
     return crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
   } catch {
     return false;
@@ -132,13 +133,14 @@ export function registerAdminAuthRoutes(app: Express) {
       let isAdmin = false;
       if (headerToken) {
         // Verify via scrypt (raw password sent as header token)
-        const storedHash = process.env.ADMIN_PASSWORD_HASH || "";
+        const storedHash = process.env.ADMIN_PASSWORD_HASH?.trim() || "";
         if (storedHash) {
-          const [salt, hash] = storedHash.split(":");
+          const [salt, hashValue] = storedHash.split(":");
+          const hash = hashValue?.trim();
           if (salt && hash) {
             try {
               const keyLength = Math.max(1, hash.length / 2);
-              const derived = crypto.scryptSync(headerToken, salt, keyLength).toString("hex");
+              const derived = crypto.scryptSync(headerToken.trim(), salt, keyLength).toString("hex");
               isAdmin = crypto.timingSafeEqual(Buffer.from(derived, "hex"), Buffer.from(hash, "hex"));
             } catch { /* ignore */ }
           }

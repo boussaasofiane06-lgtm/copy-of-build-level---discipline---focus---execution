@@ -6,15 +6,15 @@ const ADMIN_COOKIE = "bl_admin_token";
 const JWT_SECRET = () => process.env.JWT_SECRET || "fallback-dev-secret-change-in-prod";
 
 export function verifyAdminPassword(password: string): boolean {
-  const stored = process.env.ADMIN_PASSWORD_HASH;
+  const stored = process.env.ADMIN_PASSWORD_HASH?.trim();
   if (!stored) return false;
   const colonIdx = stored.indexOf(":");
   if (colonIdx === -1) return false;
   const salt = stored.substring(0, colonIdx);
-  const storedHash = stored.substring(colonIdx + 1);
+  const storedHash = stored.substring(colonIdx + 1).trim();
   const keyLen = storedHash.length / 2;
   try {
-    const derived = scryptSync(password, salt, keyLen);
+    const derived = scryptSync(password.trim(), salt, keyLen);
     const derivedHex = derived.toString("hex");
     return timingSafeEqual(Buffer.from(derivedHex), Buffer.from(storedHash));
   } catch {
