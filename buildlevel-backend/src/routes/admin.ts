@@ -80,6 +80,10 @@ function normalizeTidioPublicKey(value?: string | null) {
   return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
 }
 
+function isLikelyUrl(value: string) {
+  return /^https?:\/\//i.test(value.trim());
+}
+
 function getStripeClient() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return null;
@@ -681,6 +685,14 @@ router.get("/printify/status", requireAdmin, async (req: Request, res: Response)
 router.post("/printify/credentials", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { apiKey, shopId } = req.body;
+    if (!apiKey || isLikelyUrl(apiKey)) {
+      res.status(400).json({ error: "Use your Printify API token, not the API address" });
+      return;
+    }
+    if (!shopId) {
+      res.status(400).json({ error: "Printify Shop ID is required" });
+      return;
+    }
     const db = await getDb();
     for (const [key, value] of [['printify_api_key', apiKey], ['printify_shop_id', shopId]]) {
       const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).limit(1);

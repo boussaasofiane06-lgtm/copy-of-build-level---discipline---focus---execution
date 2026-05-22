@@ -64,6 +64,10 @@ function isValidHttpUrl(value: string) {
   }
 }
 
+function isLikelyUrl(value: string) {
+  return /^https?:\/\//i.test(value.trim());
+}
+
 function socialEnvStatus(platform: string) {
   const upper = platform === "x" ? "X" : platform.toUpperCase();
   return {
@@ -501,7 +505,10 @@ export function registerRestCompatRoutes(app: Express) {
 
   app.post("/api/admin/printify/credentials", requireAdminRest, async (req, res) => {
     try {
-      const schema = z.object({ apiKey: z.string().min(1), shopId: z.string().min(1) });
+      const schema = z.object({
+        apiKey: z.string().min(1).refine(value => !isLikelyUrl(value), "Use your Printify API token, not the API address"),
+        shopId: z.string().min(1),
+      });
       const data = schema.parse(req.body);
       await saveSetting("printify_api_key", data.apiKey);
       await saveSetting("printify_shop_id", data.shopId);

@@ -200,6 +200,14 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
   };
 
   const savePrintify = async () => {
+    if (/^https?:\/\//i.test(printifyCredentials.apiKey.trim())) {
+      showToast("Paste your Printify API token, not the API address");
+      return;
+    }
+    if (!printifyCredentials.apiKey.trim() || !printifyCredentials.shopId.trim()) {
+      showToast("Printify API token and Shop ID are required");
+      return;
+    }
     try {
       await adminApi.savePrintifyCredentials(printifyCredentials);
       showToast("Printify credentials saved");
@@ -391,8 +399,11 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
           </p>
           <div style={{ display: "grid", gap: 12 }}>
             <div>
-              <label style={labelStyle}>API Key</label>
+              <label style={labelStyle}>API Token</label>
               <input style={inputStyle} type="password" value={printifyCredentials.apiKey} onChange={(e) => setPrintifyCredentials((current) => ({ ...current, apiKey: e.target.value }))} placeholder="Printify API token" />
+              <p style={{ color: "var(--text3)", fontSize: "0.74rem", marginTop: 6 }}>
+                Paste the token from Printify Account Settings → API Tokens. Do not paste https://api.printify.com.
+              </p>
             </div>
             <div>
               <label style={labelStyle}>Shop ID</label>
