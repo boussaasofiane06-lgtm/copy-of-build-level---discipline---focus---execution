@@ -24,6 +24,13 @@ export const MAX_THUMBNAIL_SIZE_BYTES = Number(process.env.MAX_THUMBNAIL_SIZE_MB
 
 type UploadKind = "digital" | "thumbnail";
 
+type UploadedFile = {
+  originalname: string;
+  mimetype: string;
+  size: number;
+  buffer: Buffer;
+};
+
 function storageConfig() {
   const bucket = process.env.UPLOAD_BUCKET || process.env.R2_BUCKET || process.env.S3_BUCKET;
   const endpoint = process.env.UPLOAD_ENDPOINT || process.env.R2_ENDPOINT || process.env.S3_ENDPOINT;
@@ -69,7 +76,7 @@ function normalizeName(name: string) {
     .toLowerCase();
 }
 
-export function validateUploadFile(file: Express.Multer.File, kind: UploadKind) {
+export function validateUploadFile(file: UploadedFile, kind: UploadKind) {
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExtensions = kind === "thumbnail" ? ALLOWED_IMAGE_EXTENSIONS : ALLOWED_UPLOAD_EXTENSIONS;
   const maxSize = kind === "thumbnail" ? MAX_THUMBNAIL_SIZE_BYTES : MAX_DIGITAL_FILE_SIZE_BYTES;
@@ -83,7 +90,7 @@ export function validateUploadFile(file: Express.Multer.File, kind: UploadKind) 
   }
 }
 
-export async function uploadObject(file: Express.Multer.File, kind: UploadKind) {
+export async function uploadObject(file: UploadedFile, kind: UploadKind) {
   validateUploadFile(file, kind);
 
   const { client, bucket, publicBaseUrl } = createClient();
