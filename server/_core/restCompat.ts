@@ -1,13 +1,15 @@
 import type { Express, Request, Response, NextFunction } from "express";
 import nodemailer from "nodemailer";
+import Stripe from "stripe";
 import { z } from "zod";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db";
-import { siteSettings } from "../../drizzle/schema";
+import { products, siteSettings } from "../../drizzle/schema";
 import { verifyAdminToken } from "./adminAuth";
 
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
 const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@thebuildlevel.com";
+const SHOPIFY_API_VERSION = "2024-01";
 
 function parseCookies(header?: string) {
   const map = new Map<string, string>();
@@ -71,6 +73,60 @@ function socialEnvStatus(platform: string) {
   };
 }
 
+function maskSecret(value?: string | null) {
+  if (!value) return "";
+  if (value.length <= 8) return "configured";
+  return `${value.slice(0, 4)}...${value.slice(-4)}`;
+}
+
+async function getShopifyCredentials() {
+  const settings = await getSettingsMap(["shopify_store_url", "shopify_api_key"]);
+  return {
+    storeUrl: process.env.SHOPIFY_STORE_URL || settings.shopify_store_url || "",
+    apiKey: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || settings.shopify_api_key || "",
+  };
+}
+
+async function getPrintifyCredentials() {
+  const settings = await getSettingsMap(["printify_api_key", "printify_shop_id"]);
+  return {
+    apiKey: process.env.PRINTIFY_API_KEY || settings.printify_api_key || "",
+    shopId: process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id || "",
+  };
+}
+
+function normalizeShopifyUrl(storeUrl: string) {
+  return storeUrl.startsWith("http") ? storeUrl : `https://${storeUrl}`;
+}
+
+async function shopifyRequest(path: string) {
+  const { storeUrl, apiKey } = await getShopifyCredentials();
+  if (!storeUrl || !apiKey) throw new Error("Shopify not configured");
+  const response = await fetch(`${normalizeShopifyUrl(storeUrl)}/admin/api/${SHOPIFY_API_VERSION}${path}`, {
+    headers: { "X-Shopify-Access-Token": apiKey },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Shopify API error: ${response.status}`);
+  return data;
+}
+
+async function printifyRequest(path: string) {
+  const { apiKey } = await getPrintifyCredentials();
+  if (!apiKey) throw new Error("Printify API key not configured");
+  const response = await fetch(`https://api.printify.com/v1${path}`, {
+    headers: { Authorization: `Bearer ${apiKey}` },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) throw new Error(`Printify API error: ${response.status}`);
+  return data;
+}
+
+function getStripeClient() {
+  const key = process.env.STRIPE_SECRET_KEY;
+  if (!key) return null;
+  return new Stripe(key, { apiVersion: "2026-04-22.dahlia" });
+}
+
 function isEmailConfigured() {
   return !!(process.env.ZOHO_SMTP_USER && process.env.ZOHO_SMTP_PASS);
 }
@@ -89,6 +145,137 @@ function getTransporter() {
 }
 
 export function registerRestCompatRoutes(app: Express) {
+  app.get("/api/admin/integrations/overview", requireAdminRest, async (_req, res) => {
+    try {
+      const settings = await getSettingsMap();
+      const shopify = await getShopifyCredentials();
+      const printify = await getPrintifyCredentials();
+      const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+      const stripeWebhookConfigured = !!process.env.STRIPE_WEBHOOK_SECRET;
+      res.json({
+        generatedAt: new Date().toISOString(),
+        integrations: {
+          shopify: {
+            connected: !!(shopify.storeUrl && shopify.apiKey),
+            storeUrl: shopify.storeUrl,
+            token: maskSecret(shopify.apiKey),
+            capabilities: ["products", "inventory", "orders", "customers", "webhooks"],
+          },
+          printify: {
+            connected: !!(printify.apiKey && printify.shopId),
+            shopId: printify.shopId,
+            token: maskSecret(printify.apiKey),
+            capabilities: ["publishing", "fulfillment", "orders", "inventory"],
+          },
+          stripe: {
+            connected: stripeConfigured,
+            webhookConfigured: stripeWebhookConfigured,
+            key: maskSecret(process.env.STRIPE_SECRET_KEY),
+            capabilities: ["payments", "transactions", "webhooks", "financial reporting"],
+          },
+          tidio: {
+            enabled: settings.tidio_enabled === "true",
+            configured: !!(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
+            publicKey: maskSecret(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
+            capabilities: ["chat controls", "chatbot settings", "support analytics"],
+          },
+          social: SOCIAL_PLATFORMS.map((platform) => ({
+            platform,
+            enabled: settings[`social_${platform}_enabled`] === "true",
+            handle: settings[`social_${platform}_handle`] || "",
+            url: settings[`social_${platform}_url`] || "",
+            analyticsEnabled: settings[`social_${platform}_analytics_enabled`] === "true",
+            oauth: socialEnvStatus(platform),
+          })),
+        },
+        automation: {
+          socialSchedulerEnabled: settings.social_scheduler_enabled === "true",
+          campaignName: settings.social_campaign_name || "",
+          socialSharingEnabled: settings.social_sharing_enabled === "true",
+        },
+        system: {
+          cloudflarePagesCompatible: true,
+          renderApiCompatible: true,
+          railwayDatabaseCompatible: true,
+          publicStorefrontExposure: false,
+        },
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/integrations/stripe/dashboard", requireAdminRest, async (_req, res) => {
+    try {
+      const stripe = getStripeClient();
+      if (!stripe) {
+        res.json({ connected: false, payments: [], sessions: [], message: "STRIPE_SECRET_KEY is not configured" });
+        return;
+      }
+      const [balance, payments, sessions] = await Promise.all([
+        stripe.balance.retrieve(),
+        stripe.paymentIntents.list({ limit: 10 }),
+        stripe.checkout.sessions.list({ limit: 10 }),
+      ]);
+      res.json({
+        connected: true,
+        webhookConfigured: !!process.env.STRIPE_WEBHOOK_SECRET,
+        balance,
+        payments: payments.data.map((payment) => ({
+          id: payment.id,
+          amount: payment.amount,
+          currency: payment.currency,
+          status: payment.status,
+          created: payment.created,
+          customer: payment.customer,
+        })),
+        sessions: sessions.data.map((session) => ({
+          id: session.id,
+          amountTotal: session.amount_total,
+          currency: session.currency,
+          paymentStatus: session.payment_status,
+          customerEmail: session.customer_details?.email || session.customer_email,
+          created: session.created,
+        })),
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/integrations/tidio/config", requireAdminRest, async (_req, res) => {
+    try {
+      const settings = await getSettingsMap();
+      res.json({
+        enabled: settings.tidio_enabled === "true",
+        publicKey: settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "",
+        chatControls: settings.tidio_chat_controls || "manual",
+        chatbotSettings: settings.tidio_chatbot_settings || "",
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/integrations/tidio/config", requireAdminRest, async (req, res) => {
+    try {
+      const schema = z.object({
+        enabled: z.boolean().default(false),
+        publicKey: z.string().optional().default(""),
+        chatControls: z.string().optional().default("manual"),
+        chatbotSettings: z.string().optional().default(""),
+      });
+      const data = schema.parse(req.body);
+      await saveSetting("tidio_enabled", String(data.enabled));
+      await saveSetting("tidio_public_key", data.publicKey);
+      await saveSetting("tidio_chat_controls", data.chatControls);
+      await saveSetting("tidio_chatbot_settings", data.chatbotSettings);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   app.get("/api/social-links", async (_req, res) => {
     try {
       const settings = await getSettingsMap();
@@ -202,5 +389,170 @@ export function registerRestCompatRoutes(app: Express) {
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
+  });
+
+  app.post("/api/admin/integrations/test/:provider", requireAdminRest, async (req, res) => {
+    try {
+      const provider = req.params.provider;
+      if (provider === "shopify") {
+        await shopifyRequest(`/shop.json`);
+        res.json({ ok: true, message: "Shopify connected" });
+        return;
+      }
+      if (provider === "printify") {
+        await printifyRequest(`/shops.json`);
+        res.json({ ok: true, message: "Printify connected" });
+        return;
+      }
+      if (provider === "stripe") {
+        const stripe = getStripeClient();
+        if (!stripe) { res.json({ ok: false, message: "STRIPE_SECRET_KEY not configured" }); return; }
+        await stripe.balance.retrieve();
+        res.json({ ok: true, message: "Stripe connected" });
+        return;
+      }
+      if (provider === "tidio") {
+        const settings = await getSettingsMap(["tidio_public_key"]);
+        res.json({ ok: !!(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY), message: settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY ? "Tidio public key configured" : "Tidio public key missing" });
+        return;
+      }
+      res.status(404).json({ error: "Unsupported provider" });
+    } catch (e: any) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.get("/api/admin/shopify/status", requireAdminRest, async (_req, res) => {
+    const creds = await getShopifyCredentials();
+    res.json({ connected: !!(creds.storeUrl && creds.apiKey), storeUrl: creds.storeUrl });
+  });
+
+  app.post("/api/admin/shopify/credentials", requireAdminRest, async (req, res) => {
+    try {
+      const schema = z.object({ storeUrl: z.string().min(1), apiKey: z.string().min(1) });
+      const data = schema.parse(req.body);
+      await saveSetting("shopify_store_url", data.storeUrl);
+      await saveSetting("shopify_api_key", data.apiKey);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/shopify/products", requireAdminRest, async (_req, res) => {
+    try { res.json(await shopifyRequest(`/products.json?limit=20&status=active`)); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/shopify/orders", requireAdminRest, async (_req, res) => {
+    try { res.json(await shopifyRequest(`/orders.json?limit=20&status=any`)); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/shopify/customers", requireAdminRest, async (_req, res) => {
+    try { res.json(await shopifyRequest(`/customers.json?limit=20`)); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/shopify/inventory", requireAdminRest, async (_req, res) => {
+    try {
+      const data = await shopifyRequest(`/products.json?limit=20&fields=id,title,variants`);
+      res.json({ products: data.products || [] });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/shopify/webhooks", requireAdminRest, async (_req, res) => {
+    try { res.json(await shopifyRequest(`/webhooks.json?limit=50`)); }
+    catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/shopify/sync", requireAdminRest, async (_req, res) => {
+    try {
+      const [productsData, ordersData, customersData, webhooksData] = await Promise.all([
+        shopifyRequest(`/products.json?limit=20&status=active`),
+        shopifyRequest(`/orders.json?limit=20&status=any`),
+        shopifyRequest(`/customers.json?limit=20`),
+        shopifyRequest(`/webhooks.json?limit=50`),
+      ]);
+      res.json({
+        success: true,
+        products: productsData,
+        orders: ordersData,
+        customers: customersData,
+        webhooks: webhooksData,
+        summary: {
+          products: productsData.products?.length ?? 0,
+          orders: ordersData.orders?.length ?? 0,
+          customers: customersData.customers?.length ?? 0,
+          webhooks: webhooksData.webhooks?.length ?? 0,
+        },
+      });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/admin/printify/status", requireAdminRest, async (_req, res) => {
+    const creds = await getPrintifyCredentials();
+    res.json({ connected: !!(creds.apiKey && creds.shopId), shopId: creds.shopId });
+  });
+
+  app.post("/api/admin/printify/credentials", requireAdminRest, async (req, res) => {
+    try {
+      const schema = z.object({ apiKey: z.string().min(1), shopId: z.string().min(1) });
+      const data = schema.parse(req.body);
+      await saveSetting("printify_api_key", data.apiKey);
+      await saveSetting("printify_shop_id", data.shopId);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/printify/products", requireAdminRest, async (_req, res) => {
+    try {
+      const { shopId } = await getPrintifyCredentials();
+      if (!shopId) throw new Error("Printify shop ID not configured");
+      res.json(await printifyRequest(`/shops/${shopId}/products.json?page=1&limit=20`));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/printify/orders", requireAdminRest, async (_req, res) => {
+    try {
+      const { shopId } = await getPrintifyCredentials();
+      if (!shopId) throw new Error("Printify shop ID not configured");
+      res.json(await printifyRequest(`/shops/${shopId}/orders.json?page=1&limit=20`));
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/printify/inventory", requireAdminRest, async (_req, res) => {
+    try {
+      const { shopId } = await getPrintifyCredentials();
+      if (!shopId) throw new Error("Printify shop ID not configured");
+      const data = await printifyRequest(`/shops/${shopId}/products.json?page=1&limit=20`);
+      res.json({ products: data.data || [] });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.get("/api/admin/printify/sync", requireAdminRest, async (_req, res) => {
+    try {
+      const { shopId } = await getPrintifyCredentials();
+      if (!shopId) throw new Error("Printify shop ID not configured");
+      const [productsData, ordersData] = await Promise.all([
+        printifyRequest(`/shops/${shopId}/products.json?page=1&limit=20`),
+        printifyRequest(`/shops/${shopId}/orders.json?page=1&limit=20`),
+      ]);
+      res.json({
+        success: true,
+        products: productsData,
+        orders: ordersData,
+        summary: { products: productsData.data?.length ?? 0, orders: ordersData.data?.length ?? 0 },
+      });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.post("/api/admin/printify/publish", requireAdminRest, async (req, res) => {
+    try {
+      const schema = z.object({ printifyProductId: z.string().min(1) });
+      const { printifyProductId } = schema.parse(req.body);
+      const { shopId, apiKey } = await getPrintifyCredentials();
+      if (!shopId || !apiKey) throw new Error("Printify not configured");
+      const response = await fetch(`https://api.printify.com/v1/shops/${shopId}/products/${printifyProductId}/publish.json`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ title: true, description: true, images: true, variants: true, tags: true, keyFeatures: true, shipping_template: true }),
+      });
+      const data = await response.json().catch(() => ({}));
+      res.status(response.ok ? 200 : response.status).json({ success: response.ok, data });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 }
