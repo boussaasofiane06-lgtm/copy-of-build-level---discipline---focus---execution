@@ -6,6 +6,7 @@ import { getDb } from "../db/index.js";
 import { digitalProducts, digitalPurchases, products, siteSettings } from "../db/schema.js";
 
 const router = Router();
+const MAX_PHYSICAL_METADATA_ITEMS = 15;
 
 function getStripeSecretKey() {
   const raw = (process.env.STRIPE_SECRET_KEY || "").trim();
@@ -61,10 +62,10 @@ function buildPhysicalCheckoutMetadata(items: PhysicalCheckoutItem[]) {
   const metadata: Record<string, string> = {
     type: "physical",
     source: "build_level_store",
-    item_count: String(Math.min(items.length, 16)),
+    item_count: String(Math.min(items.length, MAX_PHYSICAL_METADATA_ITEMS)),
   };
 
-  items.slice(0, 16).forEach((item, index) => {
+  items.slice(0, MAX_PHYSICAL_METADATA_ITEMS).forEach((item, index) => {
     const productId = cleanText(item.productId);
     const size = cleanText(item.size);
     metadata[`item_${index}_product_id`] = productId;
@@ -77,7 +78,7 @@ function buildPhysicalCheckoutMetadata(items: PhysicalCheckoutItem[]) {
 
 function readPhysicalFulfillmentItems(metadata?: Stripe.Metadata | null): PhysicalFulfillmentItem[] {
   if (!metadata || metadata.type !== "physical") return [];
-  const itemCount = Math.min(Math.max(Number(metadata.item_count || 0), 0), 16);
+  const itemCount = Math.min(Math.max(Number(metadata.item_count || 0), 0), MAX_PHYSICAL_METADATA_ITEMS);
   const items: PhysicalFulfillmentItem[] = [];
 
   for (let index = 0; index < itemCount; index += 1) {
@@ -308,6 +309,14 @@ router.post("/checkout", async (req: Request, res: Response) => {
       priceUSD: Number(item.priceUSD),
       quantity: Math.max(1, Number(item.quantity || 1)),
     }));
+    if (checkoutItems.length > MAX_PHYSICAL_METADATA_ITEMS) {
+      res.status(400).json({ error: `Checkout supports up to ${MAX_PHYSICAL_METADATA_ITEMS} unique cart items at once` });
+      return;
+    }
+    if (checkoutItems.some((item) => !item.name || !Number.isFinite(item.priceUSD) || item.priceUSD <= 0)) {
+      res.status(400).json({ error: "Checkout contains an invalid product" });
+      return;
+    }
 
     const session = await createCheckoutSessionDirect({
       lineItems: checkoutItems.map((item) => ({
