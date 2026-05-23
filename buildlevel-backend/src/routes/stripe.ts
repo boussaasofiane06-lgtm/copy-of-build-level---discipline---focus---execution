@@ -13,35 +13,93 @@ function getStripe() {
   });
 }
 
+type CheckoutLineItem = {
+  name: string;
+  unitAmount: number;
+  quantity: number;
+  image?: string;
+};
+
+async function createCheckoutSessionDirect({
+  lineItems,
+  successUrl,
+  cancelUrl,
+  customerEmail,
+  metadata,
+  shippingCountries,
+}: {
+  lineItems: CheckoutLineItem[];
+  successUrl: string;
+  cancelUrl: string;
+  customerEmail?: string;
+  metadata?: Record<string, string>;
+  shippingCountries?: string[];
+}) {
+  const secretKey = process.env.STRIPE_SECRET_KEY;
+  if (!secretKey) throw new Error("STRIPE_SECRET_KEY is not configured");
+
+  const body = new URLSearchParams();
+  body.set("mode", "payment");
+  body.set("success_url", successUrl);
+  body.set("cancel_url", cancelUrl);
+  body.set("allow_promotion_codes", "true");
+  if (customerEmail) body.set("customer_email", customerEmail);
+
+  lineItems.forEach((item, index) => {
+    body.set(`line_items[${index}][price_data][currency]`, "usd");
+    body.set(`line_items[${index}][price_data][product_data][name]`, item.name);
+    if (item.image) body.set(`line_items[${index}][price_data][product_data][images][0]`, item.image);
+    body.set(`line_items[${index}][price_data][unit_amount]`, String(item.unitAmount));
+    body.set(`line_items[${index}][quantity]`, String(item.quantity));
+  });
+
+  shippingCountries?.forEach((country, index) => {
+    body.set(`shipping_address_collection[allowed_countries][${index}]`, country);
+  });
+
+  for (const [key, value] of Object.entries(metadata || {})) {
+    body.set(`metadata[${key}]`, value);
+  }
+
+  const response = await fetch("https://api.stripe.com/v1/checkout/sessions", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${secretKey}`,
+      "Content-Type": "application/x-www-form-urlencoded",
+    },
+    body,
+  });
+
+  const data = await response.json() as { url?: string; error?: { message?: string } };
+  if (!response.ok || !data.url) {
+    throw new Error(data.error?.message || `Stripe checkout failed with ${response.status}`);
+  }
+
+  return data;
+}
+
 // ─── Physical product checkout ────────────────────────────────────────────────
 router.post("/checkout", async (req: Request, res: Response) => {
   try {
-    const stripe = getStripe();
     const { items, currency = "usd", customerEmail } = req.body;
     const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
 
-    const lineItems = items.map((item: any) => ({
-      price_data: {
-        currency,
-        product_data: {
-          name: item.name,
-          images: item.image ? [item.image] : [],
-        },
-        unit_amount: Math.round(item.priceUSD * 100),
-      },
-      quantity: item.quantity,
-    }));
+    if (!Array.isArray(items) || items.length === 0) {
+      res.status(400).json({ error: "Checkout requires at least one item" });
+      return;
+    }
 
-    const session = await stripe.checkout.sessions.create({
-      line_items: lineItems,
-      mode: "payment",
-      customer_email: customerEmail || undefined,
-      allow_promotion_codes: true,
-      shipping_address_collection: {
-        allowed_countries: ["US", "GB", "CA", "AU", "DE", "FR", "JP", "NG", "ZA", "AE"],
-      },
-      success_url: `${origin}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/shop`,
+    const session = await createCheckoutSessionDirect({
+      lineItems: items.map((item: any) => ({
+        name: item.name,
+        image: item.image,
+        unitAmount: Math.round(Number(item.priceUSD) * 100),
+        quantity: Number(item.quantity || 1),
+      })),
+      customerEmail,
+      shippingCountries: ["US", "GB", "CA", "AU", "DE", "FR", "JP", "NG", "ZA", "AE"],
+      successUrl: `${origin}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/shop`,
     });
 
     res.json({ url: session.url });
@@ -53,7 +111,6 @@ router.post("/checkout", async (req: Request, res: Response) => {
 // ─── Digital product checkout ─────────────────────────────────────────────────
 router.post("/digital-checkout", async (req: Request, res: Response) => {
   try {
-    const stripe = getStripe();
     const { productId, customerEmail } = req.body;
     const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
 
@@ -61,20 +118,16 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
     const [product] = await db.select().from(digitalProducts).where(eq(digitalProducts.id, productId)).limit(1);
     if (!product) { res.status(404).json({ error: "Product not found" }); return; }
 
-    const session = await stripe.checkout.sessions.create({
-      line_items: [{
-        price_data: {
-          currency: "usd",
-          product_data: { name: product.name },
-          unit_amount: Math.round(parseFloat(product.price) * 100),
-        },
+    const session = await createCheckoutSessionDirect({
+      lineItems: [{
+        name: product.name,
+        unitAmount: Math.round(parseFloat(product.price) * 100),
         quantity: 1,
       }],
-      mode: "payment",
-      customer_email: customerEmail || undefined,
+      customerEmail,
       metadata: { productId: String(productId), type: "digital" },
-      success_url: `${origin}/digital?purchased=true&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/digital`,
+      successUrl: `${origin}/digital?purchased=true&session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/digital`,
     });
 
     res.json({ url: session.url });
