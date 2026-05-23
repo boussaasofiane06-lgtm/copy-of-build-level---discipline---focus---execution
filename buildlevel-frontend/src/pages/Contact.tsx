@@ -17,7 +17,7 @@ export default function Contact() {
       if (result.success !== true) throw new Error("Delivery failed");
       setSent(true);
     } catch {
-      setError("Message delivery failed. Please try again or email info@buildlevel.com directly.");
+      setError("Message delivery failed. Please try again or email info@thebuildlevel.com directly.");
     } finally {
       setSending(false);
     }
@@ -29,7 +29,7 @@ export default function Contact() {
         <div className="container">
           <h1 style={{ marginBottom: 8 }}>Contact</h1>
           <p style={{ color: "var(--text2)" }}>Get in touch with the BUILD LEVEL team.</p>
-          <a href="mailto:info@buildlevel.com" style={{ color: "var(--red)", fontFamily: "var(--font-display)", letterSpacing: "0.08em", fontSize: "0.85rem" }}>info@buildlevel.com</a>
+          <a href="mailto:info@thebuildlevel.com" style={{ color: "var(--red)", fontFamily: "var(--font-display)", letterSpacing: "0.08em", fontSize: "0.85rem" }}>info@thebuildlevel.com</a>
         </div>
       </div>
 

@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 
-const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@buildlevel.com";
+const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@thebuildlevel.com";
 
 function cleanEnv(value?: string) {
   return (value || "").trim();
