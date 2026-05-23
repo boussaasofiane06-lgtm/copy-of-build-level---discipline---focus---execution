@@ -89,6 +89,12 @@ export default function Admin() {
     const { audience: _audience, ...productPayload } = productForm;
     const data = { ...productPayload, price: parseFloat(productForm.price), compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined, sizes: productForm.sizes.split(",").map(s => s.trim()).filter(Boolean) };
     try {
+      if (!data.name.trim()) throw new Error("Product name is required");
+      if (!Number.isFinite(data.price) || data.price <= 0) throw new Error("Product price must be greater than 0");
+      if (!data.category.trim()) throw new Error("Product category is required");
+      if (data.imageUrl && data.imageUrl.length > 1_500_000) {
+        throw new Error("Image is too large. Upload a smaller image or use an image URL.");
+      }
       if (editProduct?.id) await adminApi.updateProduct(editProduct.id, data as any);
       else await adminApi.createProduct(data as any);
       showToast(editProduct?.id ? "Product updated!" : "Product created!");
@@ -96,20 +102,45 @@ export default function Admin() {
       setCustomProductCategory("");
       setProductImagePreviews([]);
       loadData();
-    } catch { showToast("Error saving product"); }
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || error?.message || "Error saving product");
+    }
   };
+
+  const compressImageFile = (file: File) => new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const img = new Image();
+      img.onload = () => {
+        const maxSide = 1400;
+        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+        const width = Math.max(1, Math.round(img.width * scale));
+        const height = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = width;
+        canvas.height = height;
+        const context = canvas.getContext("2d");
+        if (!context) {
+          reject(new Error("Could not process image"));
+          return;
+        }
+        context.drawImage(img, 0, 0, width, height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      img.onerror = () => reject(new Error("Could not load image"));
+      img.src = String(reader.result);
+    };
+    reader.onerror = () => reject(reader.error || new Error("Could not read image"));
+    reader.readAsDataURL(file);
+  });
 
   const handleProductImageFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
-    const dataUrls = await Promise.all(imageFiles.map(file => new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    })));
+    const dataUrls = await Promise.all(imageFiles.slice(0, 6).map(compressImageFile));
     setProductImagePreviews(dataUrls);
     if (dataUrls[0]) setProductForm(f => ({ ...f, imageUrl: dataUrls[0] }));
+    showToast("Images optimized for storefront upload");
   };
 
   const deleteProduct = async (id: number) => {
