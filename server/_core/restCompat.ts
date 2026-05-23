@@ -11,6 +11,14 @@ const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pi
 const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@buildlevel.com";
 const SHOPIFY_API_VERSION = "2024-01";
 
+function cleanEnv(value?: string) {
+  return (value || "").trim();
+}
+
+function cleanSecret(value?: string) {
+  return cleanEnv(value).replace(/\s+/g, "");
+}
+
 function parseCookies(header?: string) {
   const map = new Map<string, string>();
   if (!header) return map;
@@ -140,18 +148,18 @@ function getStripeClient() {
 }
 
 function isEmailConfigured() {
-  return !!(process.env.ZOHO_SMTP_USER && process.env.ZOHO_SMTP_PASS);
+  return !!(cleanEnv(process.env.ZOHO_SMTP_USER) && cleanSecret(process.env.ZOHO_SMTP_PASS));
 }
 
 function getTransporter() {
   if (!isEmailConfigured()) throw new Error("Zoho SMTP is not configured");
   return nodemailer.createTransport({
-    host: process.env.ZOHO_SMTP_HOST || "smtp.zoho.com",
-    port: Number(process.env.ZOHO_SMTP_PORT || 465),
-    secure: String(process.env.ZOHO_SMTP_SECURE || "true") === "true",
+    host: cleanEnv(process.env.ZOHO_SMTP_HOST) || "smtp.zoho.com",
+    port: Number(cleanEnv(process.env.ZOHO_SMTP_PORT) || 465),
+    secure: String(cleanEnv(process.env.ZOHO_SMTP_SECURE) || "true") === "true",
     auth: {
-      user: process.env.ZOHO_SMTP_USER,
-      pass: process.env.ZOHO_SMTP_PASS,
+      user: cleanEnv(process.env.ZOHO_SMTP_USER),
+      pass: cleanSecret(process.env.ZOHO_SMTP_PASS),
     },
   });
 }
@@ -328,7 +336,7 @@ export function registerRestCompatRoutes(app: Express) {
       });
       const data = schema.parse(req.body);
       const transporter = getTransporter();
-      const from = process.env.ZOHO_SMTP_FROM || BUSINESS_EMAIL;
+      const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
       await transporter.sendMail({
         from,
         to: BUSINESS_EMAIL,

@@ -2,8 +2,16 @@ import nodemailer from "nodemailer";
 
 const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@buildlevel.com";
 
+function cleanEnv(value?: string) {
+  return (value || "").trim();
+}
+
+function cleanSecret(value?: string) {
+  return cleanEnv(value).replace(/\s+/g, "");
+}
+
 export function isEmailConfigured() {
-  return !!(process.env.ZOHO_SMTP_USER && process.env.ZOHO_SMTP_PASS);
+  return !!(cleanEnv(process.env.ZOHO_SMTP_USER) && cleanSecret(process.env.ZOHO_SMTP_PASS));
 }
 
 function getTransporter() {
@@ -12,12 +20,12 @@ function getTransporter() {
   }
 
   return nodemailer.createTransport({
-    host: process.env.ZOHO_SMTP_HOST || "smtp.zoho.com",
-    port: Number(process.env.ZOHO_SMTP_PORT || 465),
-    secure: String(process.env.ZOHO_SMTP_SECURE || "true") === "true",
+    host: cleanEnv(process.env.ZOHO_SMTP_HOST) || "smtp.zoho.com",
+    port: Number(cleanEnv(process.env.ZOHO_SMTP_PORT) || 465),
+    secure: String(cleanEnv(process.env.ZOHO_SMTP_SECURE) || "true") === "true",
     auth: {
-      user: process.env.ZOHO_SMTP_USER,
-      pass: process.env.ZOHO_SMTP_PASS,
+      user: cleanEnv(process.env.ZOHO_SMTP_USER),
+      pass: cleanSecret(process.env.ZOHO_SMTP_PASS),
     },
   });
 }
@@ -34,7 +42,7 @@ export async function sendBusinessEmail({
   replyTo?: string;
 }) {
   const transporter = getTransporter();
-  const from = process.env.ZOHO_SMTP_FROM || BUSINESS_EMAIL;
+  const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
 
   await transporter.sendMail({
     from,
@@ -58,7 +66,7 @@ export async function sendCustomerEmail({
   html?: string;
 }) {
   const transporter = getTransporter();
-  const from = process.env.ZOHO_SMTP_FROM || BUSINESS_EMAIL;
+  const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
 
   await transporter.sendMail({
     from,
