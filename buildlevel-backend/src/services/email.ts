@@ -1,6 +1,6 @@
 import nodemailer from "nodemailer";
 
-const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@thebuildlevel.com";
+const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@buildlevel.com";
 
 export function isEmailConfigured() {
   return !!(process.env.ZOHO_SMTP_USER && process.env.ZOHO_SMTP_PASS);

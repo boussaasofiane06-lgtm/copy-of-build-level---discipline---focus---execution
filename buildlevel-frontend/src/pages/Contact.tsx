@@ -8,14 +8,6 @@ export default function Contact() {
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
 
-  const buildMailtoLink = () => {
-    const subject = encodeURIComponent(`Build Level contact from ${form.name || "customer"}`);
-    const body = encodeURIComponent(
-      `Name: ${form.name}\nEmail: ${form.email}\n\nMessage:\n${form.message}`
-    );
-    return `mailto:info@thebuildlevel.com?subject=${subject}&body=${body}`;
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSending(true);
@@ -25,8 +17,7 @@ export default function Contact() {
       if (result.success !== true) throw new Error("Delivery failed");
       setSent(true);
     } catch {
-      window.location.href = buildMailtoLink();
-      setError("Email app opened with your message. If it did not open, email info@thebuildlevel.com directly.");
+      setError("Message delivery failed. Please try again or email info@buildlevel.com directly.");
     } finally {
       setSending(false);
     }
@@ -38,7 +29,7 @@ export default function Contact() {
         <div className="container">
           <h1 style={{ marginBottom: 8 }}>Contact</h1>
           <p style={{ color: "var(--text2)" }}>Get in touch with the BUILD LEVEL team.</p>
-          <a href="mailto:info@thebuildlevel.com" style={{ color: "var(--red)", fontFamily: "var(--font-display)", letterSpacing: "0.08em", fontSize: "0.85rem" }}>info@thebuildlevel.com</a>
+          <a href="mailto:info@buildlevel.com" style={{ color: "var(--red)", fontFamily: "var(--font-display)", letterSpacing: "0.08em", fontSize: "0.85rem" }}>info@buildlevel.com</a>
         </div>
       </div>
 
@@ -70,9 +61,6 @@ export default function Contact() {
             {error && (
               <div style={{ color: "var(--red)", fontSize: "0.85rem", lineHeight: 1.6 }}>
                 <p>{error}</p>
-                <a href={buildMailtoLink()} className="btn btn-outline btn-sm" style={{ marginTop: 10 }}>
-                  Open Email App
-                </a>
               </div>
             )}
             <button type="submit" disabled={sending} className="btn btn-primary">

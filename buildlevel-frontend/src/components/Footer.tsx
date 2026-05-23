@@ -44,7 +44,7 @@ export default function Footer() {
                   onMouseLeave={e => (e.currentTarget.style.color = "var(--text3)")}
                 >{label}</Link>
               ))}
-              <a href="mailto:info@thebuildlevel.com" style={{ color: "var(--text3)", fontSize: "0.85rem", transition: "color 0.2s" }}>info@thebuildlevel.com</a>
+              <a href="mailto:info@buildlevel.com" style={{ color: "var(--text3)", fontSize: "0.85rem", transition: "color 0.2s" }}>info@buildlevel.com</a>
             </div>
           </div>
         </div>

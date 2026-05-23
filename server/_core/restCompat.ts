@@ -8,7 +8,7 @@ import { products, siteSettings } from "../../drizzle/schema";
 import { verifyAdminToken } from "./adminAuth";
 
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
-const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@thebuildlevel.com";
+const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@buildlevel.com";
 const SHOPIFY_API_VERSION = "2024-01";
 
 function parseCookies(header?: string) {
