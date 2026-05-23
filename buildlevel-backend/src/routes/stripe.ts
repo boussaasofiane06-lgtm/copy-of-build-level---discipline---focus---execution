@@ -34,6 +34,10 @@ type CheckoutLineItem = {
   image?: string;
 };
 
+function isStripeImageUrl(value?: string) {
+  return !!value && /^https?:\/\//i.test(value);
+}
+
 async function createCheckoutSessionDirect({
   lineItems,
   successUrl,
@@ -61,7 +65,7 @@ async function createCheckoutSessionDirect({
   lineItems.forEach((item, index) => {
     body.set(`line_items[${index}][price_data][currency]`, "usd");
     body.set(`line_items[${index}][price_data][product_data][name]`, item.name);
-    if (item.image) body.set(`line_items[${index}][price_data][product_data][images][0]`, item.image);
+    if (isStripeImageUrl(item.image)) body.set(`line_items[${index}][price_data][product_data][images][0]`, item.image);
     body.set(`line_items[${index}][price_data][unit_amount]`, String(item.unitAmount));
     body.set(`line_items[${index}][quantity]`, String(item.quantity));
   });

@@ -112,7 +112,12 @@ export default function Shop() {
     if (!cart.length) return;
     setCheckingOut(true);
     try {
-      const items = cart.map(i => ({ name: `${i.product.name}${i.size ? ` (${i.size})` : ""}`, priceUSD: parseFloat(i.product.price), quantity: i.quantity, image: i.product.imageUrl || undefined }));
+      const items = cart.map(i => ({
+        name: `${i.product.name}${i.size ? ` (${i.size})` : ""}`,
+        priceUSD: parseFloat(i.product.price),
+        quantity: i.quantity,
+        image: i.product.imageUrl?.startsWith("http") ? i.product.imageUrl : undefined,
+      }));
       const { url } = await publicApi.createCheckout(items);
       window.location.assign(url);
     } catch (e) {
