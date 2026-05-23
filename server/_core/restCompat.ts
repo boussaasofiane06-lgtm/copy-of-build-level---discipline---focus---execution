@@ -148,6 +148,47 @@ async function printifyRequest(path: string) {
   return data;
 }
 
+async function syncPrintifyProductToStore(printifyProductId: string) {
+  const { shopId } = await getPrintifyCredentials();
+  if (!shopId) throw new Error("Printify shop ID not configured");
+
+  const product = await printifyRequest(`/shops/${shopId}/products/${printifyProductId}.json`);
+  const firstVariant = product.variants?.[0];
+  const price = firstVariant ? (Number(firstVariant.price || 0) / 100).toFixed(2) : "29.99";
+  const imageUrl = product.images?.[0]?.src || "";
+  const sizes = (product.variants || [])
+    .map((variant: any) => String(variant.title || "").trim())
+    .filter(Boolean)
+    .slice(0, 12);
+  const db = await getDb();
+  const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  const values = {
+    name: product.title || "Printify Product",
+    description: product.description || "",
+    price,
+    category: "mens-t-shirts",
+    sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
+    imageUrl,
+    badge: product.visible ? "New Release" : "Coming Soon",
+    inStock: true,
+    published: true,
+    hidden: false,
+    delisted: false,
+    featured: false,
+    printifyProductId,
+    updatedAt: new Date(),
+  };
+
+  if (existing.length > 0) {
+    await db.update(products).set(values).where(eq(products.printifyProductId, printifyProductId));
+    return { productId: existing[0].id, updated: true };
+  }
+
+  await db.insert(products).values(values);
+  const [created] = await db.select({ id: products.id }).from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  return { productId: created?.id ?? 0, updated: false };
+}
+
 function getStripeClient() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return null;
@@ -640,7 +681,12 @@ export function registerRestCompatRoutes(app: Express) {
         body: JSON.stringify({ title: true, description: true, images: true, variants: true, tags: true, keyFeatures: true, shipping_template: true }),
       });
       const data = await response.json().catch(() => ({}));
-      res.status(response.ok ? 200 : response.status).json({ success: response.ok, data });
+      if (!response.ok) {
+        res.status(response.status).json({ success: false, data });
+        return;
+      }
+      const storeProduct = await syncPrintifyProductToStore(printifyProductId);
+      res.json({ success: true, data, storeProduct });
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 }

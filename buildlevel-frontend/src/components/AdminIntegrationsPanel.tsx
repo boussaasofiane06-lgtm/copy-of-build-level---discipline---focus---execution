@@ -269,7 +269,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     setTesting("printify-publish");
     try {
       const result = await adminApi.publishPrintifyProduct(printifyProductId);
-      showToast(result.success ? "Printify product publish requested" : "Printify publish failed");
+      showToast(result.success ? "Printify product published to website" : "Printify publish failed");
     } catch (error: any) {
       showToast(error?.response?.data?.error || "Printify publish needs configuration");
     } finally {
@@ -422,7 +422,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button type="button" onClick={savePrintify} className="btn btn-primary btn-sm">Save Printify</button>
               <button type="button" onClick={() => testProvider("printify")} className="btn btn-outline btn-sm">Validate</button>
-              <button type="button" onClick={() => publishPrintify()} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish Product</button>
+              <button type="button" onClick={() => publishPrintify()} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish to Website</button>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(["products", "inventory", "orders", "sync"] as const).map((action) => (
@@ -443,7 +443,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
                       <div style={{ color: "var(--text3)", fontSize: "0.7rem" }}>{product.visible ? "Visible" : "Draft"} · {product.is_locked ? "Locked" : "Editable"}</div>
                     </div>
                     <button type="button" onClick={() => publishPrintify(product.id)} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>
-                      Publish
+                      Publish to Website
                     </button>
                   </div>
                 ))}

@@ -717,6 +717,45 @@ async function getPrintifyCredentials() {
   };
 }
 
+async function syncPrintifyProductToStore(printifyProductId: string) {
+  const { shopId } = await getPrintifyCredentials();
+  if (!shopId) throw new Error("Printify shop ID not configured");
+  const r = await fetch(`https://api.printify.com/v1/shops/${shopId}/products/${printifyProductId}.json`, {
+    headers: { Authorization: `Bearer ${(await getPrintifyCredentials()).apiKey}` },
+  });
+  if (!r.ok) throw new Error(`Printify product fetch failed: ${r.status}`);
+  const product = await r.json();
+  const firstVariant = product.variants?.[0];
+  const price = firstVariant ? (Number(firstVariant.price || 0) / 100).toFixed(2) : "29.99";
+  const imageUrl = product.images?.[0]?.src || "";
+  const sizes = (product.variants || []).map((variant: any) => String(variant.title || "").trim()).filter(Boolean).slice(0, 12);
+  const db = await getDb();
+  const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  const values = {
+    name: product.title || "Printify Product",
+    description: product.description || "",
+    price,
+    category: "mens-t-shirts",
+    sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
+    imageUrl,
+    badge: product.visible ? "New Release" : "Coming Soon",
+    inStock: true,
+    published: true,
+    hidden: false,
+    delisted: false,
+    featured: false,
+    printifyProductId,
+    updatedAt: new Date(),
+  };
+  if (existing.length > 0) {
+    await db.update(products).set(values).where(eq(products.printifyProductId, printifyProductId));
+    return { productId: existing[0].id, updated: true };
+  }
+  await db.insert(products).values(values);
+  const [created] = await db.select({ id: products.id }).from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  return { productId: created?.id ?? 0, updated: false };
+}
+
 router.get("/printify/status", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { apiKey, shopId } = await getPrintifyCredentials();
@@ -819,7 +858,12 @@ router.post("/printify/publish", requireAdmin, async (req: Request, res: Respons
       }),
     });
     const data = await r.json().catch(() => ({}));
-    res.status(r.ok ? 200 : r.status).json({ success: r.ok, data });
+    if (!r.ok) {
+      res.status(r.status).json({ success: false, data });
+      return;
+    }
+    const storeProduct = await syncPrintifyProductToStore(printifyProductId);
+    res.json({ success: true, data, storeProduct });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
