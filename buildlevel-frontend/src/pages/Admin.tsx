@@ -119,20 +119,37 @@ export default function Admin() {
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const maxSide = 1400;
-        const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
-        const width = Math.max(1, Math.round(img.width * scale));
-        const height = Math.max(1, Math.round(img.height * scale));
+        const maxDataUrlLength = 55_000;
         const canvas = document.createElement("canvas");
-        canvas.width = width;
-        canvas.height = height;
-        const context = canvas.getContext("2d");
-        if (!context) {
-          reject(new Error("Could not process image"));
+        let maxSide = 720;
+        let quality = 0.72;
+        let output = "";
+
+        for (let attempt = 0; attempt < 8; attempt += 1) {
+          const scale = Math.min(1, maxSide / Math.max(img.width, img.height));
+          const width = Math.max(1, Math.round(img.width * scale));
+          const height = Math.max(1, Math.round(img.height * scale));
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          if (!context) {
+            reject(new Error("Could not process image"));
+            return;
+          }
+          context.clearRect(0, 0, width, height);
+          context.drawImage(img, 0, 0, width, height);
+          output = canvas.toDataURL("image/jpeg", quality);
+          if (output.length <= maxDataUrlLength) break;
+          maxSide = Math.max(360, Math.round(maxSide * 0.78));
+          quality = Math.max(0.5, quality - 0.08);
+        }
+
+        if (output.length > maxDataUrlLength) {
+          reject(new Error("Image is still too large. Use a smaller image or image URL."));
           return;
         }
-        context.drawImage(img, 0, 0, width, height);
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
+
+        resolve(output);
       };
       img.onerror = () => reject(new Error("Could not load image"));
       img.src = String(reader.result);
@@ -147,7 +164,7 @@ export default function Admin() {
     const dataUrls = await Promise.all(imageFiles.slice(0, 6).map(compressImageFile));
     setProductImagePreviews(dataUrls);
     if (dataUrls[0]) setProductForm(f => ({ ...f, imageUrl: dataUrls[0] }));
-    showToast("Images optimized for storefront upload");
+    showToast("Image ready — tap Save Product to publish");
   };
 
   const deleteProduct = async (id: number) => {
@@ -411,7 +428,7 @@ export default function Admin() {
                         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={productForm.featured} onChange={e => setProductForm(f => ({ ...f, featured: e.target.checked }))} /> Featured</label>
                       </div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
-                        <button type="submit" className="btn btn-primary btn-sm">Save</button>
+                        <button type="submit" className="btn btn-primary btn-sm">Save Product</button>
                         <button type="button" onClick={() => { setShowProductForm(false); setEditProduct(null); setProductImagePreviews([]); }} className="btn btn-outline btn-sm">Cancel</button>
                       </div>
                     </form>
