@@ -8,6 +8,14 @@ export default function Contact() {
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
 
+  const buildMailtoLink = () => {
+    const subject = encodeURIComponent(`Build Level contact from ${form.name || "customer"}`);
+    const body = encodeURIComponent(
+      `Name: ${form.name}\nEmail: ${form.email}\n\nMessage:\n${form.message}`
+    );
+    return `mailto:info@thebuildlevel.com?subject=${subject}&body=${body}`;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSending(true);
@@ -17,7 +25,8 @@ export default function Contact() {
       if (result.success !== true) throw new Error("Delivery failed");
       setSent(true);
     } catch {
-      setError("Message delivery failed. Please email info@thebuildlevel.com directly.");
+      window.location.href = buildMailtoLink();
+      setError("Email app opened with your message. If it did not open, email info@thebuildlevel.com directly.");
     } finally {
       setSending(false);
     }
@@ -58,8 +67,17 @@ export default function Contact() {
               <label>Message</label>
               <textarea className="input" required rows={6} value={form.message} onChange={e => setForm(f => ({ ...f, message: e.target.value }))} placeholder="How can we help?" style={{ resize: "vertical" }} />
             </div>
-            {error && <p style={{ color: "var(--red)", fontSize: "0.85rem" }}>{error}</p>}
-            <button type="submit" disabled={sending} className="btn btn-primary">{sending ? "Sending..." : "Send Message"}</button>
+            {error && (
+              <div style={{ color: "var(--red)", fontSize: "0.85rem", lineHeight: 1.6 }}>
+                <p>{error}</p>
+                <a href={buildMailtoLink()} className="btn btn-outline btn-sm" style={{ marginTop: 10 }}>
+                  Open Email App
+                </a>
+              </div>
+            )}
+            <button type="submit" disabled={sending} className="btn btn-primary">
+              {sending ? "Sending..." : "Send Message"}
+            </button>
           </form>
         )}
       </div>
