@@ -133,6 +133,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
   const [printifyCredentials, setPrintifyCredentials] = useState({ apiKey: "", shopId: "" });
   const [shopifySnapshot, setShopifySnapshot] = useState<Record<string, unknown>>({});
   const [printifySnapshot, setPrintifySnapshot] = useState<Record<string, unknown>>({});
+  const [printifyProducts, setPrintifyProducts] = useState<Array<{ id: string; title?: string; visible?: boolean; is_locked?: boolean }>>([]);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState<string>("");
 
@@ -247,23 +248,30 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
         action === "inventory" ? await adminApi.getPrintifyInventory() :
         await adminApi.syncPrintify();
       setPrintifySnapshot((current) => ({ ...current, [action]: data }));
+      if (action === "products" && data && typeof data === "object" && Array.isArray((data as any).data)) {
+        setPrintifyProducts((data as any).data);
+      }
+      const syncProducts = (data as { products?: unknown })?.products;
+      if (action === "sync" && syncProducts && typeof syncProducts === "object" && Array.isArray((syncProducts as any).data)) {
+        setPrintifyProducts((syncProducts as any).data);
+      }
       showToast(`Printify ${action} loaded`);
-    } catch {
-      showToast(`Printify ${action} needs configuration`);
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || `Printify ${action} needs configuration`);
     } finally {
       setTesting("");
     }
   };
 
-  const publishPrintify = async () => {
-    const printifyProductId = prompt("Printify product ID to publish");
+  const publishPrintify = async (printifyProductId?: string) => {
+    printifyProductId = printifyProductId || prompt("Printify product ID to publish") || "";
     if (!printifyProductId) return;
     setTesting("printify-publish");
     try {
       const result = await adminApi.publishPrintifyProduct(printifyProductId);
       showToast(result.success ? "Printify product publish requested" : "Printify publish failed");
-    } catch {
-      showToast("Printify publish needs configuration");
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Printify publish needs configuration");
     } finally {
       setTesting("");
     }
@@ -414,7 +422,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button type="button" onClick={savePrintify} className="btn btn-primary btn-sm">Save Printify</button>
               <button type="button" onClick={() => testProvider("printify")} className="btn btn-outline btn-sm">Validate</button>
-              <button type="button" onClick={publishPrintify} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish Product</button>
+              <button type="button" onClick={() => publishPrintify()} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish Product</button>
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(["products", "inventory", "orders", "sync"] as const).map((action) => (
@@ -423,6 +431,24 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
                 </button>
               ))}
             </div>
+            {printifyProducts.length > 0 && (
+              <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                <div style={{ color: "var(--text2)", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                  Printify Products
+                </div>
+                {printifyProducts.slice(0, 8).map(product => (
+                  <div key={product.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "rgba(255,255,255,0.025)" }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: "var(--text)", fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.title || product.id}</div>
+                      <div style={{ color: "var(--text3)", fontSize: "0.7rem" }}>{product.visible ? "Visible" : "Draft"} · {product.is_locked ? "Locked" : "Editable"}</div>
+                    </div>
+                    <button type="button" onClick={() => publishPrintify(product.id)} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>
+                      Publish
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
             <p style={{ color: "var(--text2)", fontSize: "0.78rem" }}>
               Loaded records: {countSnapshotRecords(printifySnapshot, ["data", "products", "orders"])}
             </p>
