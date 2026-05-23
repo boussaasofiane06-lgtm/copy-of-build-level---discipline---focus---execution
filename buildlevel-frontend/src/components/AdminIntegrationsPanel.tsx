@@ -81,12 +81,14 @@ function IntegrationCard({
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.28 }}
     >
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 12 }}>
-        <div>
+      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "flex-start", marginBottom: 12, flexWrap: "wrap" }}>
+        <div style={{ minWidth: 0, flex: "1 1 180px" }}>
           <h4 style={{ fontSize: "0.95rem", marginBottom: 6 }}>{title}</h4>
-          <p style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{meta}</p>
+          <p style={{ color: "var(--text2)", fontSize: "0.8rem", overflowWrap: "anywhere", wordBreak: "break-word" }}>{meta}</p>
         </div>
-        <StatusPill active={connected} />
+        <div style={{ flex: "0 0 auto", maxWidth: "100%" }}>
+          <StatusPill active={connected} />
+        </div>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
         {capabilities.map((capability) => (
