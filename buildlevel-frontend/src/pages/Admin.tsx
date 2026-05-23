@@ -11,6 +11,7 @@ import {
   getCategoryLabel,
   type ApparelAudience,
 } from "../lib/apparelCategories";
+import { BLOG_CATEGORIES, DEFAULT_BLOG_CATEGORY, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
 
 type Tab = "products" | "digital" | "blog" | "integrations";
 
@@ -45,7 +46,7 @@ export default function Admin() {
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
   const [editBlog, setEditBlog] = useState<Partial<BlogPost> | null>(null);
-  const [blogForm, setBlogForm] = useState({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: "mindset", readTime: "", published: true, featured: false });
+  const [blogForm, setBlogForm] = useState({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, featured: false });
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
@@ -196,8 +197,9 @@ export default function Admin() {
   const saveBlog = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      if (editBlog?.id) await adminApi.updateBlogPost(editBlog.id, blogForm as any);
-      else await adminApi.createBlogPost(blogForm as any);
+      const payload = { ...blogForm, category: normalizeBlogCategory(blogForm.category) };
+      if (editBlog?.id) await adminApi.updateBlogPost(editBlog.id, payload as any);
+      else await adminApi.createBlogPost(payload as any);
       showToast(editBlog?.id ? "Updated!" : "Created!");
       setShowBlogForm(false); setEditBlog(null); loadData();
     } catch { showToast("Error saving"); }
@@ -205,7 +207,7 @@ export default function Admin() {
 
   const openEditBlog = (p: BlogPost) => {
     setEditBlog(p);
-    setBlogForm({ title: p.title, slug: p.slug, excerpt: p.excerpt || "", content: p.content || "", imageUrl: p.imageUrl || "", category: p.category, readTime: p.readTime || "", published: p.published, featured: p.featured });
+    setBlogForm({ title: p.title, slug: p.slug, excerpt: p.excerpt || "", content: p.content || "", imageUrl: p.imageUrl || "", category: normalizeBlogCategory(p.category), readTime: p.readTime || "", published: p.published, featured: p.featured });
     setShowBlogForm(true);
   };
 
@@ -458,7 +460,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Blog Posts ({blog.length})</h3>
-                  <button onClick={() => { setEditBlog(null); setBlogForm({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: "mindset", readTime: "", published: true, featured: false }); setShowBlogForm(true); }} className="btn btn-primary btn-sm">+ Add Post</button>
+                  <button onClick={() => { setEditBlog(null); setBlogForm({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, featured: false }); setShowBlogForm(true); }} className="btn btn-primary btn-sm">+ Add Post</button>
                 </div>
 
                 {showBlogForm && (
@@ -467,7 +469,30 @@ export default function Admin() {
                     <form onSubmit={saveBlog} style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                       <div><label style={labelStyle}>Title *</label><input style={inputStyle} required value={blogForm.title} onChange={e => setBlogForm(f => ({ ...f, title: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Slug *</label><input style={inputStyle} required value={blogForm.slug} onChange={e => setBlogForm(f => ({ ...f, slug: e.target.value }))} placeholder="my-post-title" /></div>
-                      <div><label style={labelStyle}>Category</label><input style={inputStyle} value={blogForm.category} onChange={e => setBlogForm(f => ({ ...f, category: e.target.value }))} /></div>
+                      <div>
+                        <label style={labelStyle}>Category</label>
+                        <select
+                          style={inputStyle}
+                          value={BLOG_CATEGORIES.some(category => category.slug === blogForm.category) ? blogForm.category : ""}
+                          onChange={e => e.target.value && setBlogForm(f => ({ ...f, category: e.target.value }))}
+                        >
+                          <option value="">Custom / Future Category</option>
+                          {BLOG_CATEGORIES.map(category => (
+                            <option key={category.slug} value={category.slug}>{category.label}</option>
+                          ))}
+                        </select>
+                        <input
+                          list="blog-category-options"
+                          style={{ ...inputStyle, marginTop: 8 }}
+                          value={blogForm.category}
+                          onChange={e => setBlogForm(f => ({ ...f, category: normalizeBlogCategory(e.target.value) }))}
+                          placeholder="Search or enter a category"
+                        />
+                        <datalist id="blog-category-options">
+                          {BLOG_CATEGORIES.map(category => <option key={category.slug} value={category.slug}>{category.label}</option>)}
+                        </datalist>
+                        <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>Stored as: {getBlogCategoryLabel(blogForm.category)}</p>
+                      </div>
                       <div><label style={labelStyle}>Read Time</label><input style={inputStyle} value={blogForm.readTime} onChange={e => setBlogForm(f => ({ ...f, readTime: e.target.value }))} placeholder="5 min read" /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Image URL</label><input style={inputStyle} value={blogForm.imageUrl} onChange={e => setBlogForm(f => ({ ...f, imageUrl: e.target.value }))} /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Excerpt</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={2} value={blogForm.excerpt} onChange={e => setBlogForm(f => ({ ...f, excerpt: e.target.value }))} /></div>
@@ -490,7 +515,7 @@ export default function Admin() {
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.title}</div>
-                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{p.slug} · {p.category} · {p.published ? "Published" : "Draft"}</div>
+                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{p.slug} · {getBlogCategoryLabel(p.category)} · {p.published ? "Published" : "Draft"}</div>
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => openEditBlog(p)} className="btn btn-outline btn-sm">Edit</button>

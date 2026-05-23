@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { publicApi, BlogPost } from "../lib/api";
+import { getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
 
 export default function BlogPostPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -34,7 +35,7 @@ export default function BlogPostPage() {
         <div style={{ display: "flex", gap: 12, alignItems: "center", marginBottom: 24 }}>
           <Link to="/blog" style={{ color: "var(--text3)", fontSize: "0.85rem" }}>← Journal</Link>
           <span style={{ color: "var(--text3)" }}>/</span>
-          <span className="badge badge-dark">{post.category}</span>
+          <Link to={`/blog?category=${normalizeBlogCategory(post.category)}`} className="badge badge-dark" style={{ textDecoration: "none" }}>{getBlogCategoryLabel(post.category)}</Link>
         </div>
         <h1 style={{ fontSize: "clamp(1.8rem, 4vw, 2.8rem)", marginBottom: 16 }}>{post.title}</h1>
         <div style={{ display: "flex", gap: 16, color: "var(--text3)", fontSize: "0.8rem", marginBottom: 40 }}>
