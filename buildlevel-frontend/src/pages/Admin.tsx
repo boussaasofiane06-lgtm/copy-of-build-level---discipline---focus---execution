@@ -33,7 +33,7 @@ export default function Admin() {
   // Product form
   const [showProductForm, setShowProductForm] = useState(false);
   const [editProduct, setEditProduct] = useState<Partial<Product> | null>(null);
-  const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as ApparelAudience, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false });
+  const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as ApparelAudience, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false });
   const [customProductCategory, setCustomProductCategory] = useState("");
   const [productImagePreviews, setProductImagePreviews] = useState<string[]>([]);
 
@@ -89,6 +89,13 @@ export default function Admin() {
     const { audience: _audience, ...productPayload } = productForm;
     const data = { ...productPayload, price: parseFloat(productForm.price), compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined, sizes: productForm.sizes.split(",").map(s => s.trim()).filter(Boolean) };
     try {
+      const statusBadge = data.status === "available" ? "" :
+        data.status === "coming-soon" ? "Coming Soon" :
+        data.status === "new-release" ? "New Release" :
+        data.status === "limited-edition" ? "Limited Edition" : data.badge;
+      data.badge = statusBadge || data.badge;
+      data.inStock = data.status === "coming-soon" ? false : data.inStock;
+      delete (data as any).status;
       if (!data.name.trim()) throw new Error("Product name is required");
       if (!Number.isFinite(data.price) || data.price <= 0) throw new Error("Product price must be greater than 0");
       if (!data.category.trim()) throw new Error("Product category is required");
@@ -97,7 +104,7 @@ export default function Admin() {
       }
       if (editProduct?.id) await adminApi.updateProduct(editProduct.id, data as any);
       else await adminApi.createProduct(data as any);
-      showToast(editProduct?.id ? "Product updated!" : "Product created!");
+      showToast(data.published ? (editProduct?.id ? "Product updated and visible if qualified" : "Product created and visible if qualified") : "Product saved as draft");
       setShowProductForm(false); setEditProduct(null);
       setCustomProductCategory("");
       setProductImagePreviews([]);
@@ -150,8 +157,10 @@ export default function Admin() {
 
   const openEditProduct = (p: Product) => {
     const audience = getAudienceForCategory(p.category);
+    const badge = (p.badge || "").toLowerCase();
+    const status = badge.includes("coming") || badge.includes("soon") ? "coming-soon" : badge.includes("limited") ? "limited-edition" : badge.includes("new") ? "new-release" : "available";
     setEditProduct(p);
-    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", inStock: p.inStock, published: p.published, featured: p.featured });
+    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
     setCustomProductCategory(getCategoryBySlug(p.category) ? "" : getCategoryLabel(p.category));
     setProductImagePreviews(p.imageUrl ? [p.imageUrl] : []);
     setShowProductForm(true);
@@ -301,7 +310,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Apparel Products ({products.length})</h3>
-                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false }); setCustomProductCategory(""); setProductImagePreviews([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
+                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false }); setCustomProductCategory(""); setProductImagePreviews([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
                 </div>
 
                 {showProductForm && (
@@ -364,7 +373,16 @@ export default function Admin() {
                       <div><label style={labelStyle}>Price *</label><input style={inputStyle} type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm(f => ({ ...f, price: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Compare At Price</label><input style={inputStyle} type="number" step="0.01" value={productForm.compareAtPrice} onChange={e => setProductForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Sizes (comma-separated)</label><input style={inputStyle} value={productForm.sizes} onChange={e => setProductForm(f => ({ ...f, sizes: e.target.value }))} placeholder="S, M, L, XL" /></div>
-                      <div><label style={labelStyle}>Badge</label><input style={inputStyle} value={productForm.badge} onChange={e => setProductForm(f => ({ ...f, badge: e.target.value }))} placeholder="NEW, SALE, etc." /></div>
+                      <div>
+                        <label style={labelStyle}>Storefront Status</label>
+                        <select style={inputStyle} value={productForm.status} onChange={e => setProductForm(f => ({ ...f, status: e.target.value, inStock: e.target.value === "coming-soon" ? false : f.inStock }))}>
+                          <option value="available">Available</option>
+                          <option value="coming-soon">Coming Soon</option>
+                          <option value="new-release">New Release</option>
+                          <option value="limited-edition">Limited Edition</option>
+                        </select>
+                      </div>
+                      <div><label style={labelStyle}>Badge</label><input style={inputStyle} value={productForm.badge} onChange={e => setProductForm(f => ({ ...f, badge: e.target.value }))} placeholder="Optional custom badge" /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Image URL</label><input style={inputStyle} value={productForm.imageUrl} onChange={e => setProductForm(f => ({ ...f, imageUrl: e.target.value }))} placeholder="https://..." /></div>
                       <div style={{ gridColumn: "1/-1" }}>
                         <label style={labelStyle}>Upload Images From Device</label>
@@ -388,8 +406,8 @@ export default function Admin() {
                       </div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Description</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={3} value={productForm.description} onChange={e => setProductForm(f => ({ ...f, description: e.target.value }))} /></div>
                       <div style={{ display: "flex", gap: 20, gridColumn: "1/-1" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={productForm.published} onChange={e => setProductForm(f => ({ ...f, published: e.target.checked }))} /> Published</label>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={productForm.inStock} onChange={e => setProductForm(f => ({ ...f, inStock: e.target.checked }))} /> In Stock</label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={productForm.published} onChange={e => setProductForm(f => ({ ...f, published: e.target.checked }))} /> Published on storefront</label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: productForm.status === "coming-soon" ? "not-allowed" : "pointer", opacity: productForm.status === "coming-soon" ? 0.6 : 1 }}><input type="checkbox" disabled={productForm.status === "coming-soon"} checked={productForm.inStock} onChange={e => setProductForm(f => ({ ...f, inStock: e.target.checked }))} /> Purchasable / In Stock</label>
                         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={productForm.featured} onChange={e => setProductForm(f => ({ ...f, featured: e.target.checked }))} /> Featured</label>
                       </div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
