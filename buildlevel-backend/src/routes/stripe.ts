@@ -3,7 +3,7 @@ import Stripe from "stripe";
 import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { digitalProducts, digitalPurchases } from "../db/schema.js";
+import { digitalProducts, digitalPurchases, products, siteSettings } from "../db/schema.js";
 
 const router = Router();
 
@@ -34,8 +34,202 @@ type CheckoutLineItem = {
   image?: string;
 };
 
+type PhysicalCheckoutItem = {
+  productId?: number | string;
+  size?: string;
+  name: string;
+  priceUSD: number;
+  quantity: number;
+  image?: string;
+};
+
+type PhysicalFulfillmentItem = {
+  productId: number;
+  size: string;
+  quantity: number;
+};
+
 function isStripeImageUrl(value?: string) {
   return !!value && /^https?:\/\//i.test(value);
+}
+
+function cleanText(value?: unknown) {
+  return String(value ?? "").trim();
+}
+
+function buildPhysicalCheckoutMetadata(items: PhysicalCheckoutItem[]) {
+  const metadata: Record<string, string> = {
+    type: "physical",
+    source: "build_level_store",
+    item_count: String(Math.min(items.length, 16)),
+  };
+
+  items.slice(0, 16).forEach((item, index) => {
+    const productId = cleanText(item.productId);
+    const size = cleanText(item.size);
+    metadata[`item_${index}_product_id`] = productId;
+    metadata[`item_${index}_size`] = size.slice(0, 100);
+    metadata[`item_${index}_quantity`] = String(Math.max(1, Number(item.quantity || 1)));
+  });
+
+  return metadata;
+}
+
+function readPhysicalFulfillmentItems(metadata?: Stripe.Metadata | null): PhysicalFulfillmentItem[] {
+  if (!metadata || metadata.type !== "physical") return [];
+  const itemCount = Math.min(Math.max(Number(metadata.item_count || 0), 0), 16);
+  const items: PhysicalFulfillmentItem[] = [];
+
+  for (let index = 0; index < itemCount; index += 1) {
+    const productId = Number(metadata[`item_${index}_product_id`]);
+    const quantity = Math.max(1, Number(metadata[`item_${index}_quantity`] || 1));
+    if (!Number.isInteger(productId) || productId <= 0) continue;
+    items.push({
+      productId,
+      quantity,
+      size: cleanText(metadata[`item_${index}_size`]),
+    });
+  }
+
+  return items;
+}
+
+async function getPrintifyCredentials() {
+  const db = await getDb();
+  const rows = await db.select().from(siteSettings);
+  const settings = Object.fromEntries(rows.map((row) => [row.key, row.value ?? ""]));
+  return {
+    apiKey: cleanText(process.env.PRINTIFY_API_KEY || settings.printify_api_key),
+    shopId: cleanText(process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id),
+  };
+}
+
+async function printifyRequest(path: string, method = "GET", body?: unknown) {
+  const { apiKey } = await getPrintifyCredentials();
+  if (!apiKey) throw new Error("Printify API key is not configured");
+
+  const response = await fetch(`https://api.printify.com/v1${path}`, {
+    method,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof data?.message === "string" ? data.message : JSON.stringify(data).slice(0, 300);
+    throw new Error(`Printify API error ${response.status}: ${message}`);
+  }
+
+  return data;
+}
+
+function normalizeOption(value?: unknown) {
+  return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
+function variantMatchesSize(variant: any, selectedSize: string) {
+  if (!selectedSize) return true;
+  const normalizedSize = normalizeOption(selectedSize);
+  const normalizedTitle = normalizeOption(variant?.title);
+  if (normalizedTitle === normalizedSize) return true;
+
+  const titleParts = cleanText(variant?.title)
+    .split(/[\/|,;-]/)
+    .map(normalizeOption)
+    .filter(Boolean);
+  if (titleParts.includes(normalizedSize)) return true;
+
+  const optionValues = Array.isArray(variant?.options) ? variant.options.map(normalizeOption) : [];
+  return optionValues.includes(normalizedSize);
+}
+
+async function resolvePrintifyVariantId(printifyProductId: string, selectedSize: string) {
+  const printifyProduct = await printifyRequest(`/shops/${(await getPrintifyCredentials()).shopId}/products/${printifyProductId}.json`);
+  const variants = Array.isArray(printifyProduct?.variants) ? printifyProduct.variants : [];
+  const activeVariants = variants.filter((variant: any) => variant?.is_enabled !== false && variant?.is_available !== false);
+  const candidates = activeVariants.length ? activeVariants : variants;
+  const match = candidates.find((variant: any) => variantMatchesSize(variant, selectedSize));
+
+  if (!match) {
+    throw new Error(`No Printify variant matches size "${selectedSize || "default"}" for product ${printifyProductId}`);
+  }
+
+  return match.id;
+}
+
+function splitCustomerName(name?: string | null) {
+  const parts = cleanText(name).split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "Build", lastName: "Level Customer" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "Customer" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+function buildPrintifyAddress(session: Stripe.Checkout.Session) {
+  const shipping = (session as any).shipping_details;
+  const customer = (session as any).customer_details;
+  const address = shipping?.address || customer?.address;
+  if (!address?.line1 || !address?.city || !address?.postal_code || !address?.country) {
+    throw new Error("Stripe session does not include a complete shipping address");
+  }
+
+  const { firstName, lastName } = splitCustomerName(shipping?.name || customer?.name);
+  return {
+    first_name: firstName,
+    last_name: lastName,
+    email: session.customer_email || customer?.email || "",
+    phone: customer?.phone || "",
+    country: address.country,
+    region: address.state || "",
+    address1: address.line1,
+    address2: address.line2 || "",
+    city: address.city,
+    zip: address.postal_code,
+  };
+}
+
+async function createPrintifyOrderFromStripeSession(session: Stripe.Checkout.Session) {
+  if (session.payment_status && session.payment_status !== "paid") {
+    console.log(`[Printify] Skipping session ${session.id}; payment_status=${session.payment_status}`);
+    return;
+  }
+
+  const requestedItems = readPhysicalFulfillmentItems(session.metadata);
+  if (requestedItems.length === 0) return;
+
+  const { shopId } = await getPrintifyCredentials();
+  if (!shopId) throw new Error("Printify shop ID is not configured");
+
+  const db = await getDb();
+  const lineItems: Array<{ product_id: string; variant_id: number | string; quantity: number }> = [];
+
+  for (const item of requestedItems) {
+    const [product] = await db.select().from(products).where(eq(products.id, item.productId)).limit(1);
+    if (!product?.printifyProductId) continue;
+
+    const variantId = await resolvePrintifyVariantId(product.printifyProductId, item.size);
+    lineItems.push({
+      product_id: product.printifyProductId,
+      variant_id: typeof variantId === "number" ? variantId : String(variantId),
+      quantity: item.quantity,
+    });
+  }
+
+  if (lineItems.length === 0) return;
+
+  const payload = {
+    external_id: session.id,
+    label: `Build Level ${session.id}`,
+    line_items: lineItems,
+    shipping_method: 1,
+    send_shipping_notification: false,
+    address_to: buildPrintifyAddress(session),
+  };
+
+  await printifyRequest(`/shops/${shopId}/orders.json`, "POST", payload);
+  console.log(`[Printify] Created fulfillment order for Stripe session ${session.id}`);
 }
 
 async function createCheckoutSessionDirect({
@@ -106,14 +300,24 @@ router.post("/checkout", async (req: Request, res: Response) => {
       return;
     }
 
+    const checkoutItems: PhysicalCheckoutItem[] = items.map((item: any) => ({
+      productId: item.productId,
+      size: item.size,
+      name: cleanText(item.name),
+      image: item.image,
+      priceUSD: Number(item.priceUSD),
+      quantity: Math.max(1, Number(item.quantity || 1)),
+    }));
+
     const session = await createCheckoutSessionDirect({
-      lineItems: items.map((item: any) => ({
+      lineItems: checkoutItems.map((item) => ({
         name: item.name,
         image: item.image,
         unitAmount: Math.round(Number(item.priceUSD) * 100),
         quantity: Number(item.quantity || 1),
       })),
       customerEmail,
+      metadata: buildPhysicalCheckoutMetadata(checkoutItems),
       shippingCountries: ["US", "GB", "CA", "AU", "DE", "FR", "JP", "NG", "ZA", "AE"],
       successUrl: `${origin}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/shop`,
@@ -192,6 +396,12 @@ router.post("/webhook", async (req: Request, res: Response) => {
         });
       } catch (e) {
         console.error("[Webhook] Failed to record digital purchase:", e);
+      }
+    } else if (session.metadata?.type === "physical") {
+      try {
+        await createPrintifyOrderFromStripeSession(session);
+      } catch (e) {
+        console.error("[Webhook] Failed to create Printify order:", e);
       }
     }
   }

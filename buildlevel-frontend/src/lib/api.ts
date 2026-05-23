@@ -45,6 +45,9 @@ export interface Product {
   delisted: boolean;
   featured: boolean;
   sortOrder: number;
+  shopifyVariantId?: string | null;
+  shopifyProductId?: string | null;
+  printifyProductId?: string | null;
   createdAt: string;
 }
 

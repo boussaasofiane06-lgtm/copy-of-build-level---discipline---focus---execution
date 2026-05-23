@@ -113,7 +113,9 @@ export default function Shop() {
     setCheckingOut(true);
     try {
       const items = cart.map(i => ({
+        productId: i.product.id,
         name: `${i.product.name}${i.size ? ` (${i.size})` : ""}`,
+        size: i.size,
         priceUSD: parseFloat(i.product.price),
         quantity: i.quantity,
         image: i.product.imageUrl?.startsWith("http") ? i.product.imageUrl : undefined,
