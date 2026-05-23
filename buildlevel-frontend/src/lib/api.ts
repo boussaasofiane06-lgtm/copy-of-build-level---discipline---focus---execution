@@ -162,6 +162,14 @@ export interface PublicSocialLink {
   enabled: boolean;
 }
 
+export interface MaintenanceConfig {
+  enabled: boolean;
+  title: string;
+  message: string;
+  returnText: string;
+  contactEmail: string;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -175,6 +183,7 @@ export const publicApi = {
     api.post<{ url: string }>("/stripe/digital-checkout", { productId, customerEmail }).then(r => r.data),
   getSocialLinks: () => api.get<{ email: string; links: PublicSocialLink[] }>("/social-links").then(r => r.data),
   getTidioConfig: () => api.get<{ enabled: boolean; publicKey: string; chatControls: string }>("/tidio/config").then(r => r.data),
+  getMaintenanceConfig: () => api.get<MaintenanceConfig>("/maintenance").then(r => r.data),
   sendContact: (data: { name: string; email: string; message: string }) =>
     api.post<{ success: true }>("/contact", data).then(r => r.data),
 };
@@ -251,6 +260,9 @@ export const adminApi = {
   getSettings: () => api.get<Record<string, string>>("/admin/settings").then(r => r.data),
   setSetting: (key: string, value: string) =>
     api.post("/admin/settings", { key, value }).then(r => r.data),
+  getMaintenanceSettings: () => api.get<MaintenanceConfig>("/admin/maintenance").then(r => r.data),
+  saveMaintenanceSettings: (data: MaintenanceConfig) =>
+    api.post<{ success: true }>("/admin/maintenance", data).then(r => r.data),
 
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),
