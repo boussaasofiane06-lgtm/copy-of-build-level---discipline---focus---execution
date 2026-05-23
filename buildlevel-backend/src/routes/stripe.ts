@@ -7,8 +7,22 @@ import { digitalProducts, digitalPurchases } from "../db/schema.js";
 
 const router = Router();
 
+function getStripeSecretKey() {
+  const raw = (process.env.STRIPE_SECRET_KEY || "").trim();
+  if (!raw) throw new Error("STRIPE_SECRET_KEY is not configured");
+
+  const embeddedKey = raw.match(/sk_(?:test|live)_[A-Za-z0-9]{20,}/)?.[0];
+  const key = embeddedKey || raw;
+
+  if (!/^sk_(test|live)_[A-Za-z0-9]{20,}$/.test(key)) {
+    throw new Error("STRIPE_SECRET_KEY must be the raw Stripe secret key starting with sk_test_ or sk_live_");
+  }
+
+  return key;
+}
+
 function getStripe() {
-  return new Stripe(process.env.STRIPE_SECRET_KEY || "", {
+  return new Stripe(getStripeSecretKey(), {
     apiVersion: "2025-01-27.acacia" as any,
   });
 }
@@ -35,8 +49,7 @@ async function createCheckoutSessionDirect({
   metadata?: Record<string, string>;
   shippingCountries?: string[];
 }) {
-  const secretKey = process.env.STRIPE_SECRET_KEY;
-  if (!secretKey) throw new Error("STRIPE_SECRET_KEY is not configured");
+  const secretKey = getStripeSecretKey();
 
   const body = new URLSearchParams();
   body.set("mode", "payment");
