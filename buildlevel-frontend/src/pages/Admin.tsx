@@ -9,6 +9,8 @@ import {
   getCategoriesForAudience,
   getCategoryAudienceLabel,
   getCategoryLabel,
+  getCategoryBySlug,
+  createCustomCategorySlug,
   type ApparelAudience,
 } from "../lib/apparelCategories";
 import { BLOG_CATEGORIES, DEFAULT_BLOG_CATEGORY, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
@@ -32,6 +34,7 @@ export default function Admin() {
   const [showProductForm, setShowProductForm] = useState(false);
   const [editProduct, setEditProduct] = useState<Partial<Product> | null>(null);
   const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as ApparelAudience, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false });
+  const [customProductCategory, setCustomProductCategory] = useState("");
   const [productImagePreviews, setProductImagePreviews] = useState<string[]>([]);
 
   // Digital form
@@ -90,6 +93,7 @@ export default function Admin() {
       else await adminApi.createProduct(data as any);
       showToast(editProduct?.id ? "Product updated!" : "Product created!");
       setShowProductForm(false); setEditProduct(null);
+      setCustomProductCategory("");
       setProductImagePreviews([]);
       loadData();
     } catch { showToast("Error saving product"); }
@@ -117,6 +121,7 @@ export default function Admin() {
     const audience = getAudienceForCategory(p.category);
     setEditProduct(p);
     setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", inStock: p.inStock, published: p.published, featured: p.featured });
+    setCustomProductCategory(getCategoryBySlug(p.category) ? "" : getCategoryLabel(p.category));
     setProductImagePreviews(p.imageUrl ? [p.imageUrl] : []);
     setShowProductForm(true);
   };
@@ -265,7 +270,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Apparel Products ({products.length})</h3>
-                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false }); setProductImagePreviews([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
+                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", inStock: true, published: true, featured: false }); setCustomProductCategory(""); setProductImagePreviews([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
                 </div>
 
                 {showProductForm && (
@@ -285,6 +290,7 @@ export default function Admin() {
                               audience,
                               category: getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY,
                             }));
+                            setCustomProductCategory("");
                           }}
                         >
                           {APPAREL_AUDIENCES.map(audience => <option key={audience.value} value={audience.value}>{audience.label}</option>)}
@@ -292,11 +298,37 @@ export default function Admin() {
                       </div>
                       <div>
                         <label style={labelStyle}>Category</label>
-                        <select style={inputStyle} value={productForm.category} onChange={e => setProductForm(f => ({ ...f, category: e.target.value }))}>
+                        <select
+                          style={inputStyle}
+                          value={getCategoriesForAudience(productForm.audience).some(category => category.slug === productForm.category) ? productForm.category : "__custom"}
+                          onChange={e => {
+                            if (e.target.value === "__custom") {
+                              const label = customProductCategory || "";
+                              setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience, label) }));
+                              return;
+                            }
+                            setCustomProductCategory("");
+                            setProductForm(f => ({ ...f, category: e.target.value }));
+                          }}
+                        >
                           {getCategoriesForAudience(productForm.audience).map(category => (
                             <option key={category.slug} value={category.slug}>{category.label}</option>
                           ))}
+                          <option value="__custom">Custom Category</option>
                         </select>
+                        <input
+                          style={{ ...inputStyle, marginTop: 8 }}
+                          value={customProductCategory}
+                          onChange={e => {
+                            const value = e.target.value;
+                            setCustomProductCategory(value);
+                            setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience, value) }));
+                          }}
+                          placeholder="Add any future category"
+                        />
+                        <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
+                          Stored as: {getCategoryLabel(productForm.category)}
+                        </p>
                       </div>
                       <div><label style={labelStyle}>Price *</label><input style={inputStyle} type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm(f => ({ ...f, price: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Compare At Price</label><input style={inputStyle} type="number" step="0.01" value={productForm.compareAtPrice} onChange={e => setProductForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>

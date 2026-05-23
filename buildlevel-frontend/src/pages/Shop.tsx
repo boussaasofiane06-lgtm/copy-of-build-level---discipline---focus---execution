@@ -9,6 +9,8 @@ import {
   getCategoryAudienceLabel,
   getCategoryLabel,
   getKnownAudienceForCategory,
+  getAudienceForCategory,
+  STOREFRONT_CATEGORY_PRIORITY,
   type ApparelAudience,
 } from "../lib/apparelCategories";
 
@@ -48,12 +50,37 @@ export default function Shop() {
     };
   }, [cartOpen]);
 
+  const normalizedBadge = (product: Product) => (product.badge || "").trim().toLowerCase();
+  const getProductStatus = (product: Product) => {
+    const badge = normalizedBadge(product);
+    if (badge.includes("coming") || badge.includes("soon") || badge.includes("preorder")) return "Coming Soon";
+    if (badge.includes("limited")) return "Limited Edition";
+    if (badge.includes("new")) return "New Release";
+    if (product.featured) return "Featured";
+    if (product.inStock) return "Available";
+    return "";
+  };
+  const isPurchasable = (product: Product) => product.inStock && getProductStatus(product) !== "Coming Soon";
+  const qualifiesForStorefront = (product: Product) => {
+    if (product.published === false || product.hidden === true || product.delisted === true) return false;
+    return ["Available", "Coming Soon", "Featured", "New Release", "Limited Edition"].includes(getProductStatus(product));
+  };
+  const storefrontProducts = products.filter(qualifiesForStorefront);
+  const audienceHasProducts = (value: ApparelAudience) =>
+    storefrontProducts.some(product => getAudienceForCategory(product.category) === value);
   const audienceFiltered = audience === "all"
-    ? products
-    : products.filter(p => getKnownAudienceForCategory(p.category) === audience);
-  const availableCategories = audience === "all"
-    ? Array.from(new Set(products.map(p => p.category).filter(Boolean)))
-    : getCategoriesForAudience(audience).map(category => category.slug);
+    ? storefrontProducts
+    : storefrontProducts.filter(p => getAudienceForCategory(p.category) === audience);
+  const sortCategories = (categories: string[]) => {
+    const priority = (audience === "all" ? ["mens", "womens", "kids"].flatMap(a => STOREFRONT_CATEGORY_PRIORITY[a as ApparelAudience]) : STOREFRONT_CATEGORY_PRIORITY[audience]) || [];
+    return categories.sort((a, b) => {
+      const ai = priority.indexOf(a);
+      const bi = priority.indexOf(b);
+      if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
+      return getCategoryLabel(a).localeCompare(getCategoryLabel(b));
+    });
+  };
+  const availableCategories = sortCategories(Array.from(new Set(audienceFiltered.map(p => p.category).filter(Boolean))));
   const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => p.category === category);
 
   const addToCart = (product: Product) => {
@@ -173,13 +200,13 @@ export default function Shop() {
       <div className="container section-sm">
         {/* Filters + Cart button */}
         <div style={{ display: "flex", flexDirection: "column", marginBottom: 32, gap: 14 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+          {storefrontProducts.length > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button onClick={() => { setAudience("all"); setCategory("all"); }} className="btn btn-sm"
                 style={{ background: audience === "all" ? "var(--red)" : "var(--bg3)", color: audience === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
                 All Apparel
               </button>
-              {APPAREL_AUDIENCES.map(a => (
+              {APPAREL_AUDIENCES.filter(a => audienceHasProducts(a.value)).map(a => (
                 <button key={a.value} onClick={() => { setAudience(a.value); setCategory("all"); }} className="btn btn-sm"
                   style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
                   {a.label}
@@ -191,8 +218,8 @@ export default function Shop() {
                 Cart ({cart.reduce((s, i) => s + i.quantity, 0)}) — ${cartTotal.toFixed(2)}
               </button>
             )}
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          </div>}
+          {availableCategories.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => setCategory("all")} className="btn btn-sm"
               style={{ background: category === "all" ? "var(--red)" : "transparent", color: category === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
               {audience === "all" ? "All Categories" : `All ${getAudienceLabel(audience)}`}
@@ -203,15 +230,15 @@ export default function Shop() {
                 {getCategoryLabel(c)}
               </button>
             ))}
-          </div>
+          </div>}
         </div>
 
         {loading ? (
           <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><div className="spinner" /></div>
         ) : filtered.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 80, color: "var(--text2)" }}>
-            <p style={{ fontSize: "1.1rem", marginBottom: 8 }}>No products available yet.</p>
-            <p style={{ fontSize: "0.9rem" }}>Check back soon.</p>
+          <div style={{ textAlign: "center", padding: "72px 24px", color: "var(--text2)", border: "1px solid var(--border)", background: "var(--bg2)", borderRadius: 8 }}>
+            <p style={{ fontFamily: "var(--font-display)", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--red)", fontSize: "0.78rem", marginBottom: 10 }}>Next Drop Loading</p>
+            <p style={{ fontSize: "1rem" }}>The next BUILD LEVEL release is being prepared.</p>
           </div>
         ) : (
           <div className="grid-4">
@@ -223,8 +250,8 @@ export default function Shop() {
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: "0.8rem" }}>No Image</div>
                   )}
-                  {p.badge && <span className="badge badge-red" style={{ position: "absolute", top: 12, left: 12 }}>{p.badge}</span>}
-                  {!p.inStock && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.6)", display: "flex", alignItems: "center", justifyContent: "center" }}><span style={{ color: "#fff", fontFamily: "var(--font-display)", letterSpacing: "0.1em" }}>SOLD OUT</span></div>}
+                  {getProductStatus(p) && getProductStatus(p) !== "Available" && <span className="badge badge-red" style={{ position: "absolute", top: 12, left: 12 }}>{getProductStatus(p)}</span>}
+                  {!isPurchasable(p) && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.42)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}><span style={{ color: "#fff", fontFamily: "var(--font-display)", letterSpacing: "0.1em" }}>{getProductStatus(p) || "Unavailable"}</span></div>}
                 </div>
                 <div style={{ padding: 16 }}>
                   <div style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>
@@ -248,8 +275,8 @@ export default function Shop() {
                       ))}
                     </div>
                   )}
-                  <button onClick={() => addToCart(p)} disabled={!p.inStock} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
-                    {p.inStock ? "Add to Cart" : "Sold Out"}
+                  <button onClick={() => addToCart(p)} disabled={!isPurchasable(p)} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
+                    {isPurchasable(p) ? "Add to Cart" : (getProductStatus(p) === "Coming Soon" ? "Coming Soon" : "Not Available")}
                   </button>
                 </div>
               </div>
