@@ -10,6 +10,13 @@ import { verifyAdminToken } from "./adminAuth";
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
 const BUSINESS_EMAIL = process.env.BUSINESS_EMAIL || "info@thebuildlevel.com";
 const SHOPIFY_API_VERSION = "2024-01";
+const DEFAULT_MAINTENANCE = {
+  enabled: false,
+  title: "Coming Back Soon",
+  message: "BUILD LEVEL is upgrading the experience. The storefront will return shortly.",
+  returnText: "Discipline. Focus. Execution.",
+  contactEmail: "info@thebuildlevel.com",
+};
 
 function cleanEnv(value?: string) {
   return (value || "").trim();
@@ -313,6 +320,21 @@ export function registerRestCompatRoutes(app: Express) {
     }
   });
 
+  app.get("/api/maintenance", async (_req, res) => {
+    try {
+      const settings = await getSettingsMap();
+      res.json({
+        enabled: settings.maintenance_enabled === "true",
+        title: settings.maintenance_title || DEFAULT_MAINTENANCE.title,
+        message: settings.maintenance_message || DEFAULT_MAINTENANCE.message,
+        returnText: settings.maintenance_return_text || DEFAULT_MAINTENANCE.returnText,
+        contactEmail: settings.maintenance_contact_email || settings.contact_email || DEFAULT_MAINTENANCE.contactEmail,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/tidio/config", async (_req, res) => {
     try {
       const settings = await getSettingsMap();
@@ -374,6 +396,48 @@ export function registerRestCompatRoutes(app: Express) {
       });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/maintenance", requireAdminRest, async (_req, res) => {
+    try {
+      const settings = await getSettingsMap([
+        "maintenance_enabled",
+        "maintenance_title",
+        "maintenance_message",
+        "maintenance_return_text",
+        "maintenance_contact_email",
+      ]);
+      res.json({
+        enabled: settings.maintenance_enabled === "true",
+        title: settings.maintenance_title || DEFAULT_MAINTENANCE.title,
+        message: settings.maintenance_message || DEFAULT_MAINTENANCE.message,
+        returnText: settings.maintenance_return_text || DEFAULT_MAINTENANCE.returnText,
+        contactEmail: settings.maintenance_contact_email || DEFAULT_MAINTENANCE.contactEmail,
+      });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/maintenance", requireAdminRest, async (req, res) => {
+    try {
+      const schema = z.object({
+        enabled: z.boolean().default(false),
+        title: z.string().min(1).max(160),
+        message: z.string().min(1).max(1000),
+        returnText: z.string().max(180).default(""),
+        contactEmail: z.string().email().default(DEFAULT_MAINTENANCE.contactEmail),
+      });
+      const data = schema.parse(req.body);
+      await saveSetting("maintenance_enabled", String(data.enabled));
+      await saveSetting("maintenance_title", data.title);
+      await saveSetting("maintenance_message", data.message);
+      await saveSetting("maintenance_return_text", data.returnText);
+      await saveSetting("maintenance_contact_email", data.contactEmail);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
     }
   });
 

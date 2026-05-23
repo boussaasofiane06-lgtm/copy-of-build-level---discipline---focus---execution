@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { adminApi, Product, BlogPost, DigitalProduct } from "../lib/api";
+import { adminApi, Product, BlogPost, DigitalProduct, MaintenanceConfig } from "../lib/api";
 import AdminIntegrationsPanel from "../components/AdminIntegrationsPanel";
 import {
   APPAREL_AUDIENCES,
@@ -15,7 +15,15 @@ import {
 } from "../lib/apparelCategories";
 import { BLOG_CATEGORIES, DEFAULT_BLOG_CATEGORY, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
 
-type Tab = "products" | "digital" | "blog" | "integrations";
+type Tab = "products" | "digital" | "blog" | "integrations" | "maintenance";
+
+const defaultMaintenanceConfig: MaintenanceConfig = {
+  enabled: false,
+  title: "Coming Back Soon",
+  message: "BUILD LEVEL is upgrading the experience. The storefront will return shortly.",
+  returnText: "Discipline. Focus. Execution.",
+  contactEmail: "info@thebuildlevel.com",
+};
 
 export default function Admin() {
   const [authed, setAuthed] = useState(false);
@@ -27,6 +35,7 @@ export default function Admin() {
   const [products, setProducts] = useState<Product[]>([]);
   const [digital, setDigital] = useState<DigitalProduct[]>([]);
   const [blog, setBlog] = useState<BlogPost[]>([]);
+  const [maintenanceForm, setMaintenanceForm] = useState<MaintenanceConfig>(defaultMaintenanceConfig);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
 
@@ -68,8 +77,14 @@ export default function Admin() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [p, d, b] = await Promise.all([adminApi.getProducts(), adminApi.getDigitalProducts(), adminApi.getBlogPosts()]);
+      const [p, d, b, maintenance] = await Promise.all([
+        adminApi.getProducts(),
+        adminApi.getDigitalProducts(),
+        adminApi.getBlogPosts(),
+        adminApi.getMaintenanceSettings().catch(() => defaultMaintenanceConfig),
+      ]);
       setProducts(p); setDigital(d); setBlog(b);
+      setMaintenanceForm({ ...defaultMaintenanceConfig, ...maintenance });
     } catch { }
     setLoading(false);
   };
@@ -273,6 +288,15 @@ export default function Admin() {
     setShowBlogForm(true);
   };
 
+  const saveMaintenance = async () => {
+    try {
+      await adminApi.saveMaintenanceSettings(maintenanceForm);
+      showToast(maintenanceForm.enabled ? "Maintenance mode enabled" : "Maintenance mode disabled");
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Error saving maintenance mode");
+    }
+  };
+
   const inputStyle = { width: "100%", padding: "8px 12px", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 4, color: "var(--text)", fontSize: "0.9rem" };
   const labelStyle = { display: "block", fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4, textTransform: "uppercase" as const, letterSpacing: "0.05em" };
 
@@ -305,15 +329,15 @@ export default function Admin() {
 
       {/* Tabs */}
       <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg2)" }}>
-        <div className="container" style={{ display: "flex", gap: 0 }}>
-          {(["products", "digital", "blog", "integrations"] as Tab[]).map(t => (
+        <div className="container" style={{ display: "flex", gap: 0, flexWrap: "wrap", rowGap: 4 }}>
+          {(["products", "digital", "blog", "integrations", "maintenance"] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: "14px 24px", background: "none", border: "none", cursor: "pointer",
               fontFamily: "var(--font-display)", fontSize: "0.8rem", letterSpacing: "0.1em", textTransform: "uppercase",
               color: tab === t ? "var(--text)" : "var(--text2)",
               borderBottom: tab === t ? "2px solid var(--red)" : "2px solid transparent",
             }}>
-              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : "Integrations"}
+              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : t === "integrations" ? "Integrations" : "Maintenance"}
             </button>
           ))}
         </div>
@@ -628,6 +652,58 @@ export default function Admin() {
 
             {tab === "integrations" && (
               <AdminIntegrationsPanel showToast={showToast} />
+            )}
+
+            {tab === "maintenance" && (
+              <div style={{ maxWidth: 840 }}>
+                <div style={{ background: "linear-gradient(145deg, rgba(26,26,26,0.96), rgba(10,10,10,0.96))", border: "1px solid var(--border)", borderRadius: 12, padding: 24, boxShadow: "0 18px 45px rgba(0,0,0,0.28)" }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 16, flexWrap: "wrap", marginBottom: 24 }}>
+                    <div>
+                      <div style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.72rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>Storefront Gate</div>
+                      <h3 style={{ fontSize: "1.2rem", marginBottom: 8 }}>Maintenance Mode</h3>
+                      <p style={{ color: "var(--text2)", fontSize: "0.9rem", maxWidth: 620 }}>
+                        Temporarily replace public storefront pages with a premium coming-soon page. Admin remains fully accessible.
+                      </p>
+                    </div>
+                    <label style={{ display: "flex", alignItems: "center", gap: 10, color: "var(--text2)", cursor: "pointer" }}>
+                      <input
+                        type="checkbox"
+                        checked={maintenanceForm.enabled}
+                        onChange={e => setMaintenanceForm(f => ({ ...f, enabled: e.target.checked }))}
+                      />
+                      {maintenanceForm.enabled ? "Enabled" : "Disabled"}
+                    </label>
+                  </div>
+
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))", gap: 16 }}>
+                    <div>
+                      <label style={labelStyle}>Title</label>
+                      <input className="input" value={maintenanceForm.title} onChange={e => setMaintenanceForm(f => ({ ...f, title: e.target.value }))} />
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Contact Email</label>
+                      <input className="input" type="email" value={maintenanceForm.contactEmail} onChange={e => setMaintenanceForm(f => ({ ...f, contactEmail: e.target.value }))} />
+                    </div>
+                    <div style={{ gridColumn: "1/-1" }}>
+                      <label style={labelStyle}>Message</label>
+                      <textarea className="input" rows={4} value={maintenanceForm.message} onChange={e => setMaintenanceForm(f => ({ ...f, message: e.target.value }))} style={{ resize: "vertical" }} />
+                    </div>
+                    <div style={{ gridColumn: "1/-1" }}>
+                      <label style={labelStyle}>Return Text</label>
+                      <input className="input" value={maintenanceForm.returnText} onChange={e => setMaintenanceForm(f => ({ ...f, returnText: e.target.value }))} />
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 24 }}>
+                    <button type="button" onClick={saveMaintenance} className="btn btn-primary btn-sm">
+                      Save Maintenance Mode
+                    </button>
+                    <a href="/" target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">
+                      Open Public Site
+                    </a>
+                  </div>
+                </div>
+              </div>
             )}
           </>
         )}

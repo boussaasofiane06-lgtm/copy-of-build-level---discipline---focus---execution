@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { BrowserRouter, Routes, Route, useLocation } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import Navbar from "./components/Navbar";
@@ -13,6 +13,8 @@ import BlogPost from "./pages/BlogPost";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Admin from "./pages/Admin";
+import Maintenance from "./pages/Maintenance";
+import { MaintenanceConfig, publicApi } from "./lib/api";
 
 function RouteInteractionCleanup() {
   const { pathname } = useLocation();
@@ -51,6 +53,49 @@ function PublicRoutes() {
   );
 }
 
+const defaultMaintenance: MaintenanceConfig = {
+  enabled: false,
+  title: "Coming Back Soon",
+  message: "BUILD LEVEL is upgrading the experience. The storefront will return shortly.",
+  returnText: "Discipline. Focus. Execution.",
+  contactEmail: "info@thebuildlevel.com",
+};
+
+function PublicStorefrontShell() {
+  const [maintenance, setMaintenance] = useState<MaintenanceConfig>(defaultMaintenance);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    publicApi.getMaintenanceConfig()
+      .then(config => {
+        if (!cancelled) setMaintenance({ ...defaultMaintenance, ...config });
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  if (!loading && maintenance.enabled) {
+    return <Maintenance config={maintenance} />;
+  }
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+      <Navbar />
+      <main style={{ flex: 1 }}>
+        <PublicRoutes />
+      </main>
+      <Footer />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -61,15 +106,7 @@ export default function App() {
         <Route path="/admin" element={<Admin />} />
 
         {/* Public routes */}
-        <Route path="*" element={
-          <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-            <Navbar />
-            <main style={{ flex: 1 }}>
-              <PublicRoutes />
-            </main>
-            <Footer />
-          </div>
-        } />
+        <Route path="*" element={<PublicStorefrontShell />} />
       </Routes>
     </BrowserRouter>
   );

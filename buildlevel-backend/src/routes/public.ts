@@ -8,6 +8,13 @@ import { BUSINESS_EMAIL, isEmailConfigured, sendBusinessEmail, sendCustomerEmail
 
 const router = Router();
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
+const DEFAULT_MAINTENANCE = {
+  enabled: false,
+  title: "Coming Back Soon",
+  message: "BUILD LEVEL is upgrading the experience. The storefront will return shortly.",
+  returnText: "Discipline. Focus. Execution.",
+  contactEmail: "info@thebuildlevel.com",
+};
 
 function normalizeTidioPublicKey(value?: string | null) {
   if (!value) return "";
@@ -143,6 +150,24 @@ router.get("/social-links", async (req, res) => {
       }))
       .filter((link) => link.enabled && link.url && isValidHttpUrl(link.url));
     res.json({ email: BUSINESS_EMAIL, links });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.get("/maintenance", async (req, res) => {
+  try {
+    const db = await getDb();
+    const rows = await db.select().from(siteSettings);
+    const settings: Record<string, string> = {};
+    for (const row of rows) settings[row.key] = row.value ?? "";
+    res.json({
+      enabled: settings.maintenance_enabled === "true",
+      title: settings.maintenance_title || DEFAULT_MAINTENANCE.title,
+      message: settings.maintenance_message || DEFAULT_MAINTENANCE.message,
+      returnText: settings.maintenance_return_text || DEFAULT_MAINTENANCE.returnText,
+      contactEmail: settings.maintenance_contact_email || settings.contact_email || DEFAULT_MAINTENANCE.contactEmail,
+    });
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

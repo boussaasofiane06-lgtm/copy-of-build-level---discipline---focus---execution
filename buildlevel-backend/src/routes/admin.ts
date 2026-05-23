@@ -406,6 +406,48 @@ router.post("/settings/bulk", requireAdmin, async (req: Request, res: Response) 
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+router.get("/maintenance", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const settings = await getSettingsMap([
+      "maintenance_enabled",
+      "maintenance_title",
+      "maintenance_message",
+      "maintenance_return_text",
+      "maintenance_contact_email",
+    ]);
+    res.json({
+      enabled: settings.maintenance_enabled === "true",
+      title: settings.maintenance_title || "Coming Back Soon",
+      message: settings.maintenance_message || "BUILD LEVEL is upgrading the experience. The storefront will return shortly.",
+      returnText: settings.maintenance_return_text || "Discipline. Focus. Execution.",
+      contactEmail: settings.maintenance_contact_email || "info@thebuildlevel.com",
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/maintenance", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const schema = z.object({
+      enabled: z.boolean().default(false),
+      title: z.string().min(1).max(160),
+      message: z.string().min(1).max(1000),
+      returnText: z.string().max(180).default(""),
+      contactEmail: z.string().email().default("info@thebuildlevel.com"),
+    });
+    const data = schema.parse(req.body);
+    await saveSetting("maintenance_enabled", String(data.enabled));
+    await saveSetting("maintenance_title", data.title);
+    await saveSetting("maintenance_message", data.message);
+    await saveSetting("maintenance_return_text", data.returnText);
+    await saveSetting("maintenance_contact_email", data.contactEmail);
+    res.json({ success: true });
+  } catch (e: any) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ─── Integration Management ───────────────────────────────────────────────────
 router.get("/integrations/overview", requireAdmin, async (req: Request, res: Response) => {
   try {
