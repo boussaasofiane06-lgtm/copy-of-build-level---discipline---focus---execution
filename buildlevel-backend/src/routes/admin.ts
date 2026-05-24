@@ -866,6 +866,12 @@ async function syncPrintifyStoreToWebsite() {
   };
 }
 
+function isPrintifyAutoSyncAuthorized(req: Request) {
+  const expectedSecret = (process.env.PRINTIFY_SYNC_SECRET || "").trim();
+  const providedSecret = String(req.query.secret || req.headers["x-printify-sync-secret"] || "").trim();
+  return !!expectedSecret && providedSecret === expectedSecret;
+}
+
 router.get("/printify/status", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { apiKey, shopId } = await getPrintifyCredentials();
@@ -993,6 +999,19 @@ router.get("/printify/sync", requireAdmin, async (req: Request, res: Response) =
       },
       results: syncResult.results,
     });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.all("/printify/auto-sync", async (req: Request, res: Response) => {
+  try {
+    if (!isPrintifyAutoSyncAuthorized(req)) {
+      res.status(401).json({ error: "Printify auto-sync secret is missing or invalid" });
+      return;
+    }
+    const { apiKey, shopId } = await getPrintifyCredentials();
+    if (!apiKey || !shopId) { res.status(400).json({ error: "Printify not configured" }); return; }
+    const syncResult = await syncPrintifyStoreToWebsite();
+    res.json({ success: true, summary: syncResult.summary, results: syncResult.results });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 

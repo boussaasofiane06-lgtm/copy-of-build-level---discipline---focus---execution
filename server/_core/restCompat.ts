@@ -289,6 +289,12 @@ async function syncPrintifyStoreToWebsite() {
   };
 }
 
+function isPrintifyAutoSyncAuthorized(req: Request) {
+  const expectedSecret = cleanEnv(process.env.PRINTIFY_SYNC_SECRET);
+  const providedSecret = cleanEnv(String(req.query.secret || req.headers["x-printify-sync-secret"] || ""));
+  return !!expectedSecret && providedSecret === expectedSecret;
+}
+
 function getStripeClient() {
   const key = process.env.STRIPE_SECRET_KEY;
   if (!key) return null;
@@ -766,6 +772,30 @@ export function registerRestCompatRoutes(app: Express) {
         summary: { ...syncResult.summary, orders: ordersData.data?.length ?? 0 },
         results: syncResult.results,
       });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.all("/api/printify/auto-sync", async (req, res) => {
+    try {
+      if (!isPrintifyAutoSyncAuthorized(req)) {
+        res.status(401).json({ error: "Printify auto-sync secret is missing or invalid" });
+        return;
+      }
+      const { shopId, apiKey } = await getPrintifyCredentials();
+      if (!shopId || !apiKey) throw new Error("Printify not configured");
+      const syncResult = await syncPrintifyStoreToWebsite();
+      res.json({ success: true, summary: syncResult.summary, results: syncResult.results });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.all("/api/admin/printify/auto-sync", async (req, res) => {
+    try {
+      if (!isPrintifyAutoSyncAuthorized(req)) {
+        res.status(401).json({ error: "Printify auto-sync secret is missing or invalid" });
+        return;
+      }
+      const { shopId, apiKey } = await getPrintifyCredentials();
+      if (!shopId || !apiKey) throw new Error("Printify not configured");
+      const syncResult = await syncPrintifyStoreToWebsite();
+      res.json({ success: true, summary: syncResult.summary, results: syncResult.results });
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
   app.post("/api/admin/printify/publish", requireAdminRest, async (req, res) => {
