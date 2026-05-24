@@ -117,8 +117,8 @@ async function getShopifyCredentials() {
 async function getPrintifyCredentials() {
   const settings = await getSettingsMap(["printify_api_key", "printify_shop_id"]);
   return {
-    apiKey: process.env.PRINTIFY_API_KEY || settings.printify_api_key || "",
-    shopId: process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id || "",
+    apiKey: cleanEnv(process.env.PRINTIFY_API_KEY || settings.printify_api_key || ""),
+    shopId: cleanEnv(process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id || ""),
   };
 }
 
@@ -141,52 +141,152 @@ async function printifyRequest(path: string) {
   const { apiKey } = await getPrintifyCredentials();
   if (!apiKey) throw new Error("Printify API key not configured");
   const response = await fetch(`https://api.printify.com/v1${path}`, {
-    headers: { Authorization: `Bearer ${apiKey}` },
+    headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "BuildLevelWebsite/1.0" },
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Printify API error: ${response.status}`);
+  if (!response.ok) {
+    const message = typeof data?.message === "string" ? data.message : JSON.stringify(data).slice(0, 300);
+    throw new Error(`Printify API error ${response.status}: ${message}`);
+  }
   return data;
 }
 
-async function syncPrintifyProductToStore(printifyProductId: string) {
+function getPrintifyProductId(product: any) {
+  return String(product?.id || "").trim();
+}
+
+function getPrintifyVariants(product: any) {
+  return Array.isArray(product?.variants) ? product.variants : [];
+}
+
+function isPrintifyProductVisible(product: any) {
+  return product?.visible === true;
+}
+
+function getPrintifySizes(product: any) {
+  const sizes = getPrintifyVariants(product)
+    .filter((variant: any) => variant?.is_enabled !== false)
+    .map((variant: any) => String(variant.title || "").trim())
+    .filter(Boolean);
+  return Array.from(new Set(sizes)).slice(0, 24);
+}
+
+function getPrintifyPrice(product: any) {
+  const variants = getPrintifyVariants(product);
+  const firstVariant = variants.find((variant: any) => variant?.is_enabled !== false) || variants[0];
+  return firstVariant ? (Number(firstVariant.price || 0) / 100).toFixed(2) : "29.99";
+}
+
+function getPrintifyInStock(product: any) {
+  return getPrintifyVariants(product).some((variant: any) => variant?.is_enabled !== false && variant?.is_available !== false);
+}
+
+async function syncPrintifyProductToStore(printifyProductOrId: string | Record<string, any>) {
   const { shopId } = await getPrintifyCredentials();
   if (!shopId) throw new Error("Printify shop ID not configured");
 
-  const product = await printifyRequest(`/shops/${shopId}/products/${printifyProductId}.json`);
-  const firstVariant = product.variants?.[0];
-  const price = firstVariant ? (Number(firstVariant.price || 0) / 100).toFixed(2) : "29.99";
+  const product = typeof printifyProductOrId === "string"
+    ? await printifyRequest(`/shops/${shopId}/products/${printifyProductOrId}.json`)
+    : printifyProductOrId;
+  const printifyProductId = getPrintifyProductId(product);
+  if (!printifyProductId) throw new Error("Printify product is missing an ID");
+  const visible = isPrintifyProductVisible(product);
+  const price = getPrintifyPrice(product);
   const imageUrl = product.images?.[0]?.src || "";
-  const sizes = (product.variants || [])
-    .map((variant: any) => String(variant.title || "").trim())
-    .filter(Boolean)
-    .slice(0, 12);
+  const sizes = getPrintifySizes(product);
   const db = await getDb();
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
   const values = {
     name: product.title || "Printify Product",
     description: product.description || "",
     price,
-    category: "mens-t-shirts",
+    category: existing[0]?.category || "mens-t-shirts",
     sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
     imageUrl,
-    badge: product.visible ? "New Release" : "Coming Soon",
-    inStock: true,
-    published: true,
-    hidden: false,
-    delisted: false,
-    featured: false,
+    badge: existing[0]?.badge || (visible ? "New Release" : "Coming Soon"),
+    inStock: visible && getPrintifyInStock(product),
+    published: visible,
+    hidden: !visible,
+    delisted: !visible,
+    featured: existing[0]?.featured ?? false,
+    sortOrder: existing[0]?.sortOrder ?? 0,
     printifyProductId,
     updatedAt: new Date(),
   };
 
   if (existing.length > 0) {
     await db.update(products).set(values).where(eq(products.printifyProductId, printifyProductId));
-    return { productId: existing[0].id, updated: true };
+    return { productId: existing[0].id, printifyProductId, action: visible ? "updated" : "hidden" };
   }
 
   await db.insert(products).values(values);
   const [created] = await db.select({ id: products.id }).from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
-  return { productId: created?.id ?? 0, updated: false };
+  return { productId: created?.id ?? 0, printifyProductId, action: visible ? "created" : "hidden" };
+}
+
+async function fetchAllPrintifyProducts() {
+  const { shopId } = await getPrintifyCredentials();
+  if (!shopId) throw new Error("Printify shop ID not configured");
+  const allProducts: any[] = [];
+  let page = 1;
+  let lastPage = 1;
+  do {
+    const data = await printifyRequest(`/shops/${shopId}/products.json?page=${page}&limit=100`);
+    const pageProducts = Array.isArray(data?.data) ? data.data : [];
+    allProducts.push(...pageProducts);
+    lastPage = Number(data?.last_page || data?.lastPage || page);
+    page += 1;
+  } while (page <= lastPage && page <= 50);
+  return allProducts;
+}
+
+async function syncPrintifyStoreToWebsite() {
+  const db = await getDb();
+  const listProducts = await fetchAllPrintifyProducts();
+  const { shopId } = await getPrintifyCredentials();
+  const syncedProductIds = new Set<string>();
+  const results: Array<{ productId: number; printifyProductId: string; action: string }> = [];
+
+  for (const listProduct of listProducts) {
+    const printifyProductId = getPrintifyProductId(listProduct);
+    if (!printifyProductId) continue;
+    syncedProductIds.add(printifyProductId);
+    const detailProduct = await printifyRequest(`/shops/${shopId}/products/${printifyProductId}.json`);
+    results.push(await syncPrintifyProductToStore(detailProduct));
+  }
+
+  const localPrintifyProducts = await db.select().from(products);
+  let delisted = 0;
+  for (const localProduct of localPrintifyProducts) {
+    if (!localProduct.printifyProductId || syncedProductIds.has(localProduct.printifyProductId)) continue;
+    await db.update(products).set({
+      published: false,
+      hidden: true,
+      delisted: true,
+      inStock: false,
+      badge: "Removed from Printify",
+      updatedAt: new Date(),
+    }).where(eq(products.id, localProduct.id));
+    delisted += 1;
+  }
+
+  const summary = results.reduce<Record<string, number>>((totals, result) => {
+    totals[result.action] = (totals[result.action] || 0) + 1;
+    return totals;
+  }, {});
+
+  return {
+    products: listProducts,
+    results,
+    summary: {
+      totalPrintifyProducts: listProducts.length,
+      visiblePrintifyProducts: listProducts.filter(isPrintifyProductVisible).length,
+      created: summary.created || 0,
+      updated: summary.updated || 0,
+      hidden: summary.hidden || 0,
+      delisted,
+    },
+  };
 }
 
 function getStripeClient() {
@@ -657,15 +757,14 @@ export function registerRestCompatRoutes(app: Express) {
     try {
       const { shopId } = await getPrintifyCredentials();
       if (!shopId) throw new Error("Printify shop ID not configured");
-      const [productsData, ordersData] = await Promise.all([
-        printifyRequest(`/shops/${shopId}/products.json?page=1&limit=20`),
-        printifyRequest(`/shops/${shopId}/orders.json?page=1&limit=20`),
-      ]);
+      const syncResult = await syncPrintifyStoreToWebsite();
+      const ordersData = await printifyRequest(`/shops/${shopId}/orders.json?page=1&limit=20`);
       res.json({
         success: true,
-        products: productsData,
+        products: { data: syncResult.products },
         orders: ordersData,
-        summary: { products: productsData.data?.length ?? 0, orders: ordersData.data?.length ?? 0 },
+        summary: { ...syncResult.summary, orders: ordersData.data?.length ?? 0 },
+        results: syncResult.results,
       });
     } catch (e: any) { res.status(400).json({ error: e.message }); }
   });

@@ -61,6 +61,18 @@ function StatusPill({ active, label }: { active: boolean; label?: string }) {
   );
 }
 
+function getPrintifySyncMessage(data: unknown) {
+  const summary = data && typeof data === "object" ? (data as Record<string, any>).summary : null;
+  if (!summary || typeof summary !== "object") return "";
+  return [
+    `Printify synced`,
+    `${summary.created ?? 0} new`,
+    `${summary.updated ?? 0} updated`,
+    `${summary.hidden ?? 0} hidden drafts`,
+    `${summary.delisted ?? 0} removed`,
+  ].join(" · ");
+}
+
 function IntegrationCard({
   title,
   connected,
@@ -255,7 +267,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
       if (action === "sync" && syncProducts && typeof syncProducts === "object" && Array.isArray((syncProducts as any).data)) {
         setPrintifyProducts((syncProducts as any).data);
       }
-      showToast(`Printify ${action} loaded`);
+      showToast(action === "sync" ? getPrintifySyncMessage(data) || "Printify store synced" : `Printify ${action} loaded`);
     } catch (error: any) {
       showToast(error?.response?.data?.error || `Printify ${action} needs configuration`);
     } finally {
@@ -452,6 +464,11 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             <p style={{ color: "var(--text2)", fontSize: "0.78rem" }}>
               Loaded records: {countSnapshotRecords(printifySnapshot, ["data", "products", "orders"])}
             </p>
+            {printifySnapshot.sync && (
+              <p style={{ color: "var(--text2)", fontSize: "0.78rem", lineHeight: 1.6 }}>
+                {getPrintifySyncMessage(printifySnapshot.sync)}
+              </p>
+            )}
           </div>
         </div>
       </div>
