@@ -744,11 +744,11 @@ function isPrintifyProductVisible(product: any) {
 }
 
 function getPrintifySizes(product: any) {
-  const sizes = getPrintifyVariants(product)
+  const sizes: string[] = getPrintifyVariants(product)
     .filter((variant: any) => variant?.is_enabled !== false)
     .map((variant: any) => String(variant.title || "").trim())
     .filter(Boolean);
-  return Array.from(new Set(sizes)).slice(0, 24);
+  return Array.from(new Set<string>(sizes)).slice(0, 24);
 }
 
 function getPrintifyPrice(product: any) {
