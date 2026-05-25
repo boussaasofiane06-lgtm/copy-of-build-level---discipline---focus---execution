@@ -687,7 +687,7 @@ router.get("/integrations/social/oauth/:platform", requireAdmin, async (req: Req
 
 router.post("/integrations/test/:provider", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const provider = req.params.provider;
+    const provider = String(req.params.provider || "");
     if (await isIntegrationDisabled(provider)) {
       res.json({ ok: false, message: `${provider} is disconnected` });
       return;
@@ -732,7 +732,7 @@ router.post("/integrations/test/:provider", requireAdmin, async (req: Request, r
 
 router.post("/integrations/disconnect/:provider", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const provider = req.params.provider;
+    const provider = String(req.params.provider || "");
     if (provider === "shopify") {
       await saveSetting("shopify_disabled", "true");
       await saveSetting("shopify_store_url", "");
@@ -774,7 +774,7 @@ router.post("/integrations/disconnect/:provider", requireAdmin, async (req: Requ
 
 router.post("/integrations/enable/:provider", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const provider = req.params.provider;
+    const provider = String(req.params.provider || "");
     if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
       res.status(404).json({ error: "Unsupported provider" });
       return;
