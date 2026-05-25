@@ -725,6 +725,10 @@ export function registerRestCompatRoutes(app: Express) {
   app.post("/api/admin/integrations/enable/:provider", requireAdminRest, async (req, res) => {
     try {
       const provider = req.params.provider;
+      if (provider === "shopify" || provider === "printify") {
+        res.status(400).json({ error: `${provider} must be reconnected by entering fresh credentials` });
+        return;
+      }
       if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
         res.status(404).json({ error: "Unsupported provider" });
         return;

@@ -775,6 +775,10 @@ router.post("/integrations/disconnect/:provider", requireAdmin, async (req: Requ
 router.post("/integrations/enable/:provider", requireAdmin, async (req: Request, res: Response) => {
   try {
     const provider = String(req.params.provider || "");
+    if (provider === "shopify" || provider === "printify") {
+      res.status(400).json({ error: `${provider} must be reconnected by entering fresh credentials` });
+      return;
+    }
     if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
       res.status(404).json({ error: "Unsupported provider" });
       return;

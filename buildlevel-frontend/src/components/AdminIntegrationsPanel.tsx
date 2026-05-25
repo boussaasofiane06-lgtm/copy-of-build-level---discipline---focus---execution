@@ -230,7 +230,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     }
   };
 
-  const enableProvider = async (provider: "shopify" | "printify" | "stripe" | "tidio") => {
+  const enableProvider = async (provider: "stripe" | "tidio") => {
     const label = provider === "tidio" ? "Tidio" : provider.charAt(0).toUpperCase() + provider.slice(1);
     setTesting(`enable-${provider}`);
     try {
@@ -408,7 +408,6 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               capabilities={integrations.shopify.capabilities}
               onTest={() => testProvider("shopify")}
               onDisconnect={() => disconnectProvider("shopify")}
-              onEnable={() => enableProvider("shopify")}
             />
             <IntegrationCard
               title="Printify"
@@ -418,7 +417,6 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               capabilities={integrations.printify.capabilities}
               onTest={() => testProvider("printify")}
               onDisconnect={() => disconnectProvider("printify")}
-              onEnable={() => enableProvider("printify")}
             />
             <IntegrationCard
               title="Stripe"
@@ -460,9 +458,16 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               <input style={inputStyle} type="password" value={shopifyCredentials.apiKey} onChange={(e) => setShopifyCredentials((current) => ({ ...current, apiKey: e.target.value }))} placeholder="shpat_..." />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={saveShopify} className="btn btn-primary btn-sm">Save Shopify</button>
+              <button type="button" onClick={saveShopify} className="btn btn-primary btn-sm">
+                {integrations?.shopify.disabled ? "Reconnect Shopify" : "Save Shopify"}
+              </button>
               <button type="button" onClick={() => testProvider("shopify")} className="btn btn-outline btn-sm">Validate</button>
             </div>
+            {integrations?.shopify.disabled && (
+              <p style={{ color: "var(--text3)", fontSize: "0.74rem" }}>
+                Reconnect requires re-entering the Store URL and Admin Access Token.
+              </p>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(["products", "inventory", "orders", "customers", "webhooks", "sync"] as const).map((action) => (
                 <button key={action} type="button" onClick={() => runShopifyAction(action)} className="btn btn-outline btn-sm" disabled={testing === `shopify-${action}`}>
@@ -494,10 +499,17 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               <input style={inputStyle} value={printifyCredentials.shopId} onChange={(e) => setPrintifyCredentials((current) => ({ ...current, shopId: e.target.value }))} placeholder="Printify shop ID" />
             </div>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={savePrintify} className="btn btn-primary btn-sm">Save Printify</button>
+              <button type="button" onClick={savePrintify} className="btn btn-primary btn-sm">
+                {integrations?.printify.disabled ? "Reconnect Printify" : "Save Printify"}
+              </button>
               <button type="button" onClick={() => testProvider("printify")} className="btn btn-outline btn-sm">Validate</button>
               <button type="button" onClick={() => publishPrintify()} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish to Website</button>
             </div>
+            {integrations?.printify.disabled && (
+              <p style={{ color: "var(--text3)", fontSize: "0.74rem" }}>
+                Reconnect requires re-entering the Printify API Token and Shop ID.
+              </p>
+            )}
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               {(["products", "inventory", "orders", "sync"] as const).map((action) => (
                 <button key={action} type="button" onClick={() => runPrintifyAction(action)} className="btn btn-outline btn-sm" disabled={testing === `printify-${action}`}>
