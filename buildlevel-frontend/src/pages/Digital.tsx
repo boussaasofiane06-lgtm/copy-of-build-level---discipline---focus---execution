@@ -2,6 +2,14 @@ import { useEffect, useState } from "react";
 import { MountainLegacySection } from "../components/PromoVisualSections";
 import { publicApi, DigitalProduct } from "../lib/api";
 
+const storageImageUrl = (value?: string | null) => {
+  if (!value) return "";
+  if (value.startsWith("storage:")) {
+    return `/api/digital/thumbnail/${encodeURIComponent(value.slice("storage:".length))}`;
+  }
+  return value;
+};
+
 export default function Digital() {
   const [products, setProducts] = useState<DigitalProduct[]>([]);
   const [loading, setLoading] = useState(true);
@@ -56,7 +64,7 @@ export default function Digital() {
               <div key={p.id} className="card" style={{ display: "flex", flexDirection: "column" }}>
                 <div style={{ aspectRatio: "16/9", background: "var(--bg3)", overflow: "hidden", position: "relative" }}>
                   {p.imageUrl ? (
-                    <img src={p.imageUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <img src={storageImageUrl(p.imageUrl)} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: 8 }}>
                       <span style={{ fontSize: "2rem" }}>{p.productType === "pdf" ? "📄" : p.productType === "audiobook" ? "🎧" : p.productType === "video" ? "🎬" : "📦"}</span>

@@ -25,6 +25,14 @@ const defaultMaintenanceConfig: MaintenanceConfig = {
   contactEmail: "info@thebuildlevel.com",
 };
 
+const storageImageUrl = (value?: string | null) => {
+  if (!value) return "";
+  if (value.startsWith("storage:")) {
+    return `/api/digital/thumbnail/${encodeURIComponent(value.slice("storage:".length))}`;
+  }
+  return value;
+};
+
 export default function Admin() {
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
@@ -208,14 +216,14 @@ export default function Admin() {
       else await adminApi.createDigitalProduct(data as any);
       showToast(editDigital?.id ? "Updated!" : "Created!");
       setShowDigitalForm(false); setEditDigital(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setThumbnailPreviews([]); setDigitalFileInfo(null); loadData();
-    } catch { showToast("Error saving"); }
+    } catch (error: any) { showToast(error?.response?.data?.error || "Error saving"); }
   };
 
   const openEditDigital = (p: DigitalProduct) => {
     setEditDigital(p);
     setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", fileKey: p.fileKey || "", fileUrl: p.fileUrl || "", fileName: p.fileName || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", version: "1.0", downloadLimit: "5", published: p.published });
     setThumbnailPreviews(p.imageUrl ? [p.imageUrl] : []);
-    setDigitalFileInfo(p.fileName ? { name: p.fileName, size: 0, mimeType: "Stored file" } : null);
+    setDigitalFileInfo((p.fileName || p.fileKey || p.fileUrl) ? { name: p.fileName || "Stored digital upload", size: 0, mimeType: "Stored file" } : null);
     setShowDigitalForm(true);
   };
 
@@ -257,9 +265,9 @@ export default function Admin() {
           const weighted = Math.round(((index + progress / 100) / imageFiles.length) * 100);
           setThumbnailUploadProgress(weighted);
         });
-        const preview = uploaded.url || URL.createObjectURL(imageFiles[index]);
-        previews.push(preview);
-        if (index === 0) setDigitalForm(f => ({ ...f, imageUrl: preview }));
+        const storedImageUrl = uploaded.url || `storage:${uploaded.key}`;
+        previews.push(storedImageUrl);
+        if (index === 0) setDigitalForm(f => ({ ...f, imageUrl: storedImageUrl }));
       }
       setThumbnailPreviews(previews);
       setThumbnailUploadProgress(100);
@@ -522,7 +530,7 @@ export default function Admin() {
                             File: {digitalFileInfo.name} · {formatBytes(digitalFileInfo.size)} · {digitalFileInfo.mimeType}
                           </p>
                         )}
-                        {digitalForm.fileUrl && <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>Secure file attached. Saving this product will use the uploaded file for delivery.</p>}
+                        {(digitalForm.fileKey || digitalForm.fileUrl) && <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>Secure file attached. Saving this product will use the uploaded file for delivery.</p>}
                       </div>
                       <div
                         style={{ gridColumn: "1/-1", border: "1px dashed var(--border)", borderRadius: 10, padding: 18, background: "rgba(255,255,255,0.025)" }}
@@ -541,7 +549,7 @@ export default function Admin() {
                           <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
                             {thumbnailPreviews.map((src, index) => (
                               <button key={`${src.slice(0, 24)}-${index}`} type="button" onClick={() => setDigitalForm(f => ({ ...f, imageUrl: src }))} style={{ padding: 0, border: digitalForm.imageUrl === src ? "2px solid var(--red)" : "1px solid var(--border)", borderRadius: 8, background: "transparent" }}>
-                                <img src={src} alt={`Thumbnail ${index + 1}`} style={{ width: 86, height: 64, objectFit: "cover", borderRadius: 6 }} />
+                                <img src={storageImageUrl(src)} alt={`Thumbnail ${index + 1}`} style={{ width: 86, height: 64, objectFit: "cover", borderRadius: 6 }} />
                               </button>
                             ))}
                           </div>
@@ -562,6 +570,7 @@ export default function Admin() {
                   {digital.length === 0 ? <p style={{ color: "var(--text2)", padding: 40, textAlign: "center" }}>No digital products yet.</p> :
                     digital.map(p => (
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
+                        {p.imageUrl && <img src={storageImageUrl(p.imageUrl)} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.name}</div>
                           <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {p.productType} · {p.published ? "Published" : "Draft"}</div>

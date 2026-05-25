@@ -104,6 +104,20 @@ router.get("/digital", async (req, res) => {
   }
 });
 
+router.get("/digital/thumbnail/:key", async (req, res) => {
+  try {
+    const key = decodeURIComponent(req.params.key || "");
+    if (!key.startsWith("thumbnail/")) {
+      res.status(400).json({ error: "Invalid thumbnail key" });
+      return;
+    }
+    const url = await getProtectedDownloadUrl(key);
+    res.redirect(302, url);
+  } catch (e: any) {
+    res.status(404).json({ error: e.message || "Thumbnail not found" });
+  }
+});
+
 router.get("/digital/download/:token", async (req, res) => {
   try {
     const db = await getDb();
