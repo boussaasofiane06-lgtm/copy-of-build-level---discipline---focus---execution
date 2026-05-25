@@ -8,6 +8,20 @@ import { digitalProducts, digitalPurchases, products, siteSettings } from "../db
 const router = Router();
 const MAX_PHYSICAL_METADATA_ITEMS = 15;
 
+class StripeCheckoutError extends Error {
+  status: number;
+  requestId?: string | null;
+  stripeError?: unknown;
+
+  constructor(message: string, status: number, requestId?: string | null, stripeError?: unknown) {
+    super(message);
+    this.name = "StripeCheckoutError";
+    this.status = status;
+    this.requestId = requestId;
+    this.stripeError = stripeError;
+  }
+}
+
 function getStripeSecretKey() {
   const raw = (process.env.STRIPE_SECRET_KEY || "").trim();
   if (!raw) throw new Error("STRIPE_SECRET_KEY is not configured");
@@ -20,6 +34,11 @@ function getStripeSecretKey() {
   }
 
   return key;
+}
+
+function getStripeKeyMode() {
+  const key = getStripeSecretKey();
+  return key.startsWith("sk_live_") ? "live" : "test";
 }
 
 function getStripe() {
@@ -56,6 +75,25 @@ function isStripeImageUrl(value?: string) {
 
 function cleanText(value?: unknown) {
   return String(value ?? "").trim();
+}
+
+function toPositiveCents(value: unknown) {
+  const amount = Number.parseFloat(String(value));
+  if (!Number.isFinite(amount) || amount <= 0) {
+    throw new Error(`Invalid product price: ${value}`);
+  }
+  return Math.round(amount * 100);
+}
+
+function getStripeRequestId(response: globalThis.Response) {
+  return response.headers.get("request-id") || response.headers.get("stripe-request-id");
+}
+
+function logStripeCheckoutFailure(context: Record<string, unknown>, error: unknown) {
+  const details = error instanceof StripeCheckoutError
+    ? { message: error.message, status: error.status, requestId: error.requestId, stripeError: error.stripeError }
+    : { message: error instanceof Error ? error.message : String(error) };
+  console.error("[Stripe Checkout] Failed to create session", { ...context, ...details });
 }
 
 function buildPhysicalCheckoutMetadata(items: PhysicalCheckoutItem[]) {
@@ -282,9 +320,14 @@ async function createCheckoutSessionDirect({
     body,
   });
 
-  const data = await response.json() as { url?: string; error?: { message?: string } };
+  const data = await response.json() as { id?: string; url?: string; error?: { message?: string; type?: string; code?: string; param?: string } };
   if (!response.ok || !data.url) {
-    throw new Error(data.error?.message || `Stripe checkout failed with ${response.status}`);
+    throw new StripeCheckoutError(
+      data.error?.message || `Stripe checkout failed with ${response.status}`,
+      response.status,
+      getStripeRequestId(response),
+      data.error,
+    );
   }
 
   return data;
@@ -340,29 +383,59 @@ router.post("/checkout", async (req: Request, res: Response) => {
 
 // ─── Digital product checkout ─────────────────────────────────────────────────
 router.post("/digital-checkout", async (req: Request, res: Response) => {
+  const debugContext: Record<string, unknown> = {
+    route: "/api/stripe/digital-checkout",
+    productId: req.body?.productId,
+  };
   try {
     const { productId, customerEmail } = req.body;
     const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
+    const parsedProductId = Number(productId);
+    if (!Number.isInteger(parsedProductId) || parsedProductId <= 0) {
+      res.status(400).json({ error: "Valid productId is required", debug: { ...debugContext, receivedProductId: productId } });
+      return;
+    }
 
     const db = await getDb();
-    const [product] = await db.select().from(digitalProducts).where(eq(digitalProducts.id, productId)).limit(1);
+    const [product] = await db.select().from(digitalProducts).where(eq(digitalProducts.id, parsedProductId)).limit(1);
     if (!product) { res.status(404).json({ error: "Product not found" }); return; }
+    if (!product.published) { res.status(404).json({ error: "Product not found" }); return; }
+
+    const unitAmount = toPositiveCents(product.price);
+    const stripeMode = getStripeKeyMode();
+    Object.assign(debugContext, {
+      productId: product.id,
+      productName: product.name,
+      productPublished: product.published,
+      priceUSD: String(product.price),
+      unitAmount,
+      stripeMode,
+      usingInlinePriceData: true,
+      stripePaymentLinkConfigured: !!product.stripePaymentLink,
+    });
+    console.log("[Stripe Digital Checkout] Creating session", debugContext);
 
     const session = await createCheckoutSessionDirect({
       lineItems: [{
         name: product.name,
-        unitAmount: Math.round(parseFloat(product.price) * 100),
+        unitAmount,
         quantity: 1,
       }],
       customerEmail,
-      metadata: { productId: String(productId), type: "digital" },
+      metadata: { productId: String(parsedProductId), type: "digital" },
       successUrl: `${origin}/digital?purchased=true&session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/digital`,
     });
 
-    res.json({ url: session.url });
+    res.json({ url: session.url, debug: { ...debugContext, stripeSessionId: session.id } });
   } catch (e: any) {
-    res.status(500).json({ error: e.message });
+    logStripeCheckoutFailure(debugContext, e);
+    res.status(e instanceof StripeCheckoutError ? e.status : 500).json({
+      error: e.message,
+      stripeError: e instanceof StripeCheckoutError ? e.stripeError : undefined,
+      stripeRequestId: e instanceof StripeCheckoutError ? e.requestId : undefined,
+      debug: debugContext,
+    });
   }
 });
 
