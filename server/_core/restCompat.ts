@@ -111,12 +111,16 @@ function normalizeTidioPublicKey(value?: string | null) {
   return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
 }
 
+function settingOrEnv(settings: Record<string, string>, key: string, envValue?: string) {
+  return Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : (envValue || "");
+}
+
 async function getShopifyCredentials() {
   const settings = await getSettingsMap(["shopify_store_url", "shopify_api_key", "shopify_disabled"]);
   if (settings.shopify_disabled === "true") return { storeUrl: "", apiKey: "" };
   return {
-    storeUrl: process.env.SHOPIFY_STORE_URL || settings.shopify_store_url || "",
-    apiKey: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || settings.shopify_api_key || "",
+    storeUrl: cleanEnv(settings.shopify_store_url || process.env.SHOPIFY_STORE_URL || ""),
+    apiKey: cleanEnv(settings.shopify_api_key || process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || ""),
   };
 }
 
@@ -124,8 +128,8 @@ async function getPrintifyCredentials() {
   const settings = await getSettingsMap(["printify_api_key", "printify_shop_id", "printify_disabled"]);
   if (settings.printify_disabled === "true") return { apiKey: "", shopId: "" };
   return {
-    apiKey: cleanEnv(process.env.PRINTIFY_API_KEY || settings.printify_api_key || ""),
-    shopId: cleanEnv(process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id || ""),
+    apiKey: cleanEnv(settings.printify_api_key || process.env.PRINTIFY_API_KEY || ""),
+    shopId: cleanEnv(settings.printify_shop_id || process.env.PRINTIFY_SHOP_ID || ""),
   };
 }
 
@@ -364,8 +368,8 @@ export function registerRestCompatRoutes(app: Express) {
           tidio: {
             enabled: !tidioDisabled && settings.tidio_enabled === "true",
             disabled: tidioDisabled,
-            configured: !tidioDisabled && !!normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
-            publicKey: tidioDisabled ? "" : maskSecret(normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY)),
+            configured: !tidioDisabled && !!normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY)),
+            publicKey: tidioDisabled ? "" : maskSecret(normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY))),
             capabilities: ["chat controls", "chatbot settings", "support analytics"],
           },
           social: SOCIAL_PLATFORMS.map((platform) => ({
@@ -440,9 +444,10 @@ export function registerRestCompatRoutes(app: Express) {
     try {
       const settings = await getSettingsMap();
       const disabled = settings.tidio_disabled === "true";
+      const publicKey = settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY);
       res.json({
         enabled: !disabled && settings.tidio_enabled === "true",
-        publicKey: disabled ? "" : normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || ""),
+        publicKey: disabled ? "" : normalizeTidioPublicKey(publicKey),
         chatControls: settings.tidio_chat_controls || "manual",
         chatbotSettings: settings.tidio_chatbot_settings || "",
       });
@@ -506,7 +511,7 @@ export function registerRestCompatRoutes(app: Express) {
   app.get("/api/tidio/config", async (_req, res) => {
     try {
       const settings = await getSettingsMap();
-      const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "");
+      const publicKey = normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY));
       const disabled = settings.tidio_disabled === "true";
       res.json({
         enabled: !disabled && settings.tidio_enabled === "true" && !!publicKey,
@@ -670,7 +675,7 @@ export function registerRestCompatRoutes(app: Express) {
       }
       if (provider === "tidio") {
         const settings = await getSettingsMap(["tidio_public_key"]);
-        const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY);
+        const publicKey = normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY));
         res.json({ ok: !!publicKey, message: publicKey ? "Tidio public key configured" : "Tidio public key missing" });
         return;
       }
@@ -725,11 +730,11 @@ export function registerRestCompatRoutes(app: Express) {
   app.post("/api/admin/integrations/enable/:provider", requireAdminRest, async (req, res) => {
     try {
       const provider = req.params.provider;
-      if (provider === "shopify" || provider === "printify") {
+      if (provider === "shopify" || provider === "printify" || provider === "tidio") {
         res.status(400).json({ error: `${provider} must be reconnected by entering fresh credentials` });
         return;
       }
-      if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
+      if (provider !== "stripe") {
         res.status(404).json({ error: "Unsupported provider" });
         return;
       }
@@ -750,8 +755,8 @@ export function registerRestCompatRoutes(app: Express) {
       const schema = z.object({ storeUrl: z.string().min(1), apiKey: z.string().min(1) });
       const data = schema.parse(req.body);
       await saveSetting("shopify_disabled", "false");
-      await saveSetting("shopify_store_url", data.storeUrl);
-      await saveSetting("shopify_api_key", data.apiKey);
+      await saveSetting("shopify_store_url", cleanEnv(data.storeUrl));
+      await saveSetting("shopify_api_key", cleanEnv(data.apiKey));
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
@@ -817,8 +822,8 @@ export function registerRestCompatRoutes(app: Express) {
       });
       const data = schema.parse(req.body);
       await saveSetting("printify_disabled", "false");
-      await saveSetting("printify_api_key", data.apiKey);
-      await saveSetting("printify_shop_id", data.shopId);
+      await saveSetting("printify_api_key", cleanEnv(data.apiKey));
+      await saveSetting("printify_shop_id", cleanEnv(data.shopId));
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });

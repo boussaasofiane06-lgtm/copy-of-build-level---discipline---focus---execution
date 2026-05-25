@@ -24,6 +24,10 @@ function normalizeTidioPublicKey(value?: string | null) {
   return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
 }
 
+function settingOrEnv(settings: Record<string, string>, key: string, envValue?: string) {
+  return Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : (envValue || "");
+}
+
 function isValidHttpUrl(value: string) {
   try {
     const url = new URL(value);
@@ -179,7 +183,7 @@ router.get("/tidio/config", async (req, res) => {
     const rows = await db.select().from(siteSettings);
     const settings: Record<string, string> = {};
     for (const row of rows) settings[row.key] = row.value ?? "";
-    const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "");
+    const publicKey = normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY));
     const disabled = settings.tidio_disabled === "true";
     res.json({
       enabled: !disabled && settings.tidio_enabled === "true" && !!publicKey,

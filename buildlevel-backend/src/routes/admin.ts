@@ -89,6 +89,10 @@ function normalizeTidioPublicKey(value?: string | null) {
   return trimmed.replace(/^https?:\/\/code\.tidio\.co\//i, "").replace(/\.js$/i, "");
 }
 
+function settingOrEnv(settings: Record<string, string>, key: string, envValue?: string) {
+  return Object.prototype.hasOwnProperty.call(settings, key) ? settings[key] : (envValue || "");
+}
+
 function isLikelyUrl(value: string) {
   return /^https?:\/\//i.test(value.trim());
 }
@@ -497,8 +501,8 @@ router.get("/integrations/overview", requireAdmin, async (req: Request, res: Res
         tidio: {
           enabled: !tidioDisabled && settings.tidio_enabled === "true",
           disabled: tidioDisabled,
-          configured: !tidioDisabled && !!normalizeTidioPublicKey(settings.tidio_public_key),
-          publicKey: maskSecret(normalizeTidioPublicKey(settings.tidio_public_key)),
+          configured: !tidioDisabled && !!normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY)),
+          publicKey: tidioDisabled ? "" : maskSecret(normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY))),
           capabilities: ["chat controls", "chatbot settings", "support analytics"],
         },
         social: SOCIAL_PLATFORMS.map((platform) => ({
@@ -581,9 +585,10 @@ router.get("/integrations/tidio/config", requireAdmin, async (req: Request, res:
   try {
     const settings = await getSettingsMap(integrationSettingKeys);
     const disabled = settings.tidio_disabled === "true";
+    const publicKey = settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY);
     res.json({
       enabled: !disabled && settings.tidio_enabled === "true",
-      publicKey: disabled ? "" : normalizeTidioPublicKey(settings.tidio_public_key || ""),
+      publicKey: disabled ? "" : normalizeTidioPublicKey(publicKey),
       chatControls: settings.tidio_chat_controls || "manual",
       chatbotSettings: settings.tidio_chatbot_settings || "",
     });
@@ -720,7 +725,7 @@ router.post("/integrations/test/:provider", requireAdmin, async (req: Request, r
     }
     if (provider === "tidio") {
       const settings = await getSettingsMap(["tidio_public_key"]);
-      const publicKey = normalizeTidioPublicKey(settings.tidio_public_key);
+      const publicKey = normalizeTidioPublicKey(settingOrEnv(settings, "tidio_public_key", process.env.TIDIO_PUBLIC_KEY));
       res.json({ ok: !!publicKey, message: publicKey ? "Tidio public key configured" : "Tidio public key missing" });
       return;
     }
@@ -775,11 +780,11 @@ router.post("/integrations/disconnect/:provider", requireAdmin, async (req: Requ
 router.post("/integrations/enable/:provider", requireAdmin, async (req: Request, res: Response) => {
   try {
     const provider = String(req.params.provider || "");
-    if (provider === "shopify" || provider === "printify") {
+    if (provider === "shopify" || provider === "printify" || provider === "tidio") {
       res.status(400).json({ error: `${provider} must be reconnected by entering fresh credentials` });
       return;
     }
-    if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
+    if (provider !== "stripe") {
       res.status(404).json({ error: "Unsupported provider" });
       return;
     }
@@ -800,8 +805,8 @@ async function getPrintifyCredentials() {
   const shopRows = await db.select().from(siteSettings)
     .where(eq(siteSettings.key, 'printify_shop_id'));
   return {
-    apiKey: (process.env.PRINTIFY_API_KEY || rows[0]?.value || '').trim(),
-    shopId: (process.env.PRINTIFY_SHOP_ID || shopRows[0]?.value || '').trim(),
+    apiKey: (rows[0]?.value || process.env.PRINTIFY_API_KEY || '').trim(),
+    shopId: (shopRows[0]?.value || process.env.PRINTIFY_SHOP_ID || '').trim(),
   };
 }
 
@@ -969,7 +974,8 @@ router.get("/printify/status", requireAdmin, async (req: Request, res: Response)
 
 router.post("/printify/credentials", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { apiKey, shopId } = req.body;
+    const apiKey = String(req.body.apiKey || "").trim();
+    const shopId = String(req.body.shopId || "").trim();
     if (!apiKey || isLikelyUrl(apiKey)) {
       res.status(400).json({ error: "Use your Printify API token, not the API address" });
       return;
@@ -1124,8 +1130,8 @@ async function getShopifyCredentials() {
   const urlRows = await db.select().from(siteSettings).where(eq(siteSettings.key, 'shopify_store_url'));
   const keyRows = await db.select().from(siteSettings).where(eq(siteSettings.key, 'shopify_api_key'));
   return {
-    storeUrl: process.env.SHOPIFY_STORE_URL || urlRows[0]?.value || '',
-    apiKey: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || keyRows[0]?.value || '',
+    storeUrl: urlRows[0]?.value || process.env.SHOPIFY_STORE_URL || '',
+    apiKey: keyRows[0]?.value || process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || '',
   };
 }
 
@@ -1142,7 +1148,8 @@ router.get("/shopify/status", requireAdmin, async (req: Request, res: Response) 
 
 router.post("/shopify/credentials", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const { storeUrl, apiKey } = req.body;
+    const storeUrl = String(req.body.storeUrl || "").trim();
+    const apiKey = String(req.body.apiKey || "").trim();
     await saveSetting("shopify_disabled", "false");
     const db = await getDb();
     for (const [key, value] of [['shopify_store_url', storeUrl], ['shopify_api_key', apiKey]]) {

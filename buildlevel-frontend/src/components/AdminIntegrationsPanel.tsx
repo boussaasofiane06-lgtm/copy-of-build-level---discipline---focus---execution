@@ -119,10 +119,12 @@ function IntegrationCard({
             Validate Connection
           </button>
         )}
-        {disabled && onEnable ? (
-          <button type="button" onClick={onEnable} className="btn btn-primary btn-sm">
-            Enable
-          </button>
+        {disabled ? (
+          onEnable ? (
+            <button type="button" onClick={onEnable} className="btn btn-primary btn-sm">
+              Enable
+            </button>
+          ) : null
         ) : onDisconnect ? (
           <button type="button" onClick={onDisconnect} className="btn btn-outline btn-sm" style={{ borderColor: "rgba(192,57,43,0.65)", color: "#ffb4aa" }}>
             Disconnect
@@ -230,8 +232,8 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     }
   };
 
-  const enableProvider = async (provider: "stripe" | "tidio") => {
-    const label = provider === "tidio" ? "Tidio" : provider.charAt(0).toUpperCase() + provider.slice(1);
+  const enableProvider = async (provider: "stripe") => {
+    const label = provider.charAt(0).toUpperCase() + provider.slice(1);
     setTesting(`enable-${provider}`);
     try {
       await adminApi.enableIntegration(provider);
@@ -436,7 +438,6 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               capabilities={integrations.tidio.capabilities}
               onTest={() => testProvider("tidio")}
               onDisconnect={() => disconnectProvider("tidio")}
-              onEnable={() => enableProvider("tidio")}
             />
           </>
         )}
@@ -577,7 +578,14 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               <label style={labelStyle}>Chatbot Settings</label>
               <textarea style={{ ...inputStyle, resize: "vertical" }} rows={3} value={tidio.chatbotSettings} onChange={(e) => setTidio((current) => ({ ...current, chatbotSettings: e.target.value }))} placeholder="Support prompts, routing notes, escalation rules" />
             </div>
-            <button type="button" onClick={saveTidio} className="btn btn-primary btn-sm">Save Tidio</button>
+            <button type="button" onClick={saveTidio} className="btn btn-primary btn-sm">
+              {integrations?.tidio.disabled ? "Reconnect Tidio" : "Save Tidio"}
+            </button>
+            {integrations?.tidio.disabled && (
+              <p style={{ color: "var(--text3)", fontSize: "0.74rem" }}>
+                Reconnect requires re-entering the Tidio public key or snippet.
+              </p>
+            )}
           </div>
         </div>
       </div>

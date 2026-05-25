@@ -139,8 +139,8 @@ async function getPrintifyCredentials() {
   const settings = Object.fromEntries(rows.map((row) => [row.key, row.value ?? ""]));
   if (settings.printify_disabled === "true") return { apiKey: "", shopId: "" };
   return {
-    apiKey: cleanText(process.env.PRINTIFY_API_KEY || settings.printify_api_key),
-    shopId: cleanText(process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id),
+    apiKey: cleanText(settings.printify_api_key || process.env.PRINTIFY_API_KEY),
+    shopId: cleanText(settings.printify_shop_id || process.env.PRINTIFY_SHOP_ID),
   };
 }
 
