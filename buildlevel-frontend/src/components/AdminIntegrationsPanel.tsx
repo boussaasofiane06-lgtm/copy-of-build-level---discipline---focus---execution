@@ -76,15 +76,21 @@ function getPrintifySyncMessage(data: unknown) {
 function IntegrationCard({
   title,
   connected,
+  disabled,
   meta,
   capabilities,
   onTest,
+  onDisconnect,
+  onEnable,
 }: {
   title: string;
   connected: boolean;
+  disabled?: boolean;
   meta: string;
   capabilities: string[];
   onTest?: () => void;
+  onDisconnect?: () => void;
+  onEnable?: () => void;
 }) {
   return (
     <motion.div
@@ -99,7 +105,7 @@ function IntegrationCard({
           <p style={{ color: "var(--text2)", fontSize: "0.8rem", overflowWrap: "anywhere", wordBreak: "break-word" }}>{meta}</p>
         </div>
         <div style={{ flex: "0 0 auto", maxWidth: "100%" }}>
-          <StatusPill active={connected} />
+          <StatusPill active={!disabled && connected} label={disabled ? "Disconnected" : undefined} />
         </div>
       </div>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
@@ -107,11 +113,22 @@ function IntegrationCard({
           <span key={capability} className="badge badge-dark">{capability}</span>
         ))}
       </div>
-      {onTest && (
-        <button type="button" onClick={onTest} className="btn btn-outline btn-sm">
-          Validate Connection
-        </button>
-      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        {onTest && (
+          <button type="button" onClick={onTest} className="btn btn-outline btn-sm" disabled={disabled}>
+            Validate Connection
+          </button>
+        )}
+        {disabled && onEnable ? (
+          <button type="button" onClick={onEnable} className="btn btn-primary btn-sm">
+            Enable
+          </button>
+        ) : onDisconnect ? (
+          <button type="button" onClick={onDisconnect} className="btn btn-outline btn-sm" style={{ borderColor: "rgba(192,57,43,0.65)", color: "#ffb4aa" }}>
+            Disconnect
+          </button>
+        ) : null}
+      </div>
     </motion.div>
   );
 }
@@ -189,6 +206,39 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
       loadIntegrations();
     } catch {
       showToast(`Error validating ${provider}`);
+    } finally {
+      setTesting("");
+    }
+  };
+
+  const disconnectProvider = async (provider: "shopify" | "printify" | "stripe" | "tidio" | "social") => {
+    const label = provider === "tidio" ? "Tidio" : provider.charAt(0).toUpperCase() + provider.slice(1);
+    const confirmed = window.confirm(`Disconnect ${label}? This will disable the integration immediately. You can reconnect it later.`);
+    if (!confirmed) return;
+    setTesting(`disconnect-${provider}`);
+    try {
+      await adminApi.disconnectIntegration(provider);
+      if (provider === "shopify") setShopifyCredentials({ storeUrl: "", apiKey: "" });
+      if (provider === "printify") setPrintifyCredentials({ apiKey: "", shopId: "" });
+      if (provider === "tidio") setTidio(defaultTidio);
+      showToast(`${label} disconnected`);
+      loadIntegrations();
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || `Error disconnecting ${label}`);
+    } finally {
+      setTesting("");
+    }
+  };
+
+  const enableProvider = async (provider: "shopify" | "printify" | "stripe" | "tidio") => {
+    const label = provider === "tidio" ? "Tidio" : provider.charAt(0).toUpperCase() + provider.slice(1);
+    setTesting(`enable-${provider}`);
+    try {
+      await adminApi.enableIntegration(provider);
+      showToast(`${label} enabled`);
+      loadIntegrations();
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || `Error enabling ${label}`);
     } finally {
       setTesting("");
     }
@@ -353,30 +403,42 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             <IntegrationCard
               title="Shopify"
               connected={integrations.shopify.connected}
-              meta={integrations.shopify.storeUrl || "Store URL and Admin token required"}
+              disabled={integrations.shopify.disabled}
+              meta={integrations.shopify.disabled ? "Disconnected by admin" : integrations.shopify.storeUrl || "Store URL and Admin token required"}
               capabilities={integrations.shopify.capabilities}
               onTest={() => testProvider("shopify")}
+              onDisconnect={() => disconnectProvider("shopify")}
+              onEnable={() => enableProvider("shopify")}
             />
             <IntegrationCard
               title="Printify"
               connected={integrations.printify.connected}
-              meta={integrations.printify.shopId ? `Shop ${integrations.printify.shopId}` : "API key and Shop ID required"}
+              disabled={integrations.printify.disabled}
+              meta={integrations.printify.disabled ? "Disconnected by admin" : integrations.printify.shopId ? `Shop ${integrations.printify.shopId}` : "API key and Shop ID required"}
               capabilities={integrations.printify.capabilities}
               onTest={() => testProvider("printify")}
+              onDisconnect={() => disconnectProvider("printify")}
+              onEnable={() => enableProvider("printify")}
             />
             <IntegrationCard
               title="Stripe"
               connected={integrations.stripe.connected}
-              meta={integrations.stripe.webhookConfigured ? "Payments and webhook configured" : "Payment key or webhook secret missing"}
+              disabled={integrations.stripe.disabled}
+              meta={integrations.stripe.disabled ? "Checkout disconnected by admin" : integrations.stripe.webhookConfigured ? "Payments and webhook configured" : "Payment key or webhook secret missing"}
               capabilities={integrations.stripe.capabilities}
               onTest={() => testProvider("stripe")}
+              onDisconnect={() => disconnectProvider("stripe")}
+              onEnable={() => enableProvider("stripe")}
             />
             <IntegrationCard
               title="Tidio AI"
               connected={integrations.tidio.configured}
-              meta={integrations.tidio.enabled ? "Chat controls enabled" : "Configure chatbot controls"}
+              disabled={integrations.tidio.disabled}
+              meta={integrations.tidio.disabled ? "Disconnected by admin" : integrations.tidio.enabled ? "Chat controls enabled" : "Configure chatbot controls"}
               capabilities={integrations.tidio.capabilities}
               onTest={() => testProvider("tidio")}
+              onDisconnect={() => disconnectProvider("tidio")}
+              onEnable={() => enableProvider("tidio")}
             />
           </>
         )}
@@ -514,7 +576,12 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             <h4 style={{ fontSize: "1rem", marginBottom: 8 }}>Social Media Management</h4>
             <p style={{ color: "var(--text2)", fontSize: "0.85rem" }}>Connect account metadata, scheduling, analytics flags, campaigns, and sharing controls.</p>
           </div>
-          <button type="button" onClick={saveSocial} className="btn btn-primary btn-sm">Save Social Settings</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" onClick={saveSocial} className="btn btn-primary btn-sm">Save Social Settings</button>
+            <button type="button" onClick={() => disconnectProvider("social")} className="btn btn-outline btn-sm" style={{ borderColor: "rgba(192,57,43,0.65)", color: "#ffb4aa" }}>
+              Disconnect Social
+            </button>
+          </div>
         </div>
 
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 14, marginBottom: 18 }}>

@@ -87,10 +87,10 @@ export interface DigitalProduct {
 export interface IntegrationOverview {
   generatedAt: string;
   integrations: {
-    shopify: { connected: boolean; storeUrl: string; token: string; capabilities: string[] };
-    printify: { connected: boolean; shopId: string; token: string; capabilities: string[] };
-    stripe: { connected: boolean; webhookConfigured: boolean; key: string; capabilities: string[] };
-    tidio: { enabled: boolean; configured: boolean; publicKey: string; capabilities: string[] };
+    shopify: { connected: boolean; disabled?: boolean; storeUrl: string; token: string; capabilities: string[] };
+    printify: { connected: boolean; disabled?: boolean; shopId: string; token: string; capabilities: string[] };
+    stripe: { connected: boolean; disabled?: boolean; webhookConfigured: boolean; key: string; capabilities: string[] };
+    tidio: { enabled: boolean; disabled?: boolean; configured: boolean; publicKey: string; capabilities: string[] };
     social: SocialPlatformSetting[];
   };
   automation: {
@@ -270,6 +270,8 @@ export const adminApi = {
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),
   testIntegration: (provider: string) => api.post<{ ok: boolean; message?: string; status?: number; error?: string }>(`/admin/integrations/test/${provider}`).then(r => r.data),
+  disconnectIntegration: (provider: string) => api.post<{ success: true; provider: string; disabled: boolean }>(`/admin/integrations/disconnect/${provider}`).then(r => r.data),
+  enableIntegration: (provider: string) => api.post<{ success: true; provider: string; disabled: boolean }>(`/admin/integrations/enable/${provider}`).then(r => r.data),
   saveShopifyCredentials: (data: { storeUrl: string; apiKey: string }) => api.post<{ success: true }>("/admin/shopify/credentials", data).then(r => r.data),
   getShopifyProducts: () => api.get<unknown>("/admin/shopify/products").then(r => r.data),
   getShopifyOrders: () => api.get<unknown>("/admin/shopify/orders").then(r => r.data),

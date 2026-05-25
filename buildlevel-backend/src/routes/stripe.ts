@@ -137,10 +137,17 @@ async function getPrintifyCredentials() {
   const db = await getDb();
   const rows = await db.select().from(siteSettings);
   const settings = Object.fromEntries(rows.map((row) => [row.key, row.value ?? ""]));
+  if (settings.printify_disabled === "true") return { apiKey: "", shopId: "" };
   return {
     apiKey: cleanText(process.env.PRINTIFY_API_KEY || settings.printify_api_key),
     shopId: cleanText(process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id),
   };
+}
+
+async function isStripeCheckoutDisabled() {
+  const db = await getDb();
+  const rows = await db.select().from(siteSettings).where(eq(siteSettings.key, "stripe_disabled")).limit(1);
+  return rows[0]?.value === "true";
 }
 
 async function printifyRequest(path: string, method = "GET", body?: unknown) {
@@ -336,6 +343,10 @@ async function createCheckoutSessionDirect({
 // ─── Physical product checkout ────────────────────────────────────────────────
 router.post("/checkout", async (req: Request, res: Response) => {
   try {
+    if (await isStripeCheckoutDisabled()) {
+      res.status(503).json({ error: "Stripe checkout is disabled from the admin integrations panel" });
+      return;
+    }
     const { items, currency = "usd", customerEmail } = req.body;
     const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
 
@@ -388,6 +399,10 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
     productId: req.body?.productId,
   };
   try {
+    if (await isStripeCheckoutDisabled()) {
+      res.status(503).json({ error: "Stripe checkout is disabled from the admin integrations panel", debug: debugContext });
+      return;
+    }
     const { productId, customerEmail } = req.body;
     const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
     const parsedProductId = Number(productId);

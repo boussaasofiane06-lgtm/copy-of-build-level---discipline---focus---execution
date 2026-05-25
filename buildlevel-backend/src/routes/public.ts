@@ -180,9 +180,10 @@ router.get("/tidio/config", async (req, res) => {
     const settings: Record<string, string> = {};
     for (const row of rows) settings[row.key] = row.value ?? "";
     const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "");
+    const disabled = settings.tidio_disabled === "true";
     res.json({
-      enabled: settings.tidio_enabled === "true" && !!publicKey,
-      publicKey,
+      enabled: !disabled && settings.tidio_enabled === "true" && !!publicKey,
+      publicKey: disabled ? "" : publicKey,
       chatControls: settings.tidio_chat_controls || "manual",
     });
   } catch (e: any) {

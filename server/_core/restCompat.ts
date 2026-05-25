@@ -70,6 +70,11 @@ async function saveSetting(key: string, value: string) {
   }
 }
 
+async function isIntegrationDisabled(provider: string) {
+  const settings = await getSettingsMap([`${provider}_disabled`]);
+  return settings[`${provider}_disabled`] === "true";
+}
+
 function isValidHttpUrl(value: string) {
   try {
     const url = new URL(value);
@@ -107,7 +112,8 @@ function normalizeTidioPublicKey(value?: string | null) {
 }
 
 async function getShopifyCredentials() {
-  const settings = await getSettingsMap(["shopify_store_url", "shopify_api_key"]);
+  const settings = await getSettingsMap(["shopify_store_url", "shopify_api_key", "shopify_disabled"]);
+  if (settings.shopify_disabled === "true") return { storeUrl: "", apiKey: "" };
   return {
     storeUrl: process.env.SHOPIFY_STORE_URL || settings.shopify_store_url || "",
     apiKey: process.env.SHOPIFY_ADMIN_ACCESS_TOKEN || process.env.SHOPIFY_API_KEY || settings.shopify_api_key || "",
@@ -115,7 +121,8 @@ async function getShopifyCredentials() {
 }
 
 async function getPrintifyCredentials() {
-  const settings = await getSettingsMap(["printify_api_key", "printify_shop_id"]);
+  const settings = await getSettingsMap(["printify_api_key", "printify_shop_id", "printify_disabled"]);
+  if (settings.printify_disabled === "true") return { apiKey: "", shopId: "" };
   return {
     apiKey: cleanEnv(process.env.PRINTIFY_API_KEY || settings.printify_api_key || ""),
     shopId: cleanEnv(process.env.PRINTIFY_SHOP_ID || settings.printify_shop_id || ""),
@@ -324,33 +331,41 @@ export function registerRestCompatRoutes(app: Express) {
       const settings = await getSettingsMap();
       const shopify = await getShopifyCredentials();
       const printify = await getPrintifyCredentials();
-      const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+      const shopifyDisabled = settings.shopify_disabled === "true";
+      const printifyDisabled = settings.printify_disabled === "true";
+      const stripeDisabled = settings.stripe_disabled === "true";
+      const tidioDisabled = settings.tidio_disabled === "true";
+      const stripeConfigured = !stripeDisabled && !!process.env.STRIPE_SECRET_KEY;
       const stripeWebhookConfigured = !!process.env.STRIPE_WEBHOOK_SECRET;
       res.json({
         generatedAt: new Date().toISOString(),
         integrations: {
           shopify: {
             connected: !!(shopify.storeUrl && shopify.apiKey),
+            disabled: shopifyDisabled,
             storeUrl: shopify.storeUrl,
             token: maskSecret(shopify.apiKey),
             capabilities: ["products", "inventory", "orders", "customers", "webhooks"],
           },
           printify: {
             connected: !!(printify.apiKey && printify.shopId),
+            disabled: printifyDisabled,
             shopId: printify.shopId,
             token: maskSecret(printify.apiKey),
             capabilities: ["publishing", "fulfillment", "orders", "inventory"],
           },
           stripe: {
             connected: stripeConfigured,
+            disabled: stripeDisabled,
             webhookConfigured: stripeWebhookConfigured,
             key: maskSecret(process.env.STRIPE_SECRET_KEY),
             capabilities: ["payments", "transactions", "webhooks", "financial reporting"],
           },
           tidio: {
-            enabled: settings.tidio_enabled === "true",
-            configured: !!normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
-            publicKey: maskSecret(normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY)),
+            enabled: !tidioDisabled && settings.tidio_enabled === "true",
+            disabled: tidioDisabled,
+            configured: !tidioDisabled && !!normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY),
+            publicKey: tidioDisabled ? "" : maskSecret(normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY)),
             capabilities: ["chat controls", "chatbot settings", "support analytics"],
           },
           social: SOCIAL_PLATFORMS.map((platform) => ({
@@ -381,6 +396,10 @@ export function registerRestCompatRoutes(app: Express) {
 
   app.get("/api/admin/integrations/stripe/dashboard", requireAdminRest, async (_req, res) => {
     try {
+      if (await isIntegrationDisabled("stripe")) {
+        res.json({ connected: false, disabled: true, payments: [], sessions: [], message: "Stripe is disconnected" });
+        return;
+      }
       const stripe = getStripeClient();
       if (!stripe) {
         res.json({ connected: false, payments: [], sessions: [], message: "STRIPE_SECRET_KEY is not configured" });
@@ -420,9 +439,10 @@ export function registerRestCompatRoutes(app: Express) {
   app.get("/api/admin/integrations/tidio/config", requireAdminRest, async (_req, res) => {
     try {
       const settings = await getSettingsMap();
+      const disabled = settings.tidio_disabled === "true";
       res.json({
-        enabled: settings.tidio_enabled === "true",
-        publicKey: normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || ""),
+        enabled: !disabled && settings.tidio_enabled === "true",
+        publicKey: disabled ? "" : normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || ""),
         chatControls: settings.tidio_chat_controls || "manual",
         chatbotSettings: settings.tidio_chatbot_settings || "",
       });
@@ -440,6 +460,7 @@ export function registerRestCompatRoutes(app: Express) {
         chatbotSettings: z.string().optional().default(""),
       });
       const data = schema.parse(req.body);
+      await saveSetting("tidio_disabled", "false");
       await saveSetting("tidio_enabled", String(data.enabled));
       await saveSetting("tidio_public_key", normalizeTidioPublicKey(data.publicKey));
       await saveSetting("tidio_chat_controls", data.chatControls);
@@ -486,9 +507,10 @@ export function registerRestCompatRoutes(app: Express) {
     try {
       const settings = await getSettingsMap();
       const publicKey = normalizeTidioPublicKey(settings.tidio_public_key || process.env.TIDIO_PUBLIC_KEY || "");
+      const disabled = settings.tidio_disabled === "true";
       res.json({
-        enabled: settings.tidio_enabled === "true" && !!publicKey,
-        publicKey,
+        enabled: !disabled && settings.tidio_enabled === "true" && !!publicKey,
+        publicKey: disabled ? "" : publicKey,
         chatControls: settings.tidio_chat_controls || "manual",
       });
     } catch (e: any) {
@@ -625,6 +647,10 @@ export function registerRestCompatRoutes(app: Express) {
   app.post("/api/admin/integrations/test/:provider", requireAdminRest, async (req, res) => {
     try {
       const provider = req.params.provider;
+      if (await isIntegrationDisabled(provider)) {
+        res.json({ ok: false, message: `${provider} is disconnected` });
+        return;
+      }
       if (provider === "shopify") {
         await shopifyRequest(`/shop.json`);
         res.json({ ok: true, message: "Shopify connected" });
@@ -654,6 +680,62 @@ export function registerRestCompatRoutes(app: Express) {
     }
   });
 
+  app.post("/api/admin/integrations/disconnect/:provider", requireAdminRest, async (req, res) => {
+    try {
+      const provider = req.params.provider;
+      if (provider === "shopify") {
+        await saveSetting("shopify_disabled", "true");
+        await saveSetting("shopify_store_url", "");
+        await saveSetting("shopify_api_key", "");
+        res.json({ success: true, provider, disabled: true });
+        return;
+      }
+      if (provider === "printify") {
+        await saveSetting("printify_disabled", "true");
+        await saveSetting("printify_api_key", "");
+        await saveSetting("printify_shop_id", "");
+        res.json({ success: true, provider, disabled: true });
+        return;
+      }
+      if (provider === "stripe") {
+        await saveSetting("stripe_disabled", "true");
+        res.json({ success: true, provider, disabled: true });
+        return;
+      }
+      if (provider === "tidio") {
+        await saveSetting("tidio_disabled", "true");
+        await saveSetting("tidio_enabled", "false");
+        await saveSetting("tidio_public_key", "");
+        res.json({ success: true, provider, disabled: true });
+        return;
+      }
+      if (provider === "social") {
+        await saveSetting("social_scheduler_enabled", "false");
+        await saveSetting("social_sharing_enabled", "false");
+        for (const platform of SOCIAL_PLATFORMS) await saveSetting(`social_${platform}_enabled`, "false");
+        res.json({ success: true, provider, disabled: true });
+        return;
+      }
+      res.status(404).json({ error: "Unsupported provider" });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/integrations/enable/:provider", requireAdminRest, async (req, res) => {
+    try {
+      const provider = req.params.provider;
+      if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
+        res.status(404).json({ error: "Unsupported provider" });
+        return;
+      }
+      await saveSetting(`${provider}_disabled`, "false");
+      res.json({ success: true, provider, disabled: false });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
   app.get("/api/admin/shopify/status", requireAdminRest, async (_req, res) => {
     const creds = await getShopifyCredentials();
     res.json({ connected: !!(creds.storeUrl && creds.apiKey), storeUrl: creds.storeUrl });
@@ -663,6 +745,7 @@ export function registerRestCompatRoutes(app: Express) {
     try {
       const schema = z.object({ storeUrl: z.string().min(1), apiKey: z.string().min(1) });
       const data = schema.parse(req.body);
+      await saveSetting("shopify_disabled", "false");
       await saveSetting("shopify_store_url", data.storeUrl);
       await saveSetting("shopify_api_key", data.apiKey);
       res.json({ success: true });
@@ -729,6 +812,7 @@ export function registerRestCompatRoutes(app: Express) {
         shopId: z.string().min(1),
       });
       const data = schema.parse(req.body);
+      await saveSetting("printify_disabled", "false");
       await saveSetting("printify_api_key", data.apiKey);
       await saveSetting("printify_shop_id", data.shopId);
       res.json({ success: true });

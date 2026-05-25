@@ -31,6 +31,10 @@ const SOCIAL_PLATFORMS = [
 type SocialPlatform = typeof SOCIAL_PLATFORMS[number];
 
 const integrationSettingKeys = [
+  "shopify_disabled",
+  "printify_disabled",
+  "stripe_disabled",
+  "tidio_disabled",
   "tidio_enabled",
   "tidio_public_key",
   "tidio_chat_controls",
@@ -64,6 +68,11 @@ async function saveSetting(key: string, value: string) {
   } else {
     await db.insert(siteSettings).values({ key, value, updatedAt: new Date() });
   }
+}
+
+async function isIntegrationDisabled(provider: string) {
+  const settings = await getSettingsMap([`${provider}_disabled`]);
+  return settings[`${provider}_disabled`] === "true";
 }
 
 function maskSecret(value?: string | null) {
@@ -452,9 +461,13 @@ router.post("/maintenance", requireAdmin, async (req: Request, res: Response) =>
 router.get("/integrations/overview", requireAdmin, async (req: Request, res: Response) => {
   try {
     const settings = await getSettingsMap(integrationSettingKeys);
+    const shopifyDisabled = settings.shopify_disabled === "true";
+    const printifyDisabled = settings.printify_disabled === "true";
+    const stripeDisabled = settings.stripe_disabled === "true";
+    const tidioDisabled = settings.tidio_disabled === "true";
     const { storeUrl, apiKey: shopifyApiKey } = await getShopifyCredentials();
     const { apiKey: printifyApiKey, shopId: printifyShopId } = await getPrintifyCredentials();
-    const stripeConfigured = !!process.env.STRIPE_SECRET_KEY;
+    const stripeConfigured = !stripeDisabled && !!process.env.STRIPE_SECRET_KEY;
     const stripeWebhookConfigured = !!process.env.STRIPE_WEBHOOK_SECRET;
 
     res.json({
@@ -462,25 +475,29 @@ router.get("/integrations/overview", requireAdmin, async (req: Request, res: Res
       integrations: {
         shopify: {
           connected: !!(storeUrl && shopifyApiKey),
+          disabled: shopifyDisabled,
           storeUrl,
           token: maskSecret(shopifyApiKey),
           capabilities: ["products", "inventory", "orders", "customers", "webhooks"],
         },
         printify: {
           connected: !!(printifyApiKey && printifyShopId),
+          disabled: printifyDisabled,
           shopId: printifyShopId,
           token: maskSecret(printifyApiKey),
           capabilities: ["publishing", "fulfillment", "orders", "inventory"],
         },
         stripe: {
           connected: stripeConfigured,
+          disabled: stripeDisabled,
           webhookConfigured: stripeWebhookConfigured,
           key: maskSecret(process.env.STRIPE_SECRET_KEY),
           capabilities: ["payments", "transactions", "webhooks", "financial reporting"],
         },
         tidio: {
-          enabled: settings.tidio_enabled === "true",
-          configured: !!normalizeTidioPublicKey(settings.tidio_public_key),
+          enabled: !tidioDisabled && settings.tidio_enabled === "true",
+          disabled: tidioDisabled,
+          configured: !tidioDisabled && !!normalizeTidioPublicKey(settings.tidio_public_key),
           publicKey: maskSecret(normalizeTidioPublicKey(settings.tidio_public_key)),
           capabilities: ["chat controls", "chatbot settings", "support analytics"],
         },
@@ -512,6 +529,10 @@ router.get("/integrations/overview", requireAdmin, async (req: Request, res: Res
 
 router.get("/integrations/stripe/dashboard", requireAdmin, async (req: Request, res: Response) => {
   try {
+    if (await isIntegrationDisabled("stripe")) {
+      res.json({ connected: false, disabled: true, payments: [], sessions: [], message: "Stripe is disconnected" });
+      return;
+    }
     const stripe = getStripeClient();
     if (!stripe) {
       res.json({
@@ -559,9 +580,10 @@ router.get("/integrations/stripe/dashboard", requireAdmin, async (req: Request, 
 router.get("/integrations/tidio/config", requireAdmin, async (req: Request, res: Response) => {
   try {
     const settings = await getSettingsMap(integrationSettingKeys);
+    const disabled = settings.tidio_disabled === "true";
     res.json({
-      enabled: settings.tidio_enabled === "true",
-      publicKey: normalizeTidioPublicKey(settings.tidio_public_key || ""),
+      enabled: !disabled && settings.tidio_enabled === "true",
+      publicKey: disabled ? "" : normalizeTidioPublicKey(settings.tidio_public_key || ""),
       chatControls: settings.tidio_chat_controls || "manual",
       chatbotSettings: settings.tidio_chatbot_settings || "",
     });
@@ -579,6 +601,7 @@ router.post("/integrations/tidio/config", requireAdmin, async (req: Request, res
       chatbotSettings: z.string().optional().default(""),
     });
     const data = schema.parse(req.body);
+    await saveSetting("tidio_disabled", "false");
     await saveSetting("tidio_enabled", String(data.enabled));
     await saveSetting("tidio_public_key", normalizeTidioPublicKey(data.publicKey));
     await saveSetting("tidio_chat_controls", data.chatControls);
@@ -665,6 +688,10 @@ router.get("/integrations/social/oauth/:platform", requireAdmin, async (req: Req
 router.post("/integrations/test/:provider", requireAdmin, async (req: Request, res: Response) => {
   try {
     const provider = req.params.provider;
+    if (await isIntegrationDisabled(provider)) {
+      res.json({ ok: false, message: `${provider} is disconnected` });
+      return;
+    }
     if (provider === "shopify") {
       const { storeUrl, apiKey } = await getShopifyCredentials();
       if (!storeUrl || !apiKey) { res.json({ ok: false, message: "Shopify credentials not configured" }); return; }
@@ -703,9 +730,66 @@ router.post("/integrations/test/:provider", requireAdmin, async (req: Request, r
   }
 });
 
+router.post("/integrations/disconnect/:provider", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const provider = req.params.provider;
+    if (provider === "shopify") {
+      await saveSetting("shopify_disabled", "true");
+      await saveSetting("shopify_store_url", "");
+      await saveSetting("shopify_api_key", "");
+      res.json({ success: true, provider, disabled: true });
+      return;
+    }
+    if (provider === "printify") {
+      await saveSetting("printify_disabled", "true");
+      await saveSetting("printify_api_key", "");
+      await saveSetting("printify_shop_id", "");
+      res.json({ success: true, provider, disabled: true });
+      return;
+    }
+    if (provider === "stripe") {
+      await saveSetting("stripe_disabled", "true");
+      res.json({ success: true, provider, disabled: true });
+      return;
+    }
+    if (provider === "tidio") {
+      await saveSetting("tidio_disabled", "true");
+      await saveSetting("tidio_enabled", "false");
+      await saveSetting("tidio_public_key", "");
+      res.json({ success: true, provider, disabled: true });
+      return;
+    }
+    if (provider === "social") {
+      await saveSetting("social_scheduler_enabled", "false");
+      await saveSetting("social_sharing_enabled", "false");
+      for (const platform of SOCIAL_PLATFORMS) await saveSetting(`social_${platform}_enabled`, "false");
+      res.json({ success: true, provider, disabled: true });
+      return;
+    }
+    res.status(404).json({ error: "Unsupported provider" });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.post("/integrations/enable/:provider", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    const provider = req.params.provider;
+    if (!["shopify", "printify", "stripe", "tidio"].includes(provider)) {
+      res.status(404).json({ error: "Unsupported provider" });
+      return;
+    }
+    await saveSetting(`${provider}_disabled`, "false");
+    res.json({ success: true, provider, disabled: false });
+  } catch (e: any) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ─── Printify Proxy ───────────────────────────────────────────────────────────
 // Proxies requests to Printify API using stored credentials
 async function getPrintifyCredentials() {
+  if (await isIntegrationDisabled("printify")) return { apiKey: "", shopId: "" };
   const db = await getDb();
   const rows = await db.select().from(siteSettings)
     .where(eq(siteSettings.key, 'printify_api_key'));
@@ -890,6 +974,7 @@ router.post("/printify/credentials", requireAdmin, async (req: Request, res: Res
       res.status(400).json({ error: "Printify Shop ID is required" });
       return;
     }
+    await saveSetting("printify_disabled", "false");
     const db = await getDb();
     for (const [key, value] of [['printify_api_key', apiKey], ['printify_shop_id', shopId]]) {
       const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).limit(1);
@@ -1030,6 +1115,7 @@ router.post("/printify/import", requireAdmin, async (req: Request, res: Response
 
 // ─── Shopify Proxy ────────────────────────────────────────────────────────────
 async function getShopifyCredentials() {
+  if (await isIntegrationDisabled("shopify")) return { storeUrl: "", apiKey: "" };
   const db = await getDb();
   const urlRows = await db.select().from(siteSettings).where(eq(siteSettings.key, 'shopify_store_url'));
   const keyRows = await db.select().from(siteSettings).where(eq(siteSettings.key, 'shopify_api_key'));
@@ -1053,6 +1139,7 @@ router.get("/shopify/status", requireAdmin, async (req: Request, res: Response) 
 router.post("/shopify/credentials", requireAdmin, async (req: Request, res: Response) => {
   try {
     const { storeUrl, apiKey } = req.body;
+    await saveSetting("shopify_disabled", "false");
     const db = await getDb();
     for (const [key, value] of [['shopify_store_url', storeUrl], ['shopify_api_key', apiKey]]) {
       const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).limit(1);
