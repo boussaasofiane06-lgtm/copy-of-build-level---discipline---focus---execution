@@ -9,7 +9,7 @@ import {
   membershipTiers, siteSettings, aiVideos
 } from "../db/schema.js";
 import { requireAdmin, verifyAdminPassword, signAdminToken, ADMIN_COOKIE } from "../middleware/adminAuth.js";
-import { ALLOWED_IMAGE_EXTENSIONS, ALLOWED_UPLOAD_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, uploadObject } from "../storage/objectStorage.js";
+import { ALLOWED_IMAGE_EXTENSIONS, ALLOWED_UPLOAD_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, isStorageConfigured, uploadObject } from "../storage/objectStorage.js";
 
 const router = Router();
 const upload = multer({
@@ -338,7 +338,7 @@ router.get("/digital/upload-config", requireAdmin, (req: Request, res: Response)
     allowedFileTypes: ALLOWED_UPLOAD_EXTENSIONS,
     allowedThumbnailTypes: ALLOWED_IMAGE_EXTENSIONS,
     storage: {
-      configured: !!(process.env.UPLOAD_BUCKET || process.env.R2_BUCKET || process.env.S3_BUCKET),
+      configured: isStorageConfigured(),
       provider: process.env.UPLOAD_ENDPOINT || process.env.R2_ENDPOINT ? "s3-compatible" : "s3",
     },
   });

@@ -247,9 +247,9 @@ export default function Admin() {
       setDigitalFileInfo({ name: uploaded.fileName, size: uploaded.size, mimeType: uploaded.mimeType });
       setDigitalUploadProgress(100);
       showToast("Digital file uploaded");
-    } catch {
+    } catch (error: any) {
       setDigitalUploadProgress(0);
-      showToast("Upload storage needs configuration");
+      showToast(error?.response?.data?.error || "Upload storage is not configured on Render. Add R2/S3 upload env vars for digital files.");
     }
   };
 
@@ -272,9 +272,17 @@ export default function Admin() {
       setThumbnailPreviews(previews);
       setThumbnailUploadProgress(100);
       showToast("Thumbnails uploaded");
-    } catch {
-      setThumbnailUploadProgress(0);
-      showToast("Thumbnail upload needs storage configuration");
+    } catch (error: any) {
+      try {
+        const fallbackPreviews = await Promise.all(imageFiles.slice(0, 4).map(compressImageFile));
+        setThumbnailPreviews(fallbackPreviews);
+        if (fallbackPreviews[0]) setDigitalForm(f => ({ ...f, imageUrl: fallbackPreviews[0] }));
+        setThumbnailUploadProgress(100);
+        showToast("Thumbnail saved in product record. Configure upload storage for digital files.");
+      } catch {
+        setThumbnailUploadProgress(0);
+        showToast(error?.response?.data?.error || "Thumbnail upload needs storage configuration");
+      }
     }
   };
 
