@@ -238,18 +238,24 @@ function decodeHtmlEntities(value: string) {
 
 function cleanPrintifyDescription(value?: string | null) {
   if (!value) return "";
-  return decodeHtmlEntities(value)
+  const decoded = decodeHtmlEntities(decodeHtmlEntities(value));
+  const text = decoded
     .replace(/<table[\s\S]*?<\/table>/gi, " ")
+    .replace(/<thead[\s\S]*?<\/thead>/gi, " ")
+    .replace(/<tbody[\s\S]*?<\/tbody>/gi, " ")
+    .replace(/<tr[\s\S]*?<\/tr>/gi, " ")
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
     .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/<br\s*\/?>/gi, "\n")
     .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
     .replace(/<[^>]+>/g, " ")
+    .replace(/\b(Width|Length|Sleeve length|Size tolerance),?\s*in\b[\s\S]*?(?=[A-Z][a-z]{2,}\s|$)/gi, " ")
     .replace(/[ \t]+\n/g, "\n")
     .replace(/\n{3,}/g, "\n\n")
     .replace(/[ \t]{2,}/g, " ")
-    .trim()
-    .slice(0, 5000);
+    .trim();
+  const productOnly = text.split(/\bProduct features\b|\bCare instructions\b/i)[0]?.trim() || text;
+  return productOnly.slice(0, 2500);
 }
 
 async function syncPrintifyProductToStore(printifyProductOrId: string | Record<string, any>) {

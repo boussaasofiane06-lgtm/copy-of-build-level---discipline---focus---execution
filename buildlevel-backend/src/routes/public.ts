@@ -37,6 +37,43 @@ function isValidHttpUrl(value: string) {
   }
 }
 
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function cleanPrintifyDescription(value?: string | null) {
+  if (!value) return "";
+  const decoded = decodeHtmlEntities(decodeHtmlEntities(value));
+  const text = decoded
+    .replace(/<table[\s\S]*?<\/table>/gi, " ")
+    .replace(/<thead[\s\S]*?<\/thead>/gi, " ")
+    .replace(/<tbody[\s\S]*?<\/tbody>/gi, " ")
+    .replace(/<tr[\s\S]*?<\/tr>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\b(Width|Length|Sleeve length|Size tolerance),?\s*in\b[\s\S]*?(?=[A-Z][a-z]{2,}\s|$)/gi, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
+  const productOnly = text.split(/\bProduct features\b|\bCare instructions\b/i)[0]?.trim() || text;
+  return productOnly.slice(0, 2500);
+}
+
+function cleanProductDescriptionForResponse<T extends { description?: string | null; printifyProductId?: string | null }>(product: T): T {
+  if (!product.printifyProductId || !product.description) return product;
+  return { ...product, description: cleanPrintifyDescription(product.description) };
+}
+
 // ─── Products ─────────────────────────────────────────────────────────────────
 router.get("/products", async (req, res) => {
   try {
@@ -46,7 +83,7 @@ router.get("/products", async (req, res) => {
       .from(products)
       .where(and(eq(products.published, true), eq(products.hidden, false), eq(products.delisted, false)))
       .orderBy(asc(products.sortOrder), asc(products.createdAt));
-    res.json(rows);
+    res.json(rows.map(cleanProductDescriptionForResponse));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -57,7 +94,7 @@ router.get("/products/:id", async (req, res) => {
     const db = await getDb();
     const [row] = await db.select().from(products).where(eq(products.id, parseInt(req.params.id))).limit(1);
     if (!row) { res.status(404).json({ error: "Not found" }); return; }
-    res.json(row);
+    res.json(cleanProductDescriptionForResponse(row));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
