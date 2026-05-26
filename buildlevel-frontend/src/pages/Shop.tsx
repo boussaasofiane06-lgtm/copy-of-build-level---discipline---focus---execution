@@ -242,6 +242,18 @@ export default function Shop() {
     document.body
   ) : null;
 
+  const modalImages = viewProduct ? getProductImages(viewProduct.imageUrl) : [];
+  const modalCoverImage = viewProduct ? getProductCoverImage(viewProduct) : "";
+  const activeModalImage = viewImage || modalCoverImage;
+  const activeModalImageIndex = Math.max(0, modalImages.indexOf(activeModalImage));
+  const showModalImage = (direction: "prev" | "next") => {
+    if (modalImages.length === 0) return;
+    const nextIndex = direction === "next"
+      ? (activeModalImageIndex + 1) % modalImages.length
+      : (activeModalImageIndex - 1 + modalImages.length) % modalImages.length;
+    setViewImage(modalImages[nextIndex]);
+  };
+
   const productModal = viewProduct ? createPortal(
     <div className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
       <div className="cart-drawer__backdrop" aria-hidden="true" onClick={() => { setViewProduct(null); setViewImage(""); }} />
@@ -257,18 +269,27 @@ export default function Shop() {
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(280px, 0.85fr)", gap: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(280px, 0.75fr)", gap: 24 }}>
             <div>
-              {getProductImages(viewProduct.imageUrl).length > 0 ? (
-                <div style={{ display: "grid", gap: 10 }}>
-                  <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10 }}>
-                    <img src={storageImageUrl(viewImage || getProductCoverImage(viewProduct))} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+              {modalImages.length > 0 ? (
+                <div style={{ display: "grid", gap: 14 }}>
+                  <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10, position: "relative" }}>
+                    <img src={storageImageUrl(activeModalImage)} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                    {modalImages.length > 1 && (
+                      <>
+                        <button type="button" onClick={() => showModalImage("prev")} aria-label="Previous product image" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.58)", color: "#fff", cursor: "pointer", fontSize: "1.2rem" }}>‹</button>
+                        <button type="button" onClick={() => showModalImage("next")} aria-label="Next product image" style={{ position: "absolute", right: 12, top: "50%", transform: "translateY(-50%)", width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.58)", color: "#fff", cursor: "pointer", fontSize: "1.2rem" }}>›</button>
+                        <span style={{ position: "absolute", right: 12, bottom: 12, padding: "5px 9px", borderRadius: 999, background: "rgba(0,0,0,0.65)", color: "#fff", fontSize: "0.72rem" }}>
+                          {activeModalImageIndex + 1} / {modalImages.length}
+                        </span>
+                      </>
+                    )}
                   </div>
-                  {getProductImages(viewProduct.imageUrl).length > 1 && (
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))", gap: 8 }}>
-                      {getProductImages(viewProduct.imageUrl).map((image, index) => (
-                        <button key={`${image}-${index}`} type="button" onClick={() => setViewImage(image)} aria-label={`View ${viewProduct.name} image ${index + 1}`} style={{ padding: 0, background: "transparent", border: (viewImage || getProductCoverImage(viewProduct)) === image ? "2px solid var(--red)" : "1px solid var(--border)", borderRadius: 8, cursor: "pointer", overflow: "hidden" }}>
-                          <img src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                  {modalImages.length > 1 && (
+                    <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "2px 2px 8px" }}>
+                      {modalImages.map((image, index) => (
+                        <button key={`${image}-${index}`} type="button" onClick={() => setViewImage(image)} aria-label={`View ${viewProduct.name} image ${index + 1}`} style={{ padding: 0, background: "transparent", border: activeModalImage === image ? "3px solid var(--red)" : "1px solid var(--border)", borderRadius: 10, cursor: "pointer", overflow: "hidden", flex: "0 0 112px", boxShadow: activeModalImage === image ? "0 0 0 2px rgba(192,57,43,0.25)" : "none" }}>
+                          <img src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: 112, height: 112, objectFit: "cover", display: "block" }} />
                         </button>
                       ))}
                     </div>
