@@ -39,6 +39,7 @@ export default function Shop() {
   const [cartOpen, setCartOpen] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
   const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
+  const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
@@ -65,6 +66,24 @@ export default function Shop() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [cartOpen]);
+
+  useEffect(() => {
+    if (!viewProduct) return;
+
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setViewProduct(null);
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [viewProduct]);
 
   const normalizedBadge = (product: Product) => (product.badge || "").trim().toLowerCase();
   const getProductStatus = (product: Product) => {
@@ -209,6 +228,74 @@ export default function Shop() {
     document.body
   ) : null;
 
+  const productModal = viewProduct ? createPortal(
+    <div className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
+      <div className="cart-drawer__backdrop" aria-hidden="true" onClick={() => setViewProduct(null)} />
+      <aside className="cart-drawer__panel" style={{ width: "min(960px, 100vw)", maxWidth: "100vw" }}>
+        <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
+          <div>
+            <p style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.7rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
+              {getCategoryAudienceLabel(viewProduct.category)} / {getCategoryLabel(viewProduct.category)}
+            </p>
+            <h3 id="product-detail-title" style={{ fontSize: "1rem" }}>{viewProduct.name}</h3>
+          </div>
+          <button onClick={() => setViewProduct(null)} aria-label="Close product details" style={{ background: "none", border: "none", color: "var(--text2)", fontSize: "1.2rem" }}>✕</button>
+        </div>
+
+        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(280px, 0.85fr)", gap: 24 }}>
+            <div>
+              {getProductImages(viewProduct.imageUrl).length > 0 ? (
+                <div style={{ display: "grid", gap: 10 }}>
+                  <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10 }}>
+                    <img src={getProductCoverImage(viewProduct)} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  </div>
+                  {getProductImages(viewProduct.imageUrl).length > 1 && (
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))", gap: 8 }}>
+                      {getProductImages(viewProduct.imageUrl).map((image, index) => (
+                        <img key={`${image}-${index}`} src={image} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 8, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)" }} />
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ aspectRatio: "4/5", background: "var(--bg3)", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", borderRadius: 10 }}>No Image</div>
+              )}
+            </div>
+
+            <div>
+              {getProductStatus(viewProduct) && <span className="badge badge-red">{getProductStatus(viewProduct)}</span>}
+              <h2 style={{ margin: "14px 0 10px", fontSize: "1.35rem" }}>{viewProduct.name}</h2>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>${parseFloat(viewProduct.price).toFixed(2)}</span>
+                {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
+              </div>
+              {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
+              {(Array.isArray(viewProduct.sizes) ? viewProduct.sizes : []).length > 0 && (
+                <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
+                  {viewProduct.sizes.map(size => (
+                    <button key={size} onClick={() => setSelectedSizes(prev => ({ ...prev, [viewProduct.id]: size }))}
+                      style={{ padding: "6px 12px", fontSize: "0.72rem", fontFamily: "var(--font-display)", letterSpacing: "0.05em",
+                        background: selectedSizes[viewProduct.id] === size ? "var(--red)" : "var(--bg3)",
+                        color: selectedSizes[viewProduct.id] === size ? "#fff" : "var(--text2)",
+                        border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
+                      {size}
+                    </button>
+                  ))}
+                </div>
+              )}
+              <button onClick={() => addToCart(viewProduct)} disabled={!isPurchasable(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
+                {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) === "Coming Soon" ? "Coming Soon" : "Not Available")}
+              </button>
+              <button onClick={() => setViewProduct(null)} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>,
+    document.body
+  ) : null;
+
   return (
     <div>
       <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "48px 0 32px" }}>
@@ -308,9 +395,14 @@ export default function Shop() {
                       ))}
                     </div>
                   )}
-                  <button onClick={() => addToCart(p)} disabled={!isPurchasable(p)} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
-                    {isPurchasable(p) ? "Add to Cart" : (getProductStatus(p) === "Coming Soon" ? "Coming Soon" : "Not Available")}
-                  </button>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
+                    <button onClick={() => setViewProduct(p)} className="btn btn-outline btn-sm" style={{ width: "100%" }}>
+                      View
+                    </button>
+                    <button onClick={() => addToCart(p)} disabled={!isPurchasable(p)} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
+                      {isPurchasable(p) ? "Add to Cart" : (getProductStatus(p) === "Coming Soon" ? "Coming Soon" : "Not Available")}
+                    </button>
+                  </div>
                 </div>
               </div>
             );})}
@@ -319,6 +411,7 @@ export default function Shop() {
       </div>
 
       {cartDrawer}
+      {productModal}
     </div>
   );
 }
