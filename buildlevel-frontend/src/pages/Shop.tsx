@@ -157,6 +157,7 @@ export default function Shop() {
     if (product.inStock) return "Available";
     return "";
   };
+  const shouldHidePrice = (product: Product) => getProductStatus(product) === "Featured";
   const isPurchasable = (product: Product) => product.inStock && getProductStatus(product) !== "Coming Soon";
   const qualifiesForStorefront = (product: Product) => {
     if (product.published === false || product.hidden === true || product.delisted === true) return false;
@@ -352,10 +353,12 @@ export default function Shop() {
             <div>
               {getProductStatus(viewProduct) && <span className="badge badge-red">{getProductStatus(viewProduct)}</span>}
               <h2 style={{ margin: "14px 0 10px", fontSize: "1.35rem" }}>{viewProduct.name}</h2>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>{getProductDisplayPrice(viewProduct, selectedSizes)}</span>
-                {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
-              </div>
+              {!shouldHidePrice(viewProduct) && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>{getProductDisplayPrice(viewProduct, selectedSizes)}</span>
+                  {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
+                </div>
+              )}
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
               {getProductOptions(viewProduct).length > 0 && (
                 <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
@@ -365,7 +368,7 @@ export default function Shop() {
                         background: (selectedSizes[viewProduct.id] || getProductOptions(viewProduct)[0]?.value) === option.value ? "var(--red)" : "var(--bg3)",
                         color: (selectedSizes[viewProduct.id] || getProductOptions(viewProduct)[0]?.value) === option.value ? "#fff" : "var(--text2)",
                         border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
-                      {option.label}{option.price ? ` - $${option.price.toFixed(2)}` : ""}
+                      {option.label}{option.price && !shouldHidePrice(viewProduct) ? ` - $${option.price.toFixed(2)}` : ""}
                     </button>
                   ))}
                 </div>
@@ -464,10 +467,12 @@ export default function Shop() {
                     {getCategoryAudienceLabel(p.category)} / {getCategoryLabel(p.category)}
                   </div>
                   <h3 style={{ fontSize: "0.95rem", marginBottom: 6 }}>{p.name}</h3>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                    <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>{getProductDisplayPrice(p, selectedSizes)}</span>
-                    {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
-                  </div>
+                  {!shouldHidePrice(p) && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
+                      <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>{getProductDisplayPrice(p, selectedSizes)}</span>
+                      {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
+                    </div>
+                  )}
                   {getProductOptions(p).length > 0 && (
                     <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
                       {getProductOptions(p).map(option => (
@@ -476,7 +481,7 @@ export default function Shop() {
                             background: (selectedSizes[p.id] || getProductOptions(p)[0]?.value) === option.value ? "var(--red)" : "var(--bg3)",
                             color: (selectedSizes[p.id] || getProductOptions(p)[0]?.value) === option.value ? "#fff" : "var(--text2)",
                             border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
-                          {option.label}{option.price ? ` - $${option.price.toFixed(2)}` : ""}
+                          {option.label}{option.price && !shouldHidePrice(p) ? ` - $${option.price.toFixed(2)}` : ""}
                         </button>
                       ))}
                     </div>
