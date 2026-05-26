@@ -327,6 +327,20 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     }
   };
 
+  const setupPrintifyWebhooks = async () => {
+    setTesting("printify-webhooks");
+    try {
+      const result = await adminApi.setupPrintifyWebhooks();
+      const failed = result.results.filter(item => item.status === "failed");
+      showToast(failed.length ? `Printify webhooks partially installed (${failed.length} failed)` : "Printify auto-publish webhooks installed");
+      loadIntegrations();
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Printify webhook setup failed");
+    } finally {
+      setTesting("");
+    }
+  };
+
   const publishPrintify = async (printifyProductId?: string) => {
     printifyProductId = printifyProductId || prompt("Printify product ID to publish") || "";
     if (!printifyProductId) return;
@@ -505,6 +519,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               </button>
               <button type="button" onClick={() => testProvider("printify")} className="btn btn-outline btn-sm">Validate</button>
               <button type="button" onClick={() => publishPrintify()} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish to Website</button>
+              <button type="button" onClick={setupPrintifyWebhooks} className="btn btn-outline btn-sm" disabled={testing === "printify-webhooks"}>Auto Publish Webhooks</button>
             </div>
             {integrations?.printify.disabled && (
               <p style={{ color: "var(--text3)", fontSize: "0.74rem" }}>

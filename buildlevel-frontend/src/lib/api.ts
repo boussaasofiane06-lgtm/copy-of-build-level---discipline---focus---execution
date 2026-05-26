@@ -284,6 +284,7 @@ export const adminApi = {
   getPrintifyOrders: () => api.get<unknown>("/admin/printify/orders").then(r => r.data),
   getPrintifyInventory: () => api.get<unknown>("/admin/printify/inventory").then(r => r.data),
   syncPrintify: () => api.get<ExternalSyncResponse>("/admin/printify/sync").then(r => r.data),
+  setupPrintifyWebhooks: () => api.post<{ success: boolean; webhookUrl: string; results: Array<{ topic: string; status: string; error?: string }> }>("/admin/printify/webhooks/setup").then(r => r.data),
   publishPrintifyProduct: (printifyProductId: string) => api.post<{ success: boolean; data?: unknown }>("/admin/printify/publish", { printifyProductId }).then(r => r.data),
   getStripeDashboard: () => api.get<StripeDashboard>("/admin/integrations/stripe/dashboard").then(r => r.data),
   getTidioConfig: () => api.get<TidioConfig>("/admin/integrations/tidio/config").then(r => r.data),

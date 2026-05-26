@@ -165,6 +165,25 @@ async function printifyRequest(path: string) {
   return data;
 }
 
+async function printifyRequestWithBody(path: string, method: string, body?: unknown) {
+  const { apiKey } = await getPrintifyCredentials();
+  if (!apiKey) throw new Error("Printify API key not configured");
+  const response = await fetch(`https://api.printify.com/v1${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json", "User-Agent": "BuildLevelWebsite/1.0" },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    const message = typeof data?.message === "string" ? data.message : JSON.stringify(data).slice(0, 300);
+    if (response.status === 401) {
+      throw new Error("Printify rejected the API token (401 Unauthenticated). Paste the full token from Printify Account Settings > API Tokens.");
+    }
+    throw new Error(`Printify API error ${response.status}: ${message}`);
+  }
+  return data;
+}
+
 async function validatePrintifyCredentials(apiKey: string, shopId: string) {
   const response = await fetch("https://api.printify.com/v1/shops.json", {
     headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "BuildLevelWebsite/1.0" },
@@ -364,6 +383,48 @@ async function syncPrintifyStoreToWebsite() {
       delisted,
     },
   };
+}
+
+async function delistPrintifyProduct(printifyProductId: string) {
+  const db = await getDb();
+  const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  if (existing.length === 0) return { productId: 0, printifyProductId, action: "ignored" };
+  await db.update(products).set({
+    published: false,
+    hidden: true,
+    delisted: true,
+    inStock: false,
+    badge: "Removed from Printify",
+    updatedAt: new Date(),
+  }).where(eq(products.printifyProductId, printifyProductId));
+  return { productId: existing[0].id, printifyProductId, action: "delisted" };
+}
+
+function getPrintifyWebhookSecret() {
+  return cleanEnv(process.env.PRINTIFY_WEBHOOK_SECRET || process.env.PRINTIFY_SYNC_SECRET);
+}
+
+function isPrintifyWebhookAuthorized(req: Request) {
+  const expected = getPrintifyWebhookSecret();
+  if (!expected) return true;
+  const provided = cleanEnv(String(req.query.secret || req.headers["x-printify-webhook-secret"] || req.headers["x-printify-signature"] || ""));
+  return provided === expected;
+}
+
+function getPrintifyWebhookProductId(payload: any) {
+  return String(payload?.resource?.id || payload?.resource?.product_id || payload?.data?.id || payload?.data?.product_id || payload?.product?.id || payload?.product_id || payload?.id || "").trim();
+}
+
+function getPrintifyWebhookTopic(req: Request, payload: any) {
+  return String(payload?.topic || payload?.type || payload?.event || req.headers["x-printify-topic"] || "").trim();
+}
+
+function getBackendWebhookBaseUrl(req: Request) {
+  const configured = process.env.PUBLIC_BACKEND_URL || process.env.RENDER_EXTERNAL_URL || process.env.BACKEND_URL;
+  if (configured) return configured.replace(/\/$/, "");
+  const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
+  const host = req.headers["x-forwarded-host"] || req.headers.host;
+  return `${protocol}://${host}`;
 }
 
 function isPrintifyAutoSyncAuthorized(req: Request) {
@@ -940,6 +1001,59 @@ export function registerRestCompatRoutes(app: Express) {
         results: syncResult.results,
       });
     } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.post("/api/admin/printify/webhooks/setup", requireAdminRest, async (req, res) => {
+    try {
+      const { shopId } = await getPrintifyCredentials();
+      if (!shopId) throw new Error("Printify shop ID not configured");
+      const secret = getPrintifyWebhookSecret();
+      if (!secret) {
+        res.status(400).json({ error: "Set PRINTIFY_WEBHOOK_SECRET or PRINTIFY_SYNC_SECRET in Render before installing webhooks" });
+        return;
+      }
+      const webhookUrl = `${getBackendWebhookBaseUrl(req)}/api/printify/webhook?secret=${encodeURIComponent(secret)}`;
+      const topics = ["product:publish:succeeded", "product:updated", "product:deleted"];
+      const existingData = await printifyRequest(`/shops/${shopId}/webhooks.json`).catch(() => ({}));
+      const existing = Array.isArray(existingData?.data) ? existingData.data : Array.isArray(existingData) ? existingData : [];
+      const results = [];
+
+      for (const topic of topics) {
+        const alreadyInstalled = existing.some((webhook: any) => webhook?.topic === topic && webhook?.url === webhookUrl);
+        if (alreadyInstalled) {
+          results.push({ topic, status: "already-installed" });
+          continue;
+        }
+        try {
+          const created = await printifyRequestWithBody(`/shops/${shopId}/webhooks.json`, "POST", { topic, url: webhookUrl, secret });
+          results.push({ topic, status: "installed", id: created?.id });
+        } catch (error: any) {
+          results.push({ topic, status: "failed", error: error?.message || "Webhook install failed" });
+        }
+      }
+
+      res.json({ success: results.some(result => result.status === "installed" || result.status === "already-installed"), webhookUrl, results });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+  app.post("/api/printify/webhook", async (req, res) => {
+    try {
+      if (!isPrintifyWebhookAuthorized(req)) {
+        res.status(401).json({ error: "Invalid Printify webhook secret" });
+        return;
+      }
+      const payload = req.body || {};
+      const topic = getPrintifyWebhookTopic(req, payload);
+      const printifyProductId = getPrintifyWebhookProductId(payload);
+      let result: unknown;
+
+      if (topic.includes("deleted") && printifyProductId) result = await delistPrintifyProduct(printifyProductId);
+      else if (printifyProductId) result = await syncPrintifyProductToStore(printifyProductId);
+      else result = await syncPrintifyStoreToWebsite();
+
+      res.json({ success: true, topic, printifyProductId, result });
+    } catch (e: any) {
+      console.error("[Printify Webhook] Failed:", e);
+      res.status(500).json({ error: e.message });
+    }
   });
   app.all("/api/printify/auto-sync", async (req, res) => {
     try {
