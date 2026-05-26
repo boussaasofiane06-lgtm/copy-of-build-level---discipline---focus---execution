@@ -277,10 +277,10 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     }
     try {
       await adminApi.savePrintifyCredentials(printifyCredentials);
-      showToast("Printify credentials saved");
+      showToast("Printify credentials validated and saved");
       loadIntegrations();
-    } catch {
-      showToast("Error saving Printify credentials");
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Error saving Printify credentials");
     }
   };
 

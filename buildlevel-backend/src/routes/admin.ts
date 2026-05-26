@@ -711,9 +711,15 @@ router.post("/integrations/test/:provider", requireAdmin, async (req: Request, r
       const { apiKey } = await getPrintifyCredentials();
       if (!apiKey) { res.json({ ok: false, message: "Printify API key not configured" }); return; }
       const response = await fetch("https://api.printify.com/v1/shops.json", {
-        headers: { Authorization: `Bearer ${apiKey}` },
+        headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "BuildLevelWebsite/1.0" },
       });
-      res.json({ ok: response.ok, status: response.status, message: response.ok ? "Printify connected" : "Printify connection failed" });
+      const data = await response.json().catch(() => ({}));
+      const message = response.ok
+        ? "Printify connected"
+        : response.status === 401
+          ? "Printify rejected the API token. Paste the full token from Printify Account Settings > API Tokens."
+          : (typeof data?.message === "string" ? data.message : "Printify connection failed");
+      res.json({ ok: response.ok, status: response.status, message });
       return;
     }
     if (provider === "stripe") {
@@ -819,9 +825,31 @@ async function printifyRequest(path: string) {
   const data = await response.json().catch(() => ({}));
   if (!response.ok) {
     const message = typeof data?.message === "string" ? data.message : JSON.stringify(data).slice(0, 300);
+    if (response.status === 401) {
+      throw new Error("Printify rejected the API token (401 Unauthenticated). Paste the full token from Printify Account Settings > API Tokens, not the Shop ID, API URL, or OAuth client secret.");
+    }
     throw new Error(`Printify API error ${response.status}: ${message}`);
   }
   return data;
+}
+
+async function validatePrintifyCredentials(apiKey: string, shopId: string) {
+  const response = await fetch("https://api.printify.com/v1/shops.json", {
+    headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "BuildLevelWebsite/1.0" },
+  });
+  const data = await response.json().catch(() => ({}));
+  if (!response.ok) {
+    if (response.status === 401) {
+      throw new Error("Printify rejected this API token (401 Unauthenticated). Generate/copy the full Printify API token from Account Settings > API Tokens and paste it into API Token.");
+    }
+    const message = typeof data?.message === "string" ? data.message : JSON.stringify(data).slice(0, 300);
+    throw new Error(`Printify credential test failed (${response.status}): ${message}`);
+  }
+
+  const shops = Array.isArray(data) ? data : Array.isArray(data?.data) ? data.data : Array.isArray(data?.shops) ? data.shops : [];
+  if (shops.length > 0 && !shops.some((shop: any) => String(shop?.id) === shopId)) {
+    throw new Error(`Printify API token works, but Shop ID ${shopId} was not found for this token. Use a Shop ID from the same Printify account/API store.`);
+  }
 }
 
 function getPrintifyProductId(product: any) {
@@ -984,6 +1012,7 @@ router.post("/printify/credentials", requireAdmin, async (req: Request, res: Res
       res.status(400).json({ error: "Printify Shop ID is required" });
       return;
     }
+    await validatePrintifyCredentials(apiKey, shopId);
     await saveSetting("printify_disabled", "false");
     const db = await getDb();
     for (const [key, value] of [['printify_api_key', apiKey], ['printify_shop_id', shopId]]) {
