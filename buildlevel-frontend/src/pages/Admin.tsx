@@ -40,18 +40,21 @@ const storageImageUrl = (value?: string | null) => {
   return value;
 };
 
+const isStoredImageValue = (value: string) =>
+  /^https?:\/\//i.test(value) || value.startsWith("data:image/") || value.startsWith("storage:");
+
 const getProductImages = (imageUrl?: string | null) => {
   if (!imageUrl) return [];
   const trimmed = imageUrl.trim();
   if (trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed.filter((url): url is string => typeof url === "string" && /^https?:\/\//i.test(url));
+      if (Array.isArray(parsed)) return parsed.filter((url): url is string => typeof url === "string" && isStoredImageValue(url));
     } catch {
       return [];
     }
   }
-  return trimmed ? [trimmed] : [];
+  return isStoredImageValue(trimmed) ? [trimmed] : [];
 };
 
 const getProductCoverImage = (imageUrl?: string | null) => getProductImages(imageUrl)[0] || "";
@@ -173,12 +176,11 @@ export default function Admin() {
     }
   };
 
-  const compressImageFile = (file: File) => new Promise<string>((resolve, reject) => {
+  const compressImageFile = (file: File, maxDataUrlLength = 55_000) => new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = () => {
       const img = new Image();
       img.onload = () => {
-        const maxDataUrlLength = 55_000;
         const canvas = document.createElement("canvas");
         let maxSide = 720;
         let quality = 0.72;
@@ -220,10 +222,23 @@ export default function Admin() {
   const handleProductImageFiles = async (files: FileList | null) => {
     if (!files || files.length === 0) return;
     const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
-    const dataUrls = await Promise.all(imageFiles.slice(0, 6).map(compressImageFile));
-    setProductImagePreviews(dataUrls);
-    if (dataUrls[0]) setProductForm(f => ({ ...f, imageUrl: serializeProductImages(dataUrls) }));
-    showToast(`${dataUrls.length} image${dataUrls.length === 1 ? "" : "s"} ready — tap Save Product to publish`);
+    let storedImages: string[] = [];
+    if (digitalUploadConfig?.storage.configured) {
+      try {
+        const uploaded = await Promise.all(imageFiles.slice(0, 12).map(file => adminApi.uploadDigitalAsset(file, "thumbnail")));
+        storedImages = uploaded.map(file => file.url || `storage:${file.key}`);
+      } catch {
+        storedImages = [];
+        showToast("Storage upload failed. Saving compressed images in product record.");
+      }
+    }
+    if (storedImages.length === 0) {
+      const perImageLimit = Math.max(8_000, Math.floor(56_000 / Math.max(1, Math.min(imageFiles.length, 4))));
+      storedImages = await Promise.all(imageFiles.slice(0, 4).map(file => compressImageFile(file, perImageLimit)));
+    }
+    setProductImagePreviews(storedImages);
+    if (storedImages[0]) setProductForm(f => ({ ...f, imageUrl: serializeProductImages(storedImages) }));
+    showToast(`${storedImages.length} image${storedImages.length === 1 ? "" : "s"} ready — tap Save Product to publish`);
   };
 
   const deleteProduct = async (id: number) => {
@@ -520,7 +535,7 @@ export default function Admin() {
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                             {productImagePreviews.map((src, index) => (
                               <button key={`${src.slice(0, 24)}-${index}`} type="button" onClick={() => setProductForm(f => ({ ...f, imageUrl: serializeProductImages([src, ...productImagePreviews.filter(image => image !== src)]) }))} style={{ padding: 0, border: getProductCoverImage(productForm.imageUrl) === src ? "2px solid var(--red)" : "1px solid var(--border)", borderRadius: 8, background: "transparent" }}>
-                                <img src={src} alt={`Product upload ${index + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, display: "block" }} />
+                                <img src={storageImageUrl(src)} alt={`Product upload ${index + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, display: "block" }} />
                               </button>
                             ))}
                           </div>
@@ -546,7 +561,7 @@ export default function Admin() {
                       const productImages = getProductImages(p.imageUrl);
                       return (
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
-                        {getProductCoverImage(p.imageUrl) && <img src={getProductCoverImage(p.imageUrl)} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
+                        {getProductCoverImage(p.imageUrl) && <img src={storageImageUrl(getProductCoverImage(p.imageUrl))} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.name}</div>
                           <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {getCategoryAudienceLabel(p.category)} · {getCategoryLabel(p.category)} · {p.published ? "Published" : "Draft"} · {p.inStock ? "In Stock" : "Out of Stock"}</div>

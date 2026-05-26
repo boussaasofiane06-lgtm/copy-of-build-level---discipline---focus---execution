@@ -16,18 +16,29 @@ import {
 
 interface CartItem { product: Product; quantity: number; size: string; }
 
+const storageImageUrl = (value?: string | null) => {
+  if (!value) return "";
+  if (value.startsWith("storage:")) {
+    return `/api/digital/thumbnail/${encodeURIComponent(value.slice("storage:".length))}`;
+  }
+  return value;
+};
+
+const isStoredImageValue = (value: string) =>
+  /^https?:\/\//i.test(value) || value.startsWith("data:image/") || value.startsWith("storage:");
+
 const getProductImages = (imageUrl?: string | null) => {
   if (!imageUrl) return [];
   const trimmed = imageUrl.trim();
   if (trimmed.startsWith("[")) {
     try {
       const parsed = JSON.parse(trimmed);
-      if (Array.isArray(parsed)) return parsed.filter((url): url is string => typeof url === "string" && /^https?:\/\//i.test(url));
+      if (Array.isArray(parsed)) return parsed.filter((url): url is string => typeof url === "string" && isStoredImageValue(url));
     } catch {
       return [];
     }
   }
-  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith("data:image/") ? [trimmed] : [];
+  return isStoredImageValue(trimmed) ? [trimmed] : [];
 };
 
 const getProductCoverImage = (product: Product) => getProductImages(product.imageUrl)[0] || "";
@@ -182,7 +193,7 @@ export default function Shop() {
           ) : cart.map((item) => (
             <div key={`${item.product.id}-${item.size || "default"}`} style={{ display: "flex", gap: 16, marginBottom: 20, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
               <div style={{ width: 64, height: 64, background: "var(--bg3)", flexShrink: 0, overflow: "hidden", borderRadius: 2 }}>
-                {getProductCoverImage(item.product) && <img src={getProductCoverImage(item.product)} alt={item.product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                {getProductCoverImage(item.product) && <img src={storageImageUrl(getProductCoverImage(item.product))} alt={item.product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: "0.9rem", marginBottom: 4 }}>{item.product.name}</p>
@@ -248,12 +259,12 @@ export default function Shop() {
               {getProductImages(viewProduct.imageUrl).length > 0 ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10 }}>
-                    <img src={getProductCoverImage(viewProduct)} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <img src={storageImageUrl(getProductCoverImage(viewProduct))} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   </div>
                   {getProductImages(viewProduct.imageUrl).length > 1 && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))", gap: 8 }}>
                       {getProductImages(viewProduct.imageUrl).map((image, index) => (
-                        <img key={`${image}-${index}`} src={image} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 8, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)" }} />
+                        <img key={`${image}-${index}`} src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 8, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)" }} />
                       ))}
                     </div>
                   )}
@@ -359,7 +370,7 @@ export default function Shop() {
               <div key={p.id} className="card">
                 <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", position: "relative" }}>
                   {coverImage ? (
-                    <img src={coverImage} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <img src={storageImageUrl(coverImage)} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: "0.8rem" }}>No Image</div>
                   )}
@@ -370,7 +381,7 @@ export default function Shop() {
                   {productImages.length > 1 && (
                     <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
                       {productImages.slice(0, 6).map((image, index) => (
-                        <img key={`${image}-${index}`} src={image} alt={`${p.name} view ${index + 1}`} style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 4, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)", flex: "0 0 auto" }} />
+                        <img key={`${image}-${index}`} src={storageImageUrl(image)} alt={`${p.name} view ${index + 1}`} style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 4, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)", flex: "0 0 auto" }} />
                       ))}
                     </div>
                   )}
