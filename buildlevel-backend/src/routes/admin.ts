@@ -852,6 +852,18 @@ async function printifyRequestWithBody(path: string, method: string, body?: unkn
   return data;
 }
 
+async function notifyPrintifyPublishingStatus(printifyProductId: string, status: "success" | "error", reason?: string) {
+  const endpoint = status === "success" ? "publishing_succeeded" : "publishing_failed";
+  try {
+    const body = status === "error" && reason ? { reason: reason.slice(0, 500) } : undefined;
+    await printifyRequestWithBody(`/shops/${(await getPrintifyCredentials()).shopId}/products/${printifyProductId}/${endpoint}.json`, "POST", body);
+    return { ok: true, status };
+  } catch (error: any) {
+    console.error(`[Printify] Failed to notify publishing ${status}:`, error);
+    return { ok: false, status, error: error?.message || "Printify publish notification failed" };
+  }
+}
+
 async function validatePrintifyCredentials(apiKey: string, shopId: string) {
   const response = await fetch("https://api.printify.com/v1/shops.json", {
     headers: { Authorization: `Bearer ${apiKey}`, "User-Agent": "BuildLevelWebsite/1.0" },
@@ -1227,8 +1239,14 @@ router.post("/printify/publish", requireAdmin, async (req: Request, res: Respons
       res.status(r.status).json({ success: false, data });
       return;
     }
-    const storeProduct = await syncPrintifyProductToStore(printifyProductId);
-    res.json({ success: true, data, storeProduct });
+    try {
+      const storeProduct = await syncPrintifyProductToStore(printifyProductId);
+      const publishStatus = await notifyPrintifyPublishingStatus(printifyProductId, "success");
+      res.json({ success: true, data, storeProduct, publishStatus });
+    } catch (syncError: any) {
+      const publishStatus = await notifyPrintifyPublishingStatus(printifyProductId, "error", syncError.message);
+      res.status(500).json({ error: syncError.message, publishStatus });
+    }
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1268,7 +1286,7 @@ router.post("/printify/webhooks/setup", requireAdmin, async (req: Request, res: 
       return;
     }
     const webhookUrl = `${getBackendWebhookBaseUrl(req)}/api/admin/printify/webhook?secret=${encodeURIComponent(secret)}`;
-    const topics = ["product:publish:succeeded", "product:updated", "product:deleted"];
+    const topics = ["product:publish:started", "product:publish:succeeded", "product:updated", "product:deleted"];
     const existingData = await printifyRequest(`/shops/${shopId}/webhooks.json`).catch(() => ({}));
     const existing = Array.isArray(existingData?.data) ? existingData.data : Array.isArray(existingData) ? existingData : [];
     const results = [];
@@ -1306,12 +1324,21 @@ router.post("/printify/webhook", async (req: Request, res: Response) => {
       result = await delistPrintifyProduct(printifyProductId);
     } else if (printifyProductId) {
       result = await syncPrintifyProductToStore(printifyProductId);
+      if (topic.includes("publish")) {
+        await notifyPrintifyPublishingStatus(printifyProductId, "success");
+      }
     } else {
       result = await syncPrintifyStoreToWebsite();
     }
 
     res.json({ success: true, topic, printifyProductId, result });
   } catch (e: any) {
+    const payload = req.body || {};
+    const topic = getPrintifyWebhookTopic(req, payload);
+    const printifyProductId = getPrintifyWebhookProductId(payload);
+    if (topic.includes("publish") && printifyProductId) {
+      await notifyPrintifyPublishingStatus(printifyProductId, "error", e.message);
+    }
     console.error("[Printify Webhook] Failed:", e);
     res.status(500).json({ error: e.message });
   }
