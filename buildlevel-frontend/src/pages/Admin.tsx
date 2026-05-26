@@ -25,6 +25,13 @@ const defaultMaintenanceConfig: MaintenanceConfig = {
   contactEmail: "info@thebuildlevel.com",
 };
 
+type DigitalUploadConfig = {
+  maxDigitalFileSizeBytes: number;
+  allowedFileTypes: string[];
+  allowedThumbnailTypes: string[];
+  storage: { configured: boolean; provider: string };
+};
+
 const storageImageUrl = (value?: string | null) => {
   if (!value) return "";
   if (value.startsWith("storage:")) {
@@ -62,6 +69,7 @@ export default function Admin() {
   const [thumbnailUploadProgress, setThumbnailUploadProgress] = useState(0);
   const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
   const [digitalFileInfo, setDigitalFileInfo] = useState<{ name: string; size: number; mimeType: string } | null>(null);
+  const [digitalUploadConfig, setDigitalUploadConfig] = useState<DigitalUploadConfig | null>(null);
 
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
@@ -94,6 +102,7 @@ export default function Admin() {
       setProducts(p); setDigital(d); setBlog(b);
       setMaintenanceForm({ ...defaultMaintenanceConfig, ...maintenance });
     } catch { }
+    adminApi.getDigitalUploadConfig().then(setDigitalUploadConfig).catch(() => setDigitalUploadConfig(null));
     setLoading(false);
   };
 
@@ -240,6 +249,11 @@ export default function Admin() {
   };
 
   const uploadDigitalFile = async (file: File) => {
+    if (digitalUploadConfig?.storage.configured === false) {
+      setDigitalUploadProgress(0);
+      showToast("Digital file upload needs R2/S3 storage env vars on Render. Add a hosted File URL below for now.");
+      return;
+    }
     setDigitalUploadProgress(1);
     try {
       const uploaded = await adminApi.uploadDigitalAsset(file, "digital", setDigitalUploadProgress);
@@ -521,11 +535,17 @@ export default function Admin() {
                         onDrop={e => { e.preventDefault(); const file = e.dataTransfer.files?.[0]; if (file) uploadDigitalFile(file); }}
                       >
                         <label style={labelStyle}>Digital File Upload</label>
+                        {digitalUploadConfig?.storage.configured === false && (
+                          <div style={{ border: "1px solid rgba(192,57,43,0.45)", background: "rgba(192,57,43,0.08)", color: "#ffb4aa", borderRadius: 8, padding: 10, fontSize: "0.8rem", marginBottom: 12, lineHeight: 1.5 }}>
+                            Upload storage is not configured on Render. Add R2/S3 upload env vars to upload videos/PDFs directly, or paste a hosted file URL below.
+                          </div>
+                        )}
                         <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop a PDF, ZIP, video, image, DOCX, PPTX, or XLSX file here, or tap to select from mobile/desktop.</p>
                         <input
                           style={inputStyle}
                           type="file"
                           accept=".pdf,.zip,.mp4,.mov,.png,.jpg,.jpeg,.webp,.docx,.pptx,.xlsx"
+                          disabled={digitalUploadConfig?.storage.configured === false}
                           onChange={e => { const file = e.target.files?.[0]; if (file) uploadDigitalFile(file); }}
                         />
                         {digitalUploadProgress > 0 && (
@@ -539,6 +559,18 @@ export default function Admin() {
                           </p>
                         )}
                         {(digitalForm.fileKey || digitalForm.fileUrl) && <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>Secure file attached. Saving this product will use the uploaded file for delivery.</p>}
+                      </div>
+                      <div style={{ gridColumn: "1/-1" }}>
+                        <label style={labelStyle}>Digital File URL</label>
+                        <input
+                          style={inputStyle}
+                          value={digitalForm.fileUrl}
+                          onChange={e => setDigitalForm(f => ({ ...f, fileUrl: e.target.value, fileKey: e.target.value ? "" : f.fileKey, fileName: e.target.value ? (f.fileName || "External digital file") : f.fileName }))}
+                          placeholder="https://.../your-video-or-pdf"
+                        />
+                        <p style={{ color: "var(--text3)", fontSize: "0.74rem", marginTop: 6 }}>
+                          Use this when upload storage is not configured. The URL must stay accessible after purchase.
+                        </p>
                       </div>
                       <div
                         style={{ gridColumn: "1/-1", border: "1px dashed var(--border)", borderRadius: 10, padding: 18, background: "rgba(255,255,255,0.025)" }}
