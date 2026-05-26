@@ -56,6 +56,11 @@ const getProductImages = (imageUrl?: string | null) => {
 
 const getProductCoverImage = (imageUrl?: string | null) => getProductImages(imageUrl)[0] || "";
 
+const serializeProductImages = (images: string[]) => {
+  const unique = Array.from(new Set(images.map(image => image.trim()).filter(Boolean)));
+  return unique.length <= 1 ? (unique[0] || "") : JSON.stringify(unique);
+};
+
 const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
 
 export default function Admin() {
@@ -139,6 +144,7 @@ export default function Admin() {
     const { audience: _audience, ...productPayload } = productForm;
     const data = { ...productPayload, price: parseFloat(productForm.price), compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined, sizes: productForm.sizes.split(",").map(s => s.trim()).filter(Boolean) };
     try {
+      const productImages = getProductImages(data.imageUrl);
       const statusBadge = data.status === "available" ? "" :
         data.status === "coming-soon" ? "Coming Soon" :
         data.status === "new-release" ? "New Release" :
@@ -150,7 +156,10 @@ export default function Admin() {
       if (!Number.isFinite(data.price) || data.price <= 0) throw new Error("Product price must be greater than 0");
       if (!data.category.trim()) throw new Error("Product category is required");
       if (data.imageUrl && data.imageUrl.length > 1_500_000) {
-        throw new Error("Image is too large. Upload a smaller image or use an image URL.");
+        throw new Error("Image gallery is too large. Upload fewer/smaller images or use image URLs.");
+      }
+      if (productImages.length > 0) {
+        data.imageUrl = serializeProductImages(productImages);
       }
       if (editProduct?.id) await adminApi.updateProduct(editProduct.id, data as any);
       else await adminApi.createProduct(data as any);
@@ -213,8 +222,8 @@ export default function Admin() {
     const imageFiles = Array.from(files).filter(file => file.type.startsWith("image/"));
     const dataUrls = await Promise.all(imageFiles.slice(0, 6).map(compressImageFile));
     setProductImagePreviews(dataUrls);
-    if (dataUrls[0]) setProductForm(f => ({ ...f, imageUrl: dataUrls[0] }));
-    showToast("Image ready — tap Save Product to publish");
+    if (dataUrls[0]) setProductForm(f => ({ ...f, imageUrl: serializeProductImages(dataUrls) }));
+    showToast(`${dataUrls.length} image${dataUrls.length === 1 ? "" : "s"} ready — tap Save Product to publish`);
   };
 
   const deleteProduct = async (id: number) => {
@@ -491,7 +500,7 @@ export default function Admin() {
                         <input style={inputStyle} value={productForm.imageUrl} onChange={e => setProductForm(f => ({ ...f, imageUrl: e.target.value }))} placeholder="https://..." />
                         {getProductImages(productForm.imageUrl).length > 1 && (
                           <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
-                            Synced gallery: {getProductImages(productForm.imageUrl).length} Printify images. The first image is the cover.
+                            Gallery saved: {getProductImages(productForm.imageUrl).length} images. The first image is the cover.
                           </p>
                         )}
                       </div>
@@ -505,12 +514,14 @@ export default function Admin() {
                           onChange={e => handleProductImageFiles(e.target.files).catch(() => showToast("Error reading image files"))}
                         />
                         <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>
-                          Select one or more images from mobile, laptop, or desktop. The first image is used as the storefront cover.
+                          Select one or more images from mobile, laptop, or desktop. Every selected image is saved; the first image is used as the storefront cover.
                         </p>
                         {productImagePreviews.length > 0 && (
                           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                             {productImagePreviews.map((src, index) => (
-                              <img key={`${src.slice(0, 24)}-${index}`} src={src} alt={`Product upload ${index + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, border: "1px solid var(--border)" }} />
+                              <button key={`${src.slice(0, 24)}-${index}`} type="button" onClick={() => setProductForm(f => ({ ...f, imageUrl: serializeProductImages([src, ...productImagePreviews.filter(image => image !== src)]) }))} style={{ padding: 0, border: getProductCoverImage(productForm.imageUrl) === src ? "2px solid var(--red)" : "1px solid var(--border)", borderRadius: 8, background: "transparent" }}>
+                                <img src={src} alt={`Product upload ${index + 1}`} style={{ width: 72, height: 72, objectFit: "cover", borderRadius: 6, display: "block" }} />
+                              </button>
                             ))}
                           </div>
                         )}
@@ -542,6 +553,9 @@ export default function Admin() {
                           {productImages.length > 1 && <div style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 3 }}>{productImages.length} synced images</div>}
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
+                          {p.published && (
+                            <a href="/shop" target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">View</a>
+                          )}
                           <button onClick={() => openEditProduct(p)} className="btn btn-outline btn-sm">Edit</button>
                           <button onClick={() => deleteProduct(p.id)} className="btn btn-sm" style={{ background: "none", border: "1px solid var(--red)", color: "var(--red)" }}>Delete</button>
                         </div>
