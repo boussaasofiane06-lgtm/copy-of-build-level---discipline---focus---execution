@@ -51,6 +51,7 @@ export default function Shop() {
   const [checkingOut, setCheckingOut] = useState(false);
   const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
+  const [viewImage, setViewImage] = useState("");
   const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
@@ -80,6 +81,8 @@ export default function Shop() {
 
   useEffect(() => {
     if (!viewProduct) return;
+    const firstImage = getProductCoverImage(viewProduct);
+    setViewImage(firstImage);
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -241,7 +244,7 @@ export default function Shop() {
 
   const productModal = viewProduct ? createPortal(
     <div className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
-      <div className="cart-drawer__backdrop" aria-hidden="true" onClick={() => setViewProduct(null)} />
+      <div className="cart-drawer__backdrop" aria-hidden="true" onClick={() => { setViewProduct(null); setViewImage(""); }} />
       <aside className="cart-drawer__panel" style={{ width: "min(960px, 100vw)", maxWidth: "100vw" }}>
         <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
           <div>
@@ -250,7 +253,7 @@ export default function Shop() {
             </p>
             <h3 id="product-detail-title" style={{ fontSize: "1rem" }}>{viewProduct.name}</h3>
           </div>
-          <button onClick={() => setViewProduct(null)} aria-label="Close product details" style={{ background: "none", border: "none", color: "var(--text2)", fontSize: "1.2rem" }}>✕</button>
+          <button onClick={() => { setViewProduct(null); setViewImage(""); }} aria-label="Close product details" style={{ background: "none", border: "none", color: "var(--text2)", fontSize: "1.2rem" }}>✕</button>
         </div>
 
         <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
@@ -259,12 +262,14 @@ export default function Shop() {
               {getProductImages(viewProduct.imageUrl).length > 0 ? (
                 <div style={{ display: "grid", gap: 10 }}>
                   <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10 }}>
-                    <img src={storageImageUrl(getProductCoverImage(viewProduct))} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                    <img src={storageImageUrl(viewImage || getProductCoverImage(viewProduct))} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   </div>
                   {getProductImages(viewProduct.imageUrl).length > 1 && (
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(86px, 1fr))", gap: 8 }}>
                       {getProductImages(viewProduct.imageUrl).map((image, index) => (
-                        <img key={`${image}-${index}`} src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", borderRadius: 8, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)" }} />
+                        <button key={`${image}-${index}`} type="button" onClick={() => setViewImage(image)} aria-label={`View ${viewProduct.name} image ${index + 1}`} style={{ padding: 0, background: "transparent", border: (viewImage || getProductCoverImage(viewProduct)) === image ? "2px solid var(--red)" : "1px solid var(--border)", borderRadius: 8, cursor: "pointer", overflow: "hidden" }}>
+                          <img src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: "100%", aspectRatio: "1", objectFit: "cover", display: "block" }} />
+                        </button>
                       ))}
                     </div>
                   )}
@@ -298,7 +303,7 @@ export default function Shop() {
               <button onClick={() => addToCart(viewProduct)} disabled={!isPurchasable(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
                 {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) === "Coming Soon" ? "Coming Soon" : "Not Available")}
               </button>
-              <button onClick={() => setViewProduct(null)} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
+              <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
             </div>
           </div>
         </div>
