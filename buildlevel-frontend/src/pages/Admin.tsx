@@ -40,6 +40,8 @@ const storageImageUrl = (value?: string | null) => {
   return value;
 };
 
+const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
+
 export default function Admin() {
   const [authed, setAuthed] = useState(false);
   const [password, setPassword] = useState("");
@@ -253,6 +255,11 @@ export default function Admin() {
   };
 
   const uploadDigitalFile = async (file: File) => {
+    if (file.size > DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES) {
+      setDigitalUploadProgress(0);
+      showToast(`This file is ${formatBytes(file.size)}. Large videos must be uploaded directly to R2/S3 or pasted as a Digital File URL.`);
+      return;
+    }
     if (digitalUploadConfig?.storage.configured === false) {
       setDigitalUploadProgress(0);
       showToast("Digital file upload needs R2/S3 storage env vars on Render. Add a hosted File URL below for now.");
@@ -550,6 +557,9 @@ export default function Admin() {
                           </div>
                         )}
                         <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop a PDF, ZIP, video, image, DOCX, PPTX, or XLSX file here, or tap to select from mobile/desktop.</p>
+                        <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginBottom: 12 }}>
+                          Large videos over {formatBytes(DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES)} should be uploaded to R2/S3 first, then pasted in Digital File URL. Browser uploads pass through Cloudflare/Render request limits.
+                        </p>
                         <input
                           style={inputStyle}
                           type="file"
