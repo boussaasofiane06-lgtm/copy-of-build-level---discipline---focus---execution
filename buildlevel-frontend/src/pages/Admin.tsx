@@ -218,6 +218,10 @@ export default function Admin() {
   // Digital CRUD
   const saveDigital = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (digitalUploadProgress > 0 && digitalUploadProgress < 100) {
+      showToast("Please wait until the digital file finishes uploading before saving.");
+      return;
+    }
     const { version: _version, downloadLimit: _downloadLimit, ...digitalPayload } = digitalForm;
     const data = { ...digitalPayload, price: parseFloat(digitalForm.price) };
     try {
@@ -252,6 +256,11 @@ export default function Admin() {
     if (digitalUploadConfig?.storage.configured === false) {
       setDigitalUploadProgress(0);
       showToast("Digital file upload needs R2/S3 storage env vars on Render. Add a hosted File URL below for now.");
+      return;
+    }
+    if (digitalUploadConfig?.maxDigitalFileSizeBytes && file.size > digitalUploadConfig.maxDigitalFileSizeBytes) {
+      setDigitalUploadProgress(0);
+      showToast(`Video/file is too large. Max upload is ${formatBytes(digitalUploadConfig.maxDigitalFileSizeBytes)}.`);
       return;
     }
     setDigitalUploadProgress(1);
@@ -553,12 +562,26 @@ export default function Admin() {
                             <div style={{ width: `${digitalUploadProgress}%`, height: "100%", background: "var(--red)", transition: "width 0.2s ease" }} />
                           </div>
                         )}
+                        {digitalUploadProgress > 0 && digitalUploadProgress < 100 && (
+                          <p style={{ color: "var(--text2)", fontSize: "0.78rem", marginTop: 8 }}>
+                            Uploading... keep this page open and wait before saving.
+                          </p>
+                        )}
                         {digitalFileInfo && (
                           <p style={{ color: "var(--text2)", fontSize: "0.8rem", marginTop: 10 }}>
                             File: {digitalFileInfo.name} · {formatBytes(digitalFileInfo.size)} · {digitalFileInfo.mimeType}
                           </p>
                         )}
-                        {(digitalForm.fileKey || digitalForm.fileUrl) && <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>Secure file attached. Saving this product will use the uploaded file for delivery.</p>}
+                        {(digitalForm.fileKey || digitalForm.fileUrl) && (
+                          <div style={{ border: "1px solid rgba(255,255,255,0.12)", background: "rgba(255,255,255,0.035)", borderRadius: 8, padding: 10, marginTop: 10 }}>
+                            <p style={{ color: "var(--text2)", fontSize: "0.78rem", marginBottom: 4 }}>
+                              Saved file reference: {(digitalForm.fileName || digitalForm.fileKey || digitalForm.fileUrl).slice(0, 140)}
+                            </p>
+                            <p style={{ color: "var(--text3)", fontSize: "0.72rem" }}>
+                              The browser file picker will still say "No file chosen" after reload; this saved reference confirms the product has a file attached.
+                            </p>
+                          </div>
+                        )}
                       </div>
                       <div style={{ gridColumn: "1/-1" }}>
                         <label style={labelStyle}>Digital File URL</label>
@@ -599,7 +622,9 @@ export default function Admin() {
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Description</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={3} value={digitalForm.description} onChange={e => setDigitalForm(f => ({ ...f, description: e.target.value }))} /></div>
                       <div><label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={digitalForm.published} onChange={e => setDigitalForm(f => ({ ...f, published: e.target.checked }))} /> Published</label></div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
-                        <button type="submit" className="btn btn-primary btn-sm">Save</button>
+                        <button type="submit" className="btn btn-primary btn-sm" disabled={digitalUploadProgress > 0 && digitalUploadProgress < 100}>
+                          {digitalUploadProgress > 0 && digitalUploadProgress < 100 ? "Uploading..." : "Save"}
+                        </button>
                         <button type="button" onClick={() => { setShowDigitalForm(false); setEditDigital(null); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); }} className="btn btn-outline btn-sm">Cancel</button>
                       </div>
                     </form>

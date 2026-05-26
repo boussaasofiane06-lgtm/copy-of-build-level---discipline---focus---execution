@@ -112,7 +112,7 @@ export async function uploadObject(file: UploadedFile, kind: UploadKind) {
   return {
     key,
     url: publicBaseUrl ? `${publicBaseUrl.replace(/\/$/, "")}/${key}` : "",
-    fileName: file.originalname,
+    fileName: file.originalname.slice(0, 255),
     size: file.size,
     mimeType: file.mimetype,
   };
