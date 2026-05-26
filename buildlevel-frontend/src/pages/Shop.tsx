@@ -16,6 +16,22 @@ import {
 
 interface CartItem { product: Product; quantity: number; size: string; }
 
+const getProductImages = (imageUrl?: string | null) => {
+  if (!imageUrl) return [];
+  const trimmed = imageUrl.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter((url): url is string => typeof url === "string" && /^https?:\/\//i.test(url));
+    } catch {
+      return [];
+    }
+  }
+  return /^https?:\/\//i.test(trimmed) || trimmed.startsWith("data:image/") ? [trimmed] : [];
+};
+
+const getProductCoverImage = (product: Product) => getProductImages(product.imageUrl)[0] || "";
+
 export default function Shop() {
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -118,7 +134,7 @@ export default function Shop() {
         size: i.size,
         priceUSD: parseFloat(i.product.price),
         quantity: i.quantity,
-        image: i.product.imageUrl?.startsWith("http") ? i.product.imageUrl : undefined,
+        image: getProductCoverImage(i.product).startsWith("http") ? getProductCoverImage(i.product) : undefined,
       }));
       const { url } = await publicApi.createCheckout(items);
       window.location.assign(url);
@@ -147,7 +163,7 @@ export default function Shop() {
           ) : cart.map((item) => (
             <div key={`${item.product.id}-${item.size || "default"}`} style={{ display: "flex", gap: 16, marginBottom: 20, paddingBottom: 20, borderBottom: "1px solid var(--border)" }}>
               <div style={{ width: 64, height: 64, background: "var(--bg3)", flexShrink: 0, overflow: "hidden", borderRadius: 2 }}>
-                {item.product.imageUrl && <img src={item.product.imageUrl} alt={item.product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+                {getProductCoverImage(item.product) && <img src={getProductCoverImage(item.product)} alt={item.product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: "0.9rem", marginBottom: 4 }}>{item.product.name}</p>
@@ -249,11 +265,14 @@ export default function Shop() {
           </div>
         ) : (
           <div className="grid-4">
-            {filtered.map(p => (
+            {filtered.map(p => {
+              const productImages = getProductImages(p.imageUrl);
+              const coverImage = productImages[0] || "";
+              return (
               <div key={p.id} className="card">
                 <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", position: "relative" }}>
-                  {p.imageUrl ? (
-                    <img src={p.imageUrl} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                  {coverImage ? (
+                    <img src={coverImage} alt={p.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
                   ) : (
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--text3)", fontSize: "0.8rem" }}>No Image</div>
                   )}
@@ -261,6 +280,13 @@ export default function Shop() {
                   {!isPurchasable(p) && <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.42)", display: "flex", alignItems: "center", justifyContent: "center", pointerEvents: "none" }}><span style={{ color: "#fff", fontFamily: "var(--font-display)", letterSpacing: "0.1em" }}>{getProductStatus(p) || "Unavailable"}</span></div>}
                 </div>
                 <div style={{ padding: 16 }}>
+                  {productImages.length > 1 && (
+                    <div style={{ display: "flex", gap: 6, marginBottom: 12, overflowX: "auto", paddingBottom: 2 }}>
+                      {productImages.slice(0, 6).map((image, index) => (
+                        <img key={`${image}-${index}`} src={image} alt={`${p.name} view ${index + 1}`} style={{ width: 42, height: 42, objectFit: "cover", borderRadius: 4, border: index === 0 ? "1px solid var(--red)" : "1px solid var(--border)", flex: "0 0 auto" }} />
+                      ))}
+                    </div>
+                  )}
                   <div style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>
                     {getCategoryAudienceLabel(p.category)} / {getCategoryLabel(p.category)}
                   </div>
@@ -287,7 +313,7 @@ export default function Shop() {
                   </button>
                 </div>
               </div>
-            ))}
+            );})}
           </div>
         )}
       </div>

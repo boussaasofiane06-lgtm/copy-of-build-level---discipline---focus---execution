@@ -40,6 +40,22 @@ const storageImageUrl = (value?: string | null) => {
   return value;
 };
 
+const getProductImages = (imageUrl?: string | null) => {
+  if (!imageUrl) return [];
+  const trimmed = imageUrl.trim();
+  if (trimmed.startsWith("[")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed)) return parsed.filter((url): url is string => typeof url === "string" && /^https?:\/\//i.test(url));
+    } catch {
+      return [];
+    }
+  }
+  return trimmed ? [trimmed] : [];
+};
+
+const getProductCoverImage = (imageUrl?: string | null) => getProductImages(imageUrl)[0] || "";
+
 const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
 
 export default function Admin() {
@@ -213,7 +229,7 @@ export default function Admin() {
     setEditProduct(p);
     setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
     setCustomProductCategory(getCategoryBySlug(p.category) ? "" : getCategoryLabel(p.category));
-    setProductImagePreviews(p.imageUrl ? [p.imageUrl] : []);
+    setProductImagePreviews(getProductImages(p.imageUrl));
     setShowProductForm(true);
   };
 
@@ -470,7 +486,15 @@ export default function Admin() {
                         </select>
                       </div>
                       <div><label style={labelStyle}>Badge</label><input style={inputStyle} value={productForm.badge} onChange={e => setProductForm(f => ({ ...f, badge: e.target.value }))} placeholder="Optional custom badge" /></div>
-                      <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Image URL</label><input style={inputStyle} value={productForm.imageUrl} onChange={e => setProductForm(f => ({ ...f, imageUrl: e.target.value }))} placeholder="https://..." /></div>
+                      <div style={{ gridColumn: "1/-1" }}>
+                        <label style={labelStyle}>Image URL / Synced Gallery</label>
+                        <input style={inputStyle} value={productForm.imageUrl} onChange={e => setProductForm(f => ({ ...f, imageUrl: e.target.value }))} placeholder="https://..." />
+                        {getProductImages(productForm.imageUrl).length > 1 && (
+                          <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
+                            Synced gallery: {getProductImages(productForm.imageUrl).length} Printify images. The first image is the cover.
+                          </p>
+                        )}
+                      </div>
                       <div style={{ gridColumn: "1/-1" }}>
                         <label style={labelStyle}>Upload Images From Device</label>
                         <input
@@ -507,19 +531,22 @@ export default function Admin() {
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {products.length === 0 ? <p style={{ color: "var(--text2)", padding: 40, textAlign: "center" }}>No products yet. Add your first product above.</p> :
-                    products.map(p => (
+                    products.map(p => {
+                      const productImages = getProductImages(p.imageUrl);
+                      return (
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
-                        {p.imageUrl && <img src={p.imageUrl} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
+                        {getProductCoverImage(p.imageUrl) && <img src={getProductCoverImage(p.imageUrl)} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.name}</div>
                           <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {getCategoryAudienceLabel(p.category)} · {getCategoryLabel(p.category)} · {p.published ? "Published" : "Draft"} · {p.inStock ? "In Stock" : "Out of Stock"}</div>
+                          {productImages.length > 1 && <div style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 3 }}>{productImages.length} synced images</div>}
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => openEditProduct(p)} className="btn btn-outline btn-sm">Edit</button>
                           <button onClick={() => deleteProduct(p.id)} className="btn btn-sm" style={{ background: "none", border: "1px solid var(--red)", color: "var(--red)" }}>Delete</button>
                         </div>
                       </div>
-                    ))
+                    );})
                   }
                 </div>
               </div>

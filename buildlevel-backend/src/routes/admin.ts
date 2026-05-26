@@ -882,6 +882,18 @@ function getPrintifyInStock(product: any) {
   return getPrintifyVariants(product).some((variant: any) => variant?.is_enabled !== false && variant?.is_available !== false);
 }
 
+function getPrintifyImageUrls(product: any) {
+  const urls = (Array.isArray(product?.images) ? product.images : [])
+    .map((image: any) => String(image?.src || "").trim())
+    .filter((url: string) => /^https?:\/\//i.test(url));
+  return Array.from(new Set<string>(urls)).slice(0, 24);
+}
+
+function serializeProductImages(urls: string[]) {
+  if (urls.length <= 1) return urls[0] || "";
+  return JSON.stringify(urls);
+}
+
 function decodeHtmlEntities(value: string) {
   return value
     .replace(/&nbsp;/gi, " ")
@@ -918,7 +930,7 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   if (!printifyProductId) throw new Error("Printify product is missing an ID");
   const visible = isPrintifyProductVisible(product);
   const price = getPrintifyPrice(product);
-  const imageUrl = product.images?.[0]?.src || "";
+  const imageUrl = serializeProductImages(getPrintifyImageUrls(product));
   const sizes = getPrintifySizes(product);
   const db = await getDb();
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
