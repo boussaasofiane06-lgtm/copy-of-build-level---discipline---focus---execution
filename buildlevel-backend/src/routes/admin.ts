@@ -170,6 +170,11 @@ const productSchema = z.object({
 router.post("/products", requireAdmin, async (req: Request, res: Response) => {
   try {
     const data = productSchema.parse(req.body);
+    if (!data.published) {
+      data.hidden = true;
+      data.inStock = false;
+      data.featured = false;
+    }
     const db = await getDb();
     await db.insert(products).values({
       name: data.name,
@@ -201,6 +206,14 @@ router.put("/products/:id", requireAdmin, async (req: Request, res: Response) =>
     const data = productSchema.partial().parse(req.body);
     const db = await getDb();
     const updateData: Record<string, unknown> = { ...data, updatedAt: new Date() };
+    if (data.published === false) {
+      updateData.hidden = true;
+      updateData.inStock = false;
+      updateData.featured = false;
+    } else if (data.published === true && data.hidden === undefined) {
+      updateData.hidden = false;
+      updateData.delisted = false;
+    }
     if (data.price !== undefined) updateData.price = String(data.price);
     if (data.compareAtPrice !== undefined) updateData.compareAtPrice = data.compareAtPrice ? String(data.compareAtPrice) : null;
     await db.update(products).set(updateData).where(eq(products.id, id));
@@ -983,6 +996,7 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   const sizes = getPrintifySizes(product);
   const db = await getDb();
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  const locallyHidden = existing.length > 0 && (existing[0].hidden === true || existing[0].published === false);
   const values = {
     name: product.title || "Printify Product",
     description: cleanPrintifyDescription(product.description),
@@ -991,10 +1005,10 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
     sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
     imageUrl,
     badge: existing[0]?.badge || (visible ? "New Release" : "Coming Soon"),
-    inStock: visible && getPrintifyInStock(product),
-    published: visible,
-    hidden: !visible,
-    delisted: !visible,
+    inStock: locallyHidden ? false : visible && getPrintifyInStock(product),
+    published: locallyHidden ? false : visible,
+    hidden: locallyHidden ? true : !visible,
+    delisted: locallyHidden ? false : !visible,
     featured: existing[0]?.featured ?? false,
     sortOrder: existing[0]?.sortOrder ?? 0,
     printifyProductId,

@@ -359,6 +359,7 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   const sizes = getPrintifySizes(product);
   const db = await getDb();
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  const locallyHidden = existing.length > 0 && (existing[0].hidden === true || existing[0].published === false);
   const values = {
     name: product.title || "Printify Product",
     description: cleanPrintifyDescription(product.description),
@@ -367,10 +368,10 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
     sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
     imageUrl,
     badge: existing[0]?.badge || (visible ? "New Release" : "Coming Soon"),
-    inStock: visible && getPrintifyInStock(product),
-    published: visible,
-    hidden: !visible,
-    delisted: !visible,
+    inStock: locallyHidden ? false : visible && getPrintifyInStock(product),
+    published: locallyHidden ? false : visible,
+    hidden: locallyHidden ? true : !visible,
+    delisted: locallyHidden ? false : !visible,
     featured: existing[0]?.featured ?? false,
     sortOrder: existing[0]?.sortOrder ?? 0,
     printifyProductId,

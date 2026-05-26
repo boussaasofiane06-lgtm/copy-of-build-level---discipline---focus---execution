@@ -154,6 +154,14 @@ export default function Admin() {
         data.status === "limited-edition" ? "Limited Edition" : data.badge;
       data.badge = statusBadge || data.badge;
       data.inStock = data.status === "coming-soon" ? false : data.inStock;
+      if (!data.published) {
+        (data as any).hidden = true;
+        data.inStock = false;
+        data.featured = false;
+      } else {
+        (data as any).hidden = false;
+        (data as any).delisted = false;
+      }
       delete (data as any).status;
       if (!data.name.trim()) throw new Error("Product name is required");
       if (!Number.isFinite(data.price) || data.price <= 0) throw new Error("Product price must be greater than 0");
