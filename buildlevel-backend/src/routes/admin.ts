@@ -882,6 +882,32 @@ function getPrintifyInStock(product: any) {
   return getPrintifyVariants(product).some((variant: any) => variant?.is_enabled !== false && variant?.is_available !== false);
 }
 
+function decodeHtmlEntities(value: string) {
+  return value
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, "\"")
+    .replace(/&#39;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function cleanPrintifyDescription(value?: string | null) {
+  if (!value) return "";
+  return decodeHtmlEntities(value)
+    .replace(/<table[\s\S]*?<\/table>/gi, " ")
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|li|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim()
+    .slice(0, 5000);
+}
+
 async function syncPrintifyProductToStore(printifyProductOrId: string | Record<string, any>) {
   const { shopId } = await getPrintifyCredentials();
   if (!shopId) throw new Error("Printify shop ID not configured");
@@ -898,7 +924,7 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
   const values = {
     name: product.title || "Printify Product",
-    description: product.description || "",
+    description: cleanPrintifyDescription(product.description),
     price,
     category: existing[0]?.category || "mens-t-shirts",
     sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
@@ -1112,11 +1138,18 @@ router.get("/printify/sync", requireAdmin, async (req: Request, res: Response) =
     const { apiKey, shopId } = await getPrintifyCredentials();
     if (!apiKey || !shopId) { res.status(400).json({ error: 'Printify not configured' }); return; }
     const syncResult = await syncPrintifyStoreToWebsite();
-    const ordersData = await printifyRequest(`/shops/${shopId}/orders.json?page=1&limit=20`);
+    let ordersData: any = { data: [] };
+    let ordersError = "";
+    try {
+      ordersData = await printifyRequest(`/shops/${shopId}/orders.json?page=1&limit=20`);
+    } catch (error: any) {
+      ordersError = error?.message || "Printify orders could not be loaded";
+    }
     res.json({
       success: true,
       products: { data: syncResult.products },
       orders: ordersData,
+      ordersError,
       summary: {
         ...syncResult.summary,
         orders: ordersData?.data?.length ?? 0,
