@@ -303,6 +303,20 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     }
   };
 
+  const setupShopifyWebhooks = async () => {
+    setTesting("shopify-webhooks-setup");
+    try {
+      const result = await adminApi.setupShopifyWebhooks();
+      const failed = result.results.filter(item => item.status === "failed");
+      showToast(failed.length ? `Shopify webhooks partially installed (${failed.length} failed)` : "Shopify auto-publish webhooks installed");
+      loadIntegrations();
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Shopify webhook setup failed");
+    } finally {
+      setTesting("");
+    }
+  };
+
   const runPrintifyAction = async (action: "products" | "orders" | "inventory" | "sync") => {
     setTesting(`printify-${action}`);
     try {
@@ -477,6 +491,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
                 {integrations?.shopify.disabled ? "Reconnect Shopify" : "Save Shopify"}
               </button>
               <button type="button" onClick={() => testProvider("shopify")} className="btn btn-outline btn-sm">Validate</button>
+              <button type="button" onClick={setupShopifyWebhooks} className="btn btn-outline btn-sm" disabled={testing === "shopify-webhooks-setup"}>Auto Publish Webhooks</button>
             </div>
             {integrations?.shopify.disabled && (
               <p style={{ color: "var(--text3)", fontSize: "0.74rem" }}>

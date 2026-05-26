@@ -137,15 +137,62 @@ function normalizeShopifyUrl(storeUrl: string) {
   return storeUrl.startsWith("http") ? storeUrl : `https://${storeUrl}`;
 }
 
-async function shopifyRequest(path: string) {
+async function shopifyRequest(path: string, method = "GET", body?: unknown) {
   const { storeUrl, apiKey } = await getShopifyCredentials();
   if (!storeUrl || !apiKey) throw new Error("Shopify not configured");
   const response = await fetch(`${normalizeShopifyUrl(storeUrl)}/admin/api/${SHOPIFY_API_VERSION}${path}`, {
-    headers: { "X-Shopify-Access-Token": apiKey },
+    method,
+    headers: { "X-Shopify-Access-Token": apiKey, "Content-Type": "application/json" },
+    body: body ? JSON.stringify(body) : undefined,
   });
   const data = await response.json().catch(() => ({}));
-  if (!response.ok) throw new Error(`Shopify API error: ${response.status}`);
+  if (!response.ok) throw new Error(`Shopify API error ${response.status}: ${typeof data?.errors === "string" ? data.errors : JSON.stringify(data).slice(0, 300)}`);
   return data;
+}
+
+async function syncShopifyProductToStore(shopifyProduct: any) {
+  const shopifyProductId = String(shopifyProduct?.id || "").trim();
+  if (!shopifyProductId) throw new Error("Shopify product is missing an ID");
+  const db = await getDb();
+  const existing = await db.select().from(products).where(eq(products.shopifyProductId, shopifyProductId)).limit(1);
+  const variants = Array.isArray(shopifyProduct?.variants) ? shopifyProduct.variants : [];
+  const firstVariant = variants[0];
+  const sizes = variants.map((variant: any) => String(variant.title || variant.option1 || "Default").trim()).filter(Boolean).slice(0, 24);
+  const price = firstVariant?.price ? Number(firstVariant.price).toFixed(2) : "29.99";
+  const imageUrl = shopifyProduct?.image?.src || shopifyProduct?.images?.[0]?.src || "";
+  const values = {
+    name: shopifyProduct.title || "Shopify Product",
+    description: String(shopifyProduct.body_html || "").replace(/<[^>]+>/g, " ").replace(/\s{2,}/g, " ").trim().slice(0, 2500),
+    price,
+    category: existing[0]?.category || "mens-t-shirts",
+    sizes: sizes.length ? sizes : ["Default"],
+    imageUrl,
+    badge: existing[0]?.badge || "New Release",
+    inStock: true,
+    published: String(shopifyProduct.status || "active") === "active",
+    hidden: String(shopifyProduct.status || "active") !== "active",
+    delisted: false,
+    featured: existing[0]?.featured ?? false,
+    sortOrder: existing[0]?.sortOrder ?? 0,
+    shopifyProductId,
+    shopifyVariantId: firstVariant?.id ? String(firstVariant.id) : null,
+    updatedAt: new Date(),
+  };
+  if (existing.length > 0) {
+    await db.update(products).set(values).where(eq(products.shopifyProductId, shopifyProductId));
+    return { productId: existing[0].id, shopifyProductId, action: values.published ? "updated" : "hidden" };
+  }
+  await db.insert(products).values(values);
+  const [created] = await db.select({ id: products.id }).from(products).where(eq(products.shopifyProductId, shopifyProductId)).limit(1);
+  return { productId: created?.id ?? 0, shopifyProductId, action: "created" };
+}
+
+async function delistShopifyProduct(shopifyProductId: string) {
+  const db = await getDb();
+  const existing = await db.select().from(products).where(eq(products.shopifyProductId, shopifyProductId)).limit(1);
+  if (existing.length === 0) return { productId: 0, shopifyProductId, action: "ignored" };
+  await db.update(products).set({ published: false, hidden: true, delisted: true, inStock: false, badge: "Removed from Shopify", updatedAt: new Date() }).where(eq(products.shopifyProductId, shopifyProductId));
+  return { productId: existing[0].id, shopifyProductId, action: "delisted" };
 }
 
 async function printifyRequest(path: string) {
@@ -231,15 +278,22 @@ function isPrintifyProductVisible(product: any) {
 function getPrintifySizes(product: any) {
   const sizes: string[] = getPrintifyVariants(product)
     .filter((variant: any) => variant?.is_enabled !== false)
-    .map((variant: any) => String(variant.title || "").trim())
+    .map((variant: any) => JSON.stringify({
+      label: String(variant.title || "").trim(),
+      variantId: String(variant.id || "").trim(),
+      price: (Number(variant.price || 0) / 100).toFixed(2),
+    }))
     .filter(Boolean);
   return Array.from(new Set<string>(sizes)).slice(0, 24);
 }
 
 function getPrintifyPrice(product: any) {
   const variants = getPrintifyVariants(product);
-  const firstVariant = variants.find((variant: any) => variant?.is_enabled !== false) || variants[0];
-  return firstVariant ? (Number(firstVariant.price || 0) / 100).toFixed(2) : "29.99";
+  const activePrices = variants
+    .filter((variant: any) => variant?.is_enabled !== false && Number(variant.price || 0) > 0)
+    .map((variant: any) => Number(variant.price || 0));
+  const cents = activePrices.length ? Math.min(...activePrices) : Number(variants[0]?.price || 0);
+  return cents ? (cents / 100).toFixed(2) : "29.99";
 }
 
 function getPrintifyInStock(product: any) {
@@ -438,6 +492,17 @@ function getBackendWebhookBaseUrl(req: Request) {
   const protocol = req.headers["x-forwarded-proto"] || req.protocol || "https";
   const host = req.headers["x-forwarded-host"] || req.headers.host;
   return `${protocol}://${host}`;
+}
+
+function getShopifyWebhookSecret() {
+  return cleanEnv(process.env.SHOPIFY_WEBHOOK_SECRET || process.env.SHOPIFY_SYNC_SECRET);
+}
+
+function isShopifyWebhookAuthorized(req: Request) {
+  const expected = getShopifyWebhookSecret();
+  if (!expected) return true;
+  const provided = cleanEnv(String(req.query.secret || req.headers["x-shopify-webhook-secret"] || ""));
+  return provided === expected;
 }
 
 function isPrintifyAutoSyncAuthorized(req: Request) {
@@ -900,6 +965,44 @@ export function registerRestCompatRoutes(app: Express) {
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/shopify/webhooks/setup", requireAdminRest, async (req, res) => {
+    try {
+      const secret = getShopifyWebhookSecret();
+      if (!secret) { res.status(400).json({ error: "Set SHOPIFY_WEBHOOK_SECRET or SHOPIFY_SYNC_SECRET in Render before installing webhooks" }); return; }
+      const webhookUrl = `${getBackendWebhookBaseUrl(req)}/api/shopify/webhook?secret=${encodeURIComponent(secret)}`;
+      const topics = ["products/create", "products/update", "products/delete"];
+      const existingData = await shopifyRequest(`/webhooks.json?limit=250`);
+      const existing = Array.isArray(existingData?.webhooks) ? existingData.webhooks : [];
+      const results = [];
+      for (const topic of topics) {
+        const alreadyInstalled = existing.some((webhook: any) => webhook?.topic === topic && webhook?.address === webhookUrl);
+        if (alreadyInstalled) { results.push({ topic, status: "already-installed" }); continue; }
+        try {
+          const created = await shopifyRequest(`/webhooks.json`, "POST", { webhook: { topic, address: webhookUrl, format: "json" } });
+          results.push({ topic, status: "installed", id: created?.webhook?.id });
+        } catch (error: any) {
+          results.push({ topic, status: "failed", error: error?.message || "Webhook install failed" });
+        }
+      }
+      res.json({ success: results.some(result => result.status === "installed" || result.status === "already-installed"), webhookUrl, results });
+    } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/shopify/webhook", async (req, res) => {
+    try {
+      if (!isShopifyWebhookAuthorized(req)) { res.status(401).json({ error: "Invalid Shopify webhook secret" }); return; }
+      const topic = String(req.headers["x-shopify-topic"] || req.body?.topic || "").trim();
+      const shopifyProductId = String(req.body?.id || req.body?.product_id || "").trim();
+      let result: unknown;
+      if (topic.includes("delete") && shopifyProductId) result = await delistShopifyProduct(shopifyProductId);
+      else result = await syncShopifyProductToStore(req.body);
+      res.json({ success: true, topic, shopifyProductId, result });
+    } catch (e: any) {
+      console.error("[Shopify Webhook] Failed:", e);
+      res.status(500).json({ error: e.message });
     }
   });
 

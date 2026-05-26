@@ -57,6 +57,7 @@ type CheckoutLineItem = {
 type PhysicalCheckoutItem = {
   productId?: number | string;
   size?: string;
+  variantId?: number | string;
   name: string;
   priceUSD: number;
   quantity: number;
@@ -66,6 +67,7 @@ type PhysicalCheckoutItem = {
 type PhysicalFulfillmentItem = {
   productId: number;
   size: string;
+  variantId?: string;
   quantity: number;
 };
 
@@ -106,8 +108,10 @@ function buildPhysicalCheckoutMetadata(items: PhysicalCheckoutItem[]) {
   items.slice(0, MAX_PHYSICAL_METADATA_ITEMS).forEach((item, index) => {
     const productId = cleanText(item.productId);
     const size = cleanText(item.size);
+    const variantId = cleanText(item.variantId);
     metadata[`item_${index}_product_id`] = productId;
     metadata[`item_${index}_size`] = size.slice(0, 100);
+    metadata[`item_${index}_variant_id`] = variantId.slice(0, 100);
     metadata[`item_${index}_quantity`] = String(Math.max(1, Number(item.quantity || 1)));
   });
 
@@ -127,6 +131,7 @@ function readPhysicalFulfillmentItems(metadata?: Stripe.Metadata | null): Physic
       productId,
       quantity,
       size: cleanText(metadata[`item_${index}_size`]),
+      variantId: cleanText(metadata[`item_${index}_variant_id`]),
     });
   }
 
@@ -176,7 +181,20 @@ function normalizeOption(value?: unknown) {
   return cleanText(value).toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
+function parseSelectedVariant(value: string) {
+  if (!value.trim().startsWith("{")) return { label: value, variantId: "" };
+  try {
+    const parsed = JSON.parse(value);
+    return { label: cleanText(parsed?.label || value), variantId: cleanText(parsed?.variantId) };
+  } catch {
+    return { label: value, variantId: "" };
+  }
+}
+
 function variantMatchesSize(variant: any, selectedSize: string) {
+  const selected = parseSelectedVariant(selectedSize);
+  if (selected.variantId && String(variant?.id) === selected.variantId) return true;
+  selectedSize = selected.label;
   if (!selectedSize) return true;
   const normalizedSize = normalizeOption(selectedSize);
   const normalizedTitle = normalizeOption(variant?.title);
@@ -192,11 +210,12 @@ function variantMatchesSize(variant: any, selectedSize: string) {
   return optionValues.includes(normalizedSize);
 }
 
-async function resolvePrintifyVariantId(printifyProductId: string, selectedSize: string) {
+async function resolvePrintifyVariantId(printifyProductId: string, selectedSize: string, selectedVariantId?: string) {
   const printifyProduct = await printifyRequest(`/shops/${(await getPrintifyCredentials()).shopId}/products/${printifyProductId}.json`);
   const variants = Array.isArray(printifyProduct?.variants) ? printifyProduct.variants : [];
   const activeVariants = variants.filter((variant: any) => variant?.is_enabled !== false && variant?.is_available !== false);
   const candidates = activeVariants.length ? activeVariants : variants;
+  if (selectedVariantId && candidates.some((variant: any) => String(variant?.id) === selectedVariantId)) return selectedVariantId;
   const match = candidates.find((variant: any) => variantMatchesSize(variant, selectedSize));
 
   if (!match) {
@@ -255,7 +274,7 @@ async function createPrintifyOrderFromStripeSession(session: Stripe.Checkout.Ses
     const [product] = await db.select().from(products).where(eq(products.id, item.productId)).limit(1);
     if (!product?.printifyProductId) continue;
 
-    const variantId = await resolvePrintifyVariantId(product.printifyProductId, item.size);
+    const variantId = await resolvePrintifyVariantId(product.printifyProductId, item.size, item.variantId);
     lineItems.push({
       product_id: product.printifyProductId,
       variant_id: typeof variantId === "number" ? variantId : String(variantId),
@@ -358,6 +377,7 @@ router.post("/checkout", async (req: Request, res: Response) => {
     const checkoutItems: PhysicalCheckoutItem[] = items.map((item: any) => ({
       productId: item.productId,
       size: item.size,
+      variantId: item.variantId,
       name: cleanText(item.name),
       image: item.image,
       priceUSD: Number(item.priceUSD),

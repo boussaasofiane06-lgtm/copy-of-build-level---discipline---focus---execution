@@ -279,6 +279,7 @@ export const adminApi = {
   getShopifyInventory: () => api.get<unknown>("/admin/shopify/inventory").then(r => r.data),
   getShopifyWebhooks: () => api.get<unknown>("/admin/shopify/webhooks").then(r => r.data),
   syncShopify: () => api.get<ExternalSyncResponse>("/admin/shopify/sync").then(r => r.data),
+  setupShopifyWebhooks: () => api.post<{ success: boolean; webhookUrl: string; results: Array<{ topic: string; status: string; error?: string }> }>("/admin/shopify/webhooks/setup").then(r => r.data),
   savePrintifyCredentials: (data: { apiKey: string; shopId: string }) => api.post<{ success: true }>("/admin/printify/credentials", data).then(r => r.data),
   getPrintifyProducts: () => api.get<unknown>("/admin/printify/products").then(r => r.data),
   getPrintifyOrders: () => api.get<unknown>("/admin/printify/orders").then(r => r.data),

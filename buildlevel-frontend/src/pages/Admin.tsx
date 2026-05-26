@@ -707,6 +707,9 @@ export default function Admin() {
                           <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {p.productType} · {p.published ? "Published" : "Draft"}</div>
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
+                          {p.published && (
+                            <a href="/digital" target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">View</a>
+                          )}
                           <button onClick={() => openEditDigital(p)} className="btn btn-outline btn-sm">Edit</button>
                           <button onClick={async () => { if (confirm("Delete?")) { await adminApi.deleteDigitalProduct(p.id); loadData(); showToast("Deleted"); } }} className="btn btn-sm" style={{ background: "none", border: "1px solid var(--red)", color: "var(--red)" }}>Delete</button>
                         </div>

@@ -16,6 +16,13 @@ import {
 
 interface CartItem { product: Product; quantity: number; size: string; }
 
+type ProductOption = {
+  value: string;
+  label: string;
+  price?: number;
+  variantId?: string;
+};
+
 const storageImageUrl = (value?: string | null) => {
   if (!value) return "";
   if (value.startsWith("storage:")) {
@@ -42,6 +49,47 @@ const getProductImages = (imageUrl?: string | null) => {
 };
 
 const getProductCoverImage = (product: Product) => getProductImages(product.imageUrl)[0] || "";
+
+const parseProductOption = (value: string, fallbackPrice: number): ProductOption => {
+  if (value.trim().startsWith("{")) {
+    try {
+      const parsed = JSON.parse(value);
+      const price = Number.parseFloat(String(parsed?.price || ""));
+      return {
+        value,
+        label: String(parsed?.label || value),
+        price: Number.isFinite(price) && price > 0 ? price : fallbackPrice,
+        variantId: parsed?.variantId ? String(parsed.variantId) : undefined,
+      };
+    } catch {
+      return { value, label: value, price: fallbackPrice };
+    }
+  }
+  return { value, label: value, price: fallbackPrice };
+};
+
+const getProductOptions = (product: Product) => {
+  const basePrice = Number.parseFloat(product.price);
+  const fallbackPrice = Number.isFinite(basePrice) ? basePrice : 0;
+  return (Array.isArray(product.sizes) ? product.sizes : []).map(size => parseProductOption(size, fallbackPrice));
+};
+
+const getSelectedProductOption = (product: Product, selectedSizes: Record<number, string>) => {
+  const options = getProductOptions(product);
+  const selectedValue = selectedSizes[product.id] || options[0]?.value || "";
+  return options.find(option => option.value === selectedValue) || options[0] || parseProductOption(selectedValue, Number.parseFloat(product.price));
+};
+
+const getProductDisplayPrice = (product: Product, selectedSizes: Record<number, string>) => {
+  const options = getProductOptions(product).filter(option => Number.isFinite(option.price || NaN) && (option.price || 0) > 0);
+  const selected = getSelectedProductOption(product, selectedSizes);
+  if (selected?.price) return `$${selected.price.toFixed(2)}`;
+  if (options.length > 1) {
+    const prices = Array.from(new Set(options.map(option => option.price as number))).sort((a, b) => a - b);
+    if (prices.length > 1) return `$${prices[0].toFixed(2)} - $${prices[prices.length - 1].toFixed(2)}`;
+  }
+  return `$${Number.parseFloat(product.price).toFixed(2)}`;
+};
 
 export default function Shop() {
   const [products, setProducts] = useState<Product[]>([]);
@@ -133,8 +181,8 @@ export default function Shop() {
   const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => p.category === category);
 
   const addToCart = (product: Product) => {
-    const sizes = Array.isArray(product.sizes) ? product.sizes : [];
-    const size = selectedSizes[product.id] || (sizes[0] ?? "");
+    const options = getProductOptions(product);
+    const size = selectedSizes[product.id] || (options[0]?.value ?? "");
     setCart(prev => {
       const existing = prev.find(i => i.product.id === product.id && i.size === size);
       if (existing) return prev.map(i => i.product.id === product.id && i.size === size ? { ...i, quantity: i.quantity + 1 } : i);
@@ -143,7 +191,7 @@ export default function Shop() {
     setCartOpen(true);
   };
 
-  const cartTotal = cart.reduce((sum, i) => sum + parseFloat(i.product.price) * i.quantity, 0);
+  const cartTotal = cart.reduce((sum, i) => sum + (parseProductOption(i.size, parseFloat(i.product.price)).price || parseFloat(i.product.price)) * i.quantity, 0);
 
   const updateCartItemQuantity = (productId: number, size: string, quantity: number) => {
     setCart(prev => prev.map(item =>
@@ -162,10 +210,11 @@ export default function Shop() {
     setCheckingOut(true);
     try {
       const items = cart.map(i => ({
+        variantId: parseProductOption(i.size, parseFloat(i.product.price)).variantId,
         productId: i.product.id,
-        name: `${i.product.name}${i.size ? ` (${i.size})` : ""}`,
+        name: `${i.product.name}${i.size ? ` (${parseProductOption(i.size, parseFloat(i.product.price)).label})` : ""}`,
         size: i.size,
-        priceUSD: parseFloat(i.product.price),
+        priceUSD: parseProductOption(i.size, parseFloat(i.product.price)).price || parseFloat(i.product.price),
         quantity: i.quantity,
         image: getProductCoverImage(i.product).startsWith("http") ? getProductCoverImage(i.product) : undefined,
       }));
@@ -200,9 +249,9 @@ export default function Shop() {
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: "0.9rem", marginBottom: 4 }}>{item.product.name}</p>
-                {item.size && <p style={{ fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4 }}>Size: {item.size}</p>}
+                {item.size && <p style={{ fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4 }}>Option: {parseProductOption(item.size, parseFloat(item.product.price)).label}</p>}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: "0.9rem" }}>${(parseFloat(item.product.price) * item.quantity).toFixed(2)}</span>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: "0.9rem" }}>${(((parseProductOption(item.size, parseFloat(item.product.price)).price || parseFloat(item.product.price)) * item.quantity)).toFixed(2)}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button
                       onClick={() => updateCartItemQuantity(item.product.id, item.size, item.quantity - 1)}
@@ -304,19 +353,19 @@ export default function Shop() {
               {getProductStatus(viewProduct) && <span className="badge badge-red">{getProductStatus(viewProduct)}</span>}
               <h2 style={{ margin: "14px 0 10px", fontSize: "1.35rem" }}>{viewProduct.name}</h2>
               <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>${parseFloat(viewProduct.price).toFixed(2)}</span>
+                <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>{getProductDisplayPrice(viewProduct, selectedSizes)}</span>
                 {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
               </div>
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
-              {(Array.isArray(viewProduct.sizes) ? viewProduct.sizes : []).length > 0 && (
+              {getProductOptions(viewProduct).length > 0 && (
                 <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-                  {viewProduct.sizes.map(size => (
-                    <button key={size} onClick={() => setSelectedSizes(prev => ({ ...prev, [viewProduct.id]: size }))}
+                  {getProductOptions(viewProduct).map(option => (
+                    <button key={option.value} onClick={() => setSelectedSizes(prev => ({ ...prev, [viewProduct.id]: option.value }))}
                       style={{ padding: "6px 12px", fontSize: "0.72rem", fontFamily: "var(--font-display)", letterSpacing: "0.05em",
-                        background: selectedSizes[viewProduct.id] === size ? "var(--red)" : "var(--bg3)",
-                        color: selectedSizes[viewProduct.id] === size ? "#fff" : "var(--text2)",
+                        background: (selectedSizes[viewProduct.id] || getProductOptions(viewProduct)[0]?.value) === option.value ? "var(--red)" : "var(--bg3)",
+                        color: (selectedSizes[viewProduct.id] || getProductOptions(viewProduct)[0]?.value) === option.value ? "#fff" : "var(--text2)",
                         border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
-                      {size}
+                      {option.label}{option.price ? ` - $${option.price.toFixed(2)}` : ""}
                     </button>
                   ))}
                 </div>
@@ -416,18 +465,18 @@ export default function Shop() {
                   </div>
                   <h3 style={{ fontSize: "0.95rem", marginBottom: 6 }}>{p.name}</h3>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                    <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>${parseFloat(p.price).toFixed(2)}</span>
+                    <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>{getProductDisplayPrice(p, selectedSizes)}</span>
                     {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
                   </div>
-                  {(Array.isArray(p.sizes) ? p.sizes : []).length > 0 && (
+                  {getProductOptions(p).length > 0 && (
                     <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-                      {(Array.isArray(p.sizes) ? p.sizes : []).map(s => (
-                        <button key={s} onClick={() => setSelectedSizes(prev => ({ ...prev, [p.id]: s }))}
+                      {getProductOptions(p).map(option => (
+                        <button key={option.value} onClick={() => setSelectedSizes(prev => ({ ...prev, [p.id]: option.value }))}
                           style={{ padding: "4px 10px", fontSize: "0.7rem", fontFamily: "var(--font-display)", letterSpacing: "0.05em",
-                            background: selectedSizes[p.id] === s ? "var(--red)" : "var(--bg3)",
-                            color: selectedSizes[p.id] === s ? "#fff" : "var(--text2)",
+                            background: (selectedSizes[p.id] || getProductOptions(p)[0]?.value) === option.value ? "var(--red)" : "var(--bg3)",
+                            color: (selectedSizes[p.id] || getProductOptions(p)[0]?.value) === option.value ? "#fff" : "var(--text2)",
                             border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
-                          {s}
+                          {option.label}{option.price ? ` - $${option.price.toFixed(2)}` : ""}
                         </button>
                       ))}
                     </div>
