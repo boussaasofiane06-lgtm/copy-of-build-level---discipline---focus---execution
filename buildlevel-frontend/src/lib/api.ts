@@ -184,6 +184,17 @@ export const publicApi = {
     api.post<{ url: string }>("/stripe/checkout", { items, currency, customerEmail }).then(r => r.data),
   createDigitalCheckout: (productId: number, customerEmail?: string) =>
     api.post<{ url: string }>("/stripe/digital-checkout", { productId, customerEmail }).then(r => r.data),
+  getDigitalPurchaseAccess: (sessionId: string) =>
+    api.get<{
+      success: true;
+      purchaseId: number;
+      productId: number;
+      productName: string;
+      email: string;
+      downloadUrl: string;
+      fileName?: string | null;
+      created: boolean;
+    }>(`/stripe/digital-session/${encodeURIComponent(sessionId)}`).then(r => r.data),
   getSocialLinks: () => api.get<{ email: string; links: PublicSocialLink[] }>("/social-links").then(r => r.data),
   getTidioConfig: () => api.get<{ enabled: boolean; publicKey: string; chatControls: string }>("/tidio/config").then(r => r.data),
   getMaintenanceConfig: () => api.get<MaintenanceConfig>("/maintenance").then(r => r.data),

@@ -4,6 +4,7 @@ import crypto from "crypto";
 import { eq } from "drizzle-orm";
 import { getDb } from "../db/index.js";
 import { digitalProducts, digitalPurchases, products, siteSettings } from "../db/schema.js";
+import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 
 const router = Router();
 const MAX_PHYSICAL_METADATA_ITEMS = 15;
@@ -71,6 +72,18 @@ type PhysicalFulfillmentItem = {
   quantity: number;
 };
 
+type DigitalAccessResult = {
+  purchaseId: number;
+  productId: number;
+  productName: string;
+  email: string;
+  downloadToken: string;
+  downloadUrl: string;
+  fileName: string | null;
+  stripePaymentIntentId: string;
+  created: boolean;
+};
+
 function isStripeImageUrl(value?: string) {
   return !!value && /^https?:\/\//i.test(value);
 }
@@ -96,6 +109,110 @@ function logStripeCheckoutFailure(context: Record<string, unknown>, error: unkno
     ? { message: error.message, status: error.status, requestId: error.requestId, stripeError: error.stripeError }
     : { message: error instanceof Error ? error.message : String(error) };
   console.error("[Stripe Checkout] Failed to create session", { ...context, ...details });
+}
+
+function getSessionCustomerEmail(session: Stripe.Checkout.Session) {
+  return cleanText(session.customer_details?.email || session.customer_email);
+}
+
+function getDigitalProductIdFromSession(session: Stripe.Checkout.Session) {
+  const metadata = session.metadata || {};
+  const productId = Number(metadata.productId || metadata.digitalProductId || metadata.pdfId);
+  if (!Number.isInteger(productId) || productId <= 0) {
+    throw new Error(`Missing digital product metadata on Stripe session ${session.id}`);
+  }
+  return productId;
+}
+
+function getStripePaymentReference(session: Stripe.Checkout.Session) {
+  return cleanText(typeof session.payment_intent === "string" ? session.payment_intent : session.id);
+}
+
+async function getDigitalDownloadUrl(product: typeof digitalProducts.$inferSelect) {
+  if (product.fileKey) return getProtectedDownloadUrl(product.fileKey);
+  if (product.fileUrl) return product.fileUrl;
+  throw new Error(`Digital product ${product.id} has no downloadable file configured`);
+}
+
+async function createOrGetDigitalAccess(session: Stripe.Checkout.Session, source: "webhook" | "success-page"): Promise<DigitalAccessResult> {
+  console.log("[Stripe Digital Access] Processing session", {
+    source,
+    sessionId: session.id,
+    paymentStatus: session.payment_status,
+    customerEmail: getSessionCustomerEmail(session),
+    metadata: session.metadata,
+  });
+
+  if (session.payment_status !== "paid") {
+    throw new Error(`Stripe session ${session.id} is not paid (payment_status=${session.payment_status})`);
+  }
+
+  const productId = getDigitalProductIdFromSession(session);
+  const email = getSessionCustomerEmail(session);
+  if (!email) throw new Error(`Stripe session ${session.id} is missing customer email`);
+
+  const db = await getDb();
+  const [product] = await db.select().from(digitalProducts).where(eq(digitalProducts.id, productId)).limit(1);
+  if (!product) throw new Error(`Digital product ${productId} not found`);
+
+  const stripePaymentIntentId = getStripePaymentReference(session);
+  const existing = await db
+    .select()
+    .from(digitalPurchases)
+    .where(eq(digitalPurchases.stripePaymentIntentId, stripePaymentIntentId))
+    .limit(1);
+
+  let purchase = existing[0];
+  let created = false;
+
+  if (!purchase) {
+    const token = crypto.randomBytes(32).toString("hex");
+    await db.insert(digitalPurchases).values({
+      productId,
+      email,
+      stripePaymentIntentId,
+      downloadToken: token,
+      createdAt: new Date(),
+    });
+    const [createdPurchase] = await db
+      .select()
+      .from(digitalPurchases)
+      .where(eq(digitalPurchases.downloadToken, token))
+      .limit(1);
+    purchase = createdPurchase;
+    created = true;
+    console.log("[Stripe Digital Access] Order created and access granted", {
+      source,
+      sessionId: session.id,
+      productId,
+      email,
+      purchaseId: purchase?.id,
+      stripePaymentIntentId,
+    });
+  } else {
+    console.log("[Stripe Digital Access] Existing access found", {
+      source,
+      sessionId: session.id,
+      productId,
+      email,
+      purchaseId: purchase.id,
+      stripePaymentIntentId,
+    });
+  }
+
+  if (!purchase) throw new Error("Failed to create digital purchase record");
+
+  return {
+    purchaseId: purchase.id,
+    productId,
+    productName: product.name,
+    email: purchase.email || email,
+    downloadToken: purchase.downloadToken,
+    downloadUrl: await getDigitalDownloadUrl(product),
+    fileName: product.fileName,
+    stripePaymentIntentId,
+    created,
+  };
 }
 
 function buildPhysicalCheckoutMetadata(items: PhysicalCheckoutItem[]) {
@@ -457,8 +574,13 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
         quantity: 1,
       }],
       customerEmail,
-      metadata: { productId: String(parsedProductId), type: "digital" },
-      successUrl: `${origin}/digital?purchased=true&session_id={CHECKOUT_SESSION_ID}`,
+      metadata: {
+        productId: String(parsedProductId),
+        digitalProductId: String(parsedProductId),
+        pdfId: String(parsedProductId),
+        type: "digital",
+      },
+      successUrl: `${origin}/digital/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/digital`,
     });
 
@@ -474,6 +596,32 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
   }
 });
 
+router.get("/digital-session/:sessionId", async (req: Request, res: Response) => {
+  try {
+    const sessionId = cleanText(req.params.sessionId);
+    if (!sessionId.startsWith("cs_")) {
+      res.status(400).json({ error: "Invalid Stripe checkout session ID" });
+      return;
+    }
+    const stripe = getStripe();
+    const session = await stripe.checkout.sessions.retrieve(sessionId);
+    const access = await createOrGetDigitalAccess(session, "success-page");
+    res.json({
+      success: true,
+      purchaseId: access.purchaseId,
+      productId: access.productId,
+      productName: access.productName,
+      email: access.email,
+      downloadUrl: access.downloadUrl,
+      fileName: access.fileName,
+      created: access.created,
+    });
+  } catch (e: any) {
+    console.error("[Stripe Digital Access] Failed session lookup:", e);
+    res.status(400).json({ error: e.message });
+  }
+});
+
 // ─── Stripe webhook ───────────────────────────────────────────────────────────
 router.post("/webhook", async (req: Request, res: Response) => {
   const sig = req.headers["stripe-signature"] as string;
@@ -482,35 +630,34 @@ router.post("/webhook", async (req: Request, res: Response) => {
   let event: Stripe.Event;
   try {
     const stripe = getStripe();
-    if (webhookSecret && sig) {
-      event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
-    } else {
-      event = JSON.parse(req.body.toString());
+    if (!webhookSecret) {
+      res.status(500).json({ error: "STRIPE_WEBHOOK_SECRET is not configured" });
+      return;
     }
+    if (!sig) {
+      res.status(400).json({ error: "Missing Stripe signature header" });
+      return;
+    }
+    event = stripe.webhooks.constructEvent(req.body, sig, webhookSecret);
   } catch (e: any) {
+    console.error("[Stripe Webhook] Signature verification failed:", e.message);
     res.status(400).json({ error: `Webhook error: ${e.message}` });
     return;
   }
 
-  // Handle test events
-  if (event.id.startsWith("evt_test_")) {
-    res.json({ verified: true });
-    return;
-  }
+  console.log("[Stripe Webhook] Received", { eventId: event.id, eventType: event.type, liveMode: event.livemode });
 
   if (event.type === "checkout.session.completed") {
     const session = event.data.object as Stripe.Checkout.Session;
     if (session.metadata?.type === "digital") {
       try {
-        const db = await getDb();
-        const token = crypto.randomBytes(32).toString("hex");
-        await db.insert(digitalPurchases).values({
-          productId: parseInt(session.metadata.productId),
-          email: session.customer_email || "",
-          stripePaymentIntentId: session.payment_intent as string,
-          downloadToken: token,
-          createdAt: new Date(),
+        console.log("[Stripe Webhook] Digital checkout completed", {
+          sessionId: session.id,
+          customerEmail: getSessionCustomerEmail(session),
+          productId: session.metadata.productId || session.metadata.digitalProductId || session.metadata.pdfId,
+          paymentStatus: session.payment_status,
         });
+        await createOrGetDigitalAccess(session, "webhook");
       } catch (e) {
         console.error("[Webhook] Failed to record digital purchase:", e);
       }
