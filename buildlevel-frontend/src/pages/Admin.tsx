@@ -599,33 +599,41 @@ export default function Admin() {
                       </div>
                       <div><label style={labelStyle}>Price *</label><input style={inputStyle} type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm(f => ({ ...f, price: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Compare At Price</label><input style={inputStyle} type="number" step="0.01" value={productForm.compareAtPrice} onChange={e => setProductForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>
-                      <div>
+                      <div style={{ gridColumn: editProduct?.printifyProductId || editProduct?.shopifyProductId ? "1/-1" : undefined }}>
                         <label style={labelStyle}>Sizes / Variants</label>
                         {editProduct?.printifyProductId || editProduct?.shopifyProductId ? (
                           <>
                             <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
                               Edit customer-facing labels and prices. Variant IDs are preserved for checkout and fulfillment.
                             </p>
-                            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                            <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
                               {productVariantRows.map((row, index) => (
-                                <div key={`${row.variantId || row.label}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(160px, 1fr) 110px auto", gap: 8, alignItems: "center" }}>
-                                  <input
-                                    style={inputStyle}
-                                    value={row.label}
-                                    onChange={e => setProductVariantRows(rows => rows.map((item, i) => i === index ? { ...item, label: e.target.value } : item))}
-                                    placeholder="Variant label"
-                                  />
-                                  <input
-                                    style={inputStyle}
-                                    type="number"
-                                    min="0"
-                                    step="0.01"
-                                    value={row.price}
-                                    onChange={e => setProductVariantRows(rows => rows.map((item, i) => i === index ? { ...item, price: e.target.value } : item))}
-                                    placeholder="Price"
-                                  />
-                                  <button type="button" className="btn btn-outline btn-sm" onClick={() => setProductVariantRows(rows => rows.filter((_, i) => i !== index))}>Remove</button>
-                                  {row.variantId && <p style={{ gridColumn: "1/-1", color: "var(--text3)", fontSize: "0.68rem", marginTop: -4 }}>Variant ID: {row.variantId}</p>}
+                                <div key={`${row.variantId || row.label}-${index}`} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, background: "rgba(255,255,255,0.025)" }}>
+                                  <div style={{ display: "grid", gridTemplateColumns: "minmax(240px, 1fr) minmax(120px, 180px) auto", gap: 10, alignItems: "end" }}>
+                                    <div>
+                                      <label style={{ ...labelStyle, fontSize: "0.66rem" }}>Customer option label</label>
+                                      <input
+                                        style={inputStyle}
+                                        value={row.label}
+                                        onChange={e => setProductVariantRows(rows => rows.map((item, i) => i === index ? { ...item, label: e.target.value } : item))}
+                                        placeholder="Variant label"
+                                      />
+                                    </div>
+                                    <div>
+                                      <label style={{ ...labelStyle, fontSize: "0.66rem" }}>Price</label>
+                                      <input
+                                        style={inputStyle}
+                                        type="number"
+                                        min="0"
+                                        step="0.01"
+                                        value={row.price}
+                                        onChange={e => setProductVariantRows(rows => rows.map((item, i) => i === index ? { ...item, price: e.target.value } : item))}
+                                        placeholder="Price"
+                                      />
+                                    </div>
+                                    <button type="button" className="btn btn-outline btn-sm" onClick={() => setProductVariantRows(rows => rows.filter((_, i) => i !== index))}>Remove</button>
+                                  </div>
+                                  {row.variantId && <p style={{ color: "var(--text3)", fontSize: "0.68rem", marginTop: 6 }}>Variant ID preserved: {row.variantId}</p>}
                                 </div>
                               ))}
                               <button
