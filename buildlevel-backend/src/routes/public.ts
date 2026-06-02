@@ -74,6 +74,76 @@ function cleanProductDescriptionForResponse<T extends { description?: string | n
   return { ...product, description: cleanPrintifyDescription(product.description) };
 }
 
+function repairProductOptions(options?: string[] | null) {
+  if (!Array.isArray(options)) return [];
+  const repaired: string[] = [];
+  let buffer = "";
+
+  const pushOption = (value: string) => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    if (/^"?variantId"?\s*:/i.test(trimmed) || /^"?price"?\s*:/i.test(trimmed)) return;
+    repaired.push(trimmed);
+  };
+
+  for (const option of options) {
+    const part = String(option || "").trim();
+    if (!part) continue;
+
+    if (buffer) {
+      buffer += `,${part}`;
+      if (part.includes("}")) {
+        try {
+          const parsed = JSON.parse(buffer);
+          const label = String(parsed?.label || "").trim();
+          if (label) {
+            repaired.push(JSON.stringify({
+              label,
+              variantId: parsed?.variantId ? String(parsed.variantId) : undefined,
+              price: parsed?.price ? String(parsed.price) : undefined,
+            }));
+          }
+        } catch {
+          pushOption(buffer);
+        }
+        buffer = "";
+      }
+      continue;
+    }
+
+    if (part.startsWith("{") && !part.includes("}")) {
+      buffer = part;
+      continue;
+    }
+
+    if (part.startsWith("{")) {
+      try {
+        const parsed = JSON.parse(part);
+        const label = String(parsed?.label || "").trim();
+        if (label) {
+          repaired.push(JSON.stringify({
+            label,
+            variantId: parsed?.variantId ? String(parsed.variantId) : undefined,
+            price: parsed?.price ? String(parsed.price) : undefined,
+          }));
+        }
+      } catch {
+        pushOption(part);
+      }
+      continue;
+    }
+
+    pushOption(part);
+  }
+
+  if (buffer) pushOption(buffer);
+  return repaired;
+}
+
+function cleanProductForResponse<T extends { description?: string | null; printifyProductId?: string | null; sizes?: string[] | null }>(product: T): T {
+  return { ...cleanProductDescriptionForResponse(product), sizes: repairProductOptions(product.sizes) };
+}
+
 async function getSettingsMap(keys?: string[]) {
   const db = await getDb();
   const rows = await db.select().from(siteSettings);
@@ -107,7 +177,7 @@ router.get("/products", async (req, res) => {
       .from(products)
       .where(and(eq(products.published, true), eq(products.hidden, false), eq(products.delisted, false)))
       .orderBy(asc(products.sortOrder), asc(products.createdAt));
-    res.json(rows.map(cleanProductDescriptionForResponse));
+    res.json(rows.map(cleanProductForResponse));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
@@ -118,7 +188,7 @@ router.get("/products/:id", async (req, res) => {
     const db = await getDb();
     const [row] = await db.select().from(products).where(eq(products.id, parseInt(req.params.id))).limit(1);
     if (!row) { res.status(404).json({ error: "Not found" }); return; }
-    res.json(cleanProductDescriptionForResponse(row));
+    res.json(cleanProductForResponse(row));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

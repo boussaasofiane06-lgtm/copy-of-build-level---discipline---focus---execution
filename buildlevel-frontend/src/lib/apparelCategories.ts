@@ -28,6 +28,12 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "mens", slug: "mens-jackets", label: "Jackets" },
   { audience: "mens", slug: "mens-pants", label: "Pants" },
   { audience: "mens", slug: "mens-accessories", label: "Accessories" },
+  { audience: "mens", slug: "mens-greeting-cards", label: "Greeting Cards" },
+  { audience: "mens", slug: "mens-stickers", label: "Stickers" },
+  { audience: "mens", slug: "mens-posters", label: "Posters" },
+  { audience: "mens", slug: "mens-home-office", label: "Home & Office" },
+  { audience: "mens", slug: "mens-drinkware", label: "Drinkware" },
+  { audience: "mens", slug: "mens-bags", label: "Bags" },
   { audience: "mens", slug: "mens-limited-drops", label: "Limited Drops" },
   { audience: "mens", slug: "mens-seasonal", label: "Seasonal" },
   { audience: "mens", slug: "mens-streetwear", label: "Streetwear" },
@@ -50,6 +56,12 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "womens", slug: "womens-joggers", label: "Joggers" },
   { audience: "womens", slug: "womens-compression-wear", label: "Compression Wear" },
   { audience: "womens", slug: "womens-accessories", label: "Accessories" },
+  { audience: "womens", slug: "womens-greeting-cards", label: "Greeting Cards" },
+  { audience: "womens", slug: "womens-stickers", label: "Stickers" },
+  { audience: "womens", slug: "womens-posters", label: "Posters" },
+  { audience: "womens", slug: "womens-home-office", label: "Home & Office" },
+  { audience: "womens", slug: "womens-drinkware", label: "Drinkware" },
+  { audience: "womens", slug: "womens-bags", label: "Bags" },
   { audience: "womens", slug: "womens-limited-drops", label: "Limited Drops" },
   { audience: "womens", slug: "womens-seasonal", label: "Seasonal" },
   { audience: "womens", slug: "womens-streetwear", label: "Women's Streetwear" },
@@ -65,6 +77,12 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "kids", slug: "kids-performance", label: "Kids Performance" },
   { audience: "kids", slug: "kids-sets", label: "Kids Sets" },
   { audience: "kids", slug: "kids-accessories", label: "Kids Accessories" },
+  { audience: "kids", slug: "kids-greeting-cards", label: "Kids Greeting Cards" },
+  { audience: "kids", slug: "kids-stickers", label: "Kids Stickers" },
+  { audience: "kids", slug: "kids-posters", label: "Kids Posters" },
+  { audience: "kids", slug: "kids-home-office", label: "Kids Home & Office" },
+  { audience: "kids", slug: "kids-drinkware", label: "Kids Drinkware" },
+  { audience: "kids", slug: "kids-bags", label: "Kids Bags" },
   { audience: "kids", slug: "kids-limited-drops", label: "Kids Limited Drops" },
   { audience: "kids", slug: "kids-seasonal", label: "Kids Seasonal" },
 ];
@@ -73,9 +91,9 @@ export const DEFAULT_AUDIENCE: ApparelAudience = "mens";
 export const DEFAULT_CATEGORY = "mens-t-shirts";
 
 export const STOREFRONT_CATEGORY_PRIORITY: Record<ApparelAudience, string[]> = {
-  mens: ["mens-t-shirts", "mens-performance-tees", "mens-hoodies", "mens-joggers", "mens-tank-tops", "mens-shorts", "mens-hats", "mens-limited-drops"],
-  womens: ["womens-t-shirts", "womens-crop-tops", "womens-hoodies", "womens-leggings", "womens-shorts", "womens-sports-bras", "womens-hats", "womens-limited-drops"],
-  kids: ["kids-t-shirts", "kids-hoodies", "kids-joggers", "kids-shorts", "kids-hats", "kids-sets", "kids-limited-drops"],
+  mens: ["mens-t-shirts", "mens-performance-tees", "mens-hoodies", "mens-joggers", "mens-tank-tops", "mens-shorts", "mens-hats", "mens-accessories", "mens-greeting-cards", "mens-limited-drops"],
+  womens: ["womens-t-shirts", "womens-crop-tops", "womens-hoodies", "womens-leggings", "womens-shorts", "womens-sports-bras", "womens-hats", "womens-accessories", "womens-greeting-cards", "womens-limited-drops"],
+  kids: ["kids-t-shirts", "kids-hoodies", "kids-joggers", "kids-shorts", "kids-hats", "kids-sets", "kids-accessories", "kids-greeting-cards", "kids-limited-drops"],
 };
 
 export function slugifyCategory(value: string) {

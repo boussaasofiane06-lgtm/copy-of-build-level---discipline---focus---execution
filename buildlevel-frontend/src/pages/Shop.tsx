@@ -75,10 +75,40 @@ const parseProductOption = (value: string, fallbackPrice: number): ProductOption
   return { value, label: cleaned, price: fallbackPrice };
 };
 
+const repairOptionValues = (values: string[]) => {
+  const repaired: string[] = [];
+  let buffer = "";
+
+  for (const value of values) {
+    const part = String(value || "").trim();
+    if (!part) continue;
+
+    if (buffer) {
+      buffer += `,${part}`;
+      if (part.includes("}")) {
+        repaired.push(buffer);
+        buffer = "";
+      }
+      continue;
+    }
+
+    if (part.startsWith("{") && !part.includes("}")) {
+      buffer = part;
+      continue;
+    }
+
+    if (/^"?variantId"?\s*:/i.test(part) || /^"?price"?\s*:/i.test(part)) continue;
+    repaired.push(part);
+  }
+
+  if (buffer) repaired.push(buffer);
+  return repaired;
+};
+
 const getProductOptions = (product: Product) => {
   const basePrice = Number.parseFloat(product.price);
   const fallbackPrice = Number.isFinite(basePrice) ? basePrice : 0;
-  return (Array.isArray(product.sizes) ? product.sizes : [])
+  return repairOptionValues(Array.isArray(product.sizes) ? product.sizes : [])
     .map(size => parseProductOption(size, fallbackPrice))
     .filter((option): option is ProductOption => !!option && !!option.label);
 };
