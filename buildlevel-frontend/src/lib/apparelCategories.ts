@@ -21,6 +21,15 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "mens", slug: "mens-hats", label: "Hats" },
   { audience: "mens", slug: "mens-compression-wear", label: "Compression Wear" },
   { audience: "mens", slug: "mens-compression-shirts", label: "Compression Shirts" },
+  { audience: "mens", slug: "mens-performance-tees", label: "Performance Tees" },
+  { audience: "mens", slug: "mens-training-tops", label: "Training Tops" },
+  { audience: "mens", slug: "mens-long-sleeves", label: "Long Sleeves" },
+  { audience: "mens", slug: "mens-sweatshirts", label: "Sweatshirts" },
+  { audience: "mens", slug: "mens-jackets", label: "Jackets" },
+  { audience: "mens", slug: "mens-pants", label: "Pants" },
+  { audience: "mens", slug: "mens-accessories", label: "Accessories" },
+  { audience: "mens", slug: "mens-limited-drops", label: "Limited Drops" },
+  { audience: "mens", slug: "mens-seasonal", label: "Seasonal" },
   { audience: "mens", slug: "mens-streetwear", label: "Streetwear" },
   { audience: "mens", slug: "mens-gym-essentials", label: "Gym Essentials" },
 
@@ -33,6 +42,16 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "womens", slug: "womens-hats", label: "Hats" },
   { audience: "womens", slug: "womens-skirts", label: "Skirts" },
   { audience: "womens", slug: "womens-oversized-tees", label: "Oversized Tees" },
+  { audience: "womens", slug: "womens-tank-tops", label: "Tank Tops" },
+  { audience: "womens", slug: "womens-training-tops", label: "Training Tops" },
+  { audience: "womens", slug: "womens-long-sleeves", label: "Long Sleeves" },
+  { audience: "womens", slug: "womens-sweatshirts", label: "Sweatshirts" },
+  { audience: "womens", slug: "womens-jackets", label: "Jackets" },
+  { audience: "womens", slug: "womens-joggers", label: "Joggers" },
+  { audience: "womens", slug: "womens-compression-wear", label: "Compression Wear" },
+  { audience: "womens", slug: "womens-accessories", label: "Accessories" },
+  { audience: "womens", slug: "womens-limited-drops", label: "Limited Drops" },
+  { audience: "womens", slug: "womens-seasonal", label: "Seasonal" },
   { audience: "womens", slug: "womens-streetwear", label: "Women's Streetwear" },
 
   { audience: "kids", slug: "kids-t-shirts", label: "Kids T-Shirts" },
@@ -40,17 +59,23 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "kids", slug: "kids-joggers", label: "Kids Joggers" },
   { audience: "kids", slug: "kids-shorts", label: "Kids Shorts" },
   { audience: "kids", slug: "kids-hats", label: "Kids Hats" },
+  { audience: "kids", slug: "kids-sweatshirts", label: "Kids Sweatshirts" },
+  { audience: "kids", slug: "kids-long-sleeves", label: "Kids Long Sleeves" },
+  { audience: "kids", slug: "kids-jackets", label: "Kids Jackets" },
+  { audience: "kids", slug: "kids-performance", label: "Kids Performance" },
   { audience: "kids", slug: "kids-sets", label: "Kids Sets" },
   { audience: "kids", slug: "kids-accessories", label: "Kids Accessories" },
+  { audience: "kids", slug: "kids-limited-drops", label: "Kids Limited Drops" },
+  { audience: "kids", slug: "kids-seasonal", label: "Kids Seasonal" },
 ];
 
 export const DEFAULT_AUDIENCE: ApparelAudience = "mens";
 export const DEFAULT_CATEGORY = "mens-t-shirts";
 
 export const STOREFRONT_CATEGORY_PRIORITY: Record<ApparelAudience, string[]> = {
-  mens: ["mens-t-shirts", "mens-hoodies", "mens-joggers", "mens-tank-tops", "mens-shorts", "mens-hats"],
-  womens: ["womens-t-shirts", "womens-crop-tops", "womens-hoodies", "womens-leggings", "womens-shorts", "womens-sports-bras", "womens-hats"],
-  kids: ["kids-t-shirts", "kids-hoodies", "kids-joggers", "kids-shorts", "kids-hats"],
+  mens: ["mens-t-shirts", "mens-performance-tees", "mens-hoodies", "mens-joggers", "mens-tank-tops", "mens-shorts", "mens-hats", "mens-limited-drops"],
+  womens: ["womens-t-shirts", "womens-crop-tops", "womens-hoodies", "womens-leggings", "womens-shorts", "womens-sports-bras", "womens-hats", "womens-limited-drops"],
+  kids: ["kids-t-shirts", "kids-hoodies", "kids-joggers", "kids-shorts", "kids-hats", "kids-sets", "kids-limited-drops"],
 };
 
 export function slugifyCategory(value: string) {

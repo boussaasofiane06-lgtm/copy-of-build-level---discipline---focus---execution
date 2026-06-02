@@ -50,10 +50,13 @@ const getProductImages = (imageUrl?: string | null) => {
 
 const getProductCoverImage = (product: Product) => getProductImages(product.imageUrl)[0] || "";
 
-const parseProductOption = (value: string, fallbackPrice: number): ProductOption => {
-  if (value.trim().startsWith("{")) {
+const parseProductOption = (value: string, fallbackPrice: number): ProductOption | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^"?variantId"?\s*:/i.test(trimmed) || /^"?price"?\s*:/i.test(trimmed)) return null;
+  if (trimmed.startsWith("{")) {
     try {
-      const parsed = JSON.parse(value);
+      const parsed = JSON.parse(trimmed);
       const price = Number.parseFloat(String(parsed?.price || ""));
       return {
         value,
@@ -62,16 +65,22 @@ const parseProductOption = (value: string, fallbackPrice: number): ProductOption
         variantId: parsed?.variantId ? String(parsed.variantId) : undefined,
       };
     } catch {
-      return { value, label: value, price: fallbackPrice };
+      const labelMatch = trimmed.match(/"label"\s*:\s*"([^"]+)/i);
+      if (!labelMatch?.[1]) return null;
+      return { value, label: labelMatch[1], price: fallbackPrice };
     }
   }
-  return { value, label: value, price: fallbackPrice };
+  const cleaned = trimmed.replace(/^"+|"+$/g, "").replace(/[{}]/g, "").trim();
+  if (!cleaned || /^(label|variantId|price)\s*:/i.test(cleaned)) return null;
+  return { value, label: cleaned, price: fallbackPrice };
 };
 
 const getProductOptions = (product: Product) => {
   const basePrice = Number.parseFloat(product.price);
   const fallbackPrice = Number.isFinite(basePrice) ? basePrice : 0;
-  return (Array.isArray(product.sizes) ? product.sizes : []).map(size => parseProductOption(size, fallbackPrice));
+  return (Array.isArray(product.sizes) ? product.sizes : [])
+    .map(size => parseProductOption(size, fallbackPrice))
+    .filter((option): option is ProductOption => !!option && !!option.label);
 };
 
 const getSelectedProductOption = (product: Product, selectedSizes: Record<number, string>) => {
@@ -157,8 +166,9 @@ export default function Shop() {
     if (product.inStock) return "Available";
     return "";
   };
-  const shouldHidePrice = (product: Product) => getProductStatus(product) === "Featured";
-  const isPurchasable = (product: Product) => product.inStock && getProductStatus(product) !== "Coming Soon";
+  const shouldHidePrice = (product: Product) => ["Featured", "New Release", "Coming Soon"].includes(getProductStatus(product));
+  const shouldHideOptions = (product: Product) => ["Featured", "New Release", "Coming Soon"].includes(getProductStatus(product));
+  const isPurchasable = (product: Product) => product.inStock && !["Coming Soon", "New Release", "Featured"].includes(getProductStatus(product));
   const qualifiesForStorefront = (product: Product) => {
     if (product.published === false || product.hidden === true || product.delisted === true) return false;
     return ["Available", "Coming Soon", "Featured", "New Release", "Limited Edition"].includes(getProductStatus(product));
@@ -192,7 +202,7 @@ export default function Shop() {
     setCartOpen(true);
   };
 
-  const cartTotal = cart.reduce((sum, i) => sum + (parseProductOption(i.size, parseFloat(i.product.price)).price || parseFloat(i.product.price)) * i.quantity, 0);
+  const cartTotal = cart.reduce((sum, i) => sum + (parseProductOption(i.size, parseFloat(i.product.price))?.price || parseFloat(i.product.price)) * i.quantity, 0);
 
   const updateCartItemQuantity = (productId: number, size: string, quantity: number) => {
     setCart(prev => prev.map(item =>
@@ -210,15 +220,18 @@ export default function Shop() {
     if (!cart.length) return;
     setCheckingOut(true);
     try {
-      const items = cart.map(i => ({
-        variantId: parseProductOption(i.size, parseFloat(i.product.price)).variantId,
-        productId: i.product.id,
-        name: `${i.product.name}${i.size ? ` (${parseProductOption(i.size, parseFloat(i.product.price)).label})` : ""}`,
-        size: i.size,
-        priceUSD: parseProductOption(i.size, parseFloat(i.product.price)).price || parseFloat(i.product.price),
-        quantity: i.quantity,
-        image: getProductCoverImage(i.product).startsWith("http") ? getProductCoverImage(i.product) : undefined,
-      }));
+      const items = cart.map(i => {
+        const option = parseProductOption(i.size, parseFloat(i.product.price));
+        return {
+          variantId: option?.variantId,
+          productId: i.product.id,
+          name: `${i.product.name}${option?.label ? ` (${option.label})` : ""}`,
+          size: i.size,
+          priceUSD: option?.price || parseFloat(i.product.price),
+          quantity: i.quantity,
+          image: getProductCoverImage(i.product).startsWith("http") ? getProductCoverImage(i.product) : undefined,
+        };
+      });
       const { url } = await publicApi.createCheckout(items);
       window.location.assign(url);
     } catch (e) {
@@ -250,9 +263,9 @@ export default function Shop() {
               </div>
               <div style={{ flex: 1 }}>
                 <p style={{ fontSize: "0.9rem", marginBottom: 4 }}>{item.product.name}</p>
-                {item.size && <p style={{ fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4 }}>Option: {parseProductOption(item.size, parseFloat(item.product.price)).label}</p>}
+                {item.size && <p style={{ fontSize: "0.75rem", color: "var(--text2)", marginBottom: 4 }}>Option: {parseProductOption(item.size, parseFloat(item.product.price))?.label || item.size}</p>}
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: "0.9rem" }}>${(((parseProductOption(item.size, parseFloat(item.product.price)).price || parseFloat(item.product.price)) * item.quantity)).toFixed(2)}</span>
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: "0.9rem" }}>${(((parseProductOption(item.size, parseFloat(item.product.price))?.price || parseFloat(item.product.price)) * item.quantity)).toFixed(2)}</span>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button
                       onClick={() => updateCartItemQuantity(item.product.id, item.size, item.quantity - 1)}
@@ -360,7 +373,7 @@ export default function Shop() {
                 </div>
               )}
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
-              {getProductOptions(viewProduct).length > 0 && (
+              {!shouldHideOptions(viewProduct) && getProductOptions(viewProduct).length > 0 && (
                 <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
                   {getProductOptions(viewProduct).map(option => (
                     <button key={option.value} onClick={() => setSelectedSizes(prev => ({ ...prev, [viewProduct.id]: option.value }))}
@@ -374,7 +387,7 @@ export default function Shop() {
                 </div>
               )}
               <button onClick={() => addToCart(viewProduct)} disabled={!isPurchasable(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
-                {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) === "Coming Soon" ? "Coming Soon" : "Not Available")}
+                {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) || "Not Available")}
               </button>
               <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
             </div>
@@ -473,7 +486,7 @@ export default function Shop() {
                       {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
                     </div>
                   )}
-                  {getProductOptions(p).length > 0 && (
+                  {!shouldHideOptions(p) && getProductOptions(p).length > 0 && (
                     <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
                       {getProductOptions(p).map(option => (
                         <button key={option.value} onClick={() => setSelectedSizes(prev => ({ ...prev, [p.id]: option.value }))}
@@ -491,7 +504,7 @@ export default function Shop() {
                       View
                     </button>
                     <button onClick={() => addToCart(p)} disabled={!isPurchasable(p)} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
-                      {isPurchasable(p) ? "Add to Cart" : (getProductStatus(p) === "Coming Soon" ? "Coming Soon" : "Not Available")}
+                      {isPurchasable(p) ? "Add to Cart" : (getProductStatus(p) || "Not Available")}
                     </button>
                   </div>
                 </div>

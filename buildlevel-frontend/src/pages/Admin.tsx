@@ -64,6 +64,24 @@ const serializeProductImages = (images: string[]) => {
   return unique.length <= 1 ? (unique[0] || "") : JSON.stringify(unique);
 };
 
+const getProductOptionLabel = (value: string) => {
+  const trimmed = value.trim();
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      return String(parsed?.label || value);
+    } catch {
+      const labelMatch = trimmed.match(/"label"\s*:\s*"([^"]+)/i);
+      return labelMatch?.[1] || "";
+    }
+  }
+  if (/^"?variantId"?\s*:/i.test(trimmed) || /^"?price"?\s*:/i.test(trimmed)) return "";
+  return trimmed.replace(/^"+|"+$/g, "");
+};
+
+const getDisplaySizes = (sizes?: string[]) =>
+  (Array.isArray(sizes) ? sizes : []).map(getProductOptionLabel).filter(Boolean).join(", ");
+
 const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
 
 export default function Admin() {
@@ -145,7 +163,16 @@ export default function Admin() {
   const saveProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     const { audience: _audience, ...productPayload } = productForm;
-    const data = { ...productPayload, price: parseFloat(productForm.price), compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined, sizes: productForm.sizes.split(",").map(s => s.trim()).filter(Boolean) };
+    const syncedProduct = !!(editProduct?.printifyProductId || editProduct?.shopifyProductId);
+    const preservedSyncedSizes = Array.isArray(editProduct?.sizes) ? editProduct.sizes : [];
+    const data = {
+      ...productPayload,
+      price: parseFloat(productForm.price),
+      compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined,
+      sizes: syncedProduct && preservedSyncedSizes.length > 0
+        ? preservedSyncedSizes
+        : productForm.sizes.split(",").map(s => s.trim()).filter(Boolean),
+    };
     try {
       const productImages = getProductImages(data.imageUrl);
       const statusBadge = data.status === "available" ? "" :
@@ -259,7 +286,7 @@ export default function Admin() {
     const badge = (p.badge || "").toLowerCase();
     const status = badge.includes("coming") || badge.includes("soon") ? "coming-soon" : badge.includes("limited") ? "limited-edition" : badge.includes("new") ? "new-release" : "available";
     setEditProduct(p);
-    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: p.sizes.join(", "), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
+    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: getDisplaySizes(p.sizes), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
     setCustomProductCategory(getCategoryBySlug(p.category) ? "" : getCategoryLabel(p.category));
     setProductImagePreviews(getProductImages(p.imageUrl));
     setShowProductForm(true);
@@ -512,7 +539,21 @@ export default function Admin() {
                       </div>
                       <div><label style={labelStyle}>Price *</label><input style={inputStyle} type="number" step="0.01" required value={productForm.price} onChange={e => setProductForm(f => ({ ...f, price: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Compare At Price</label><input style={inputStyle} type="number" step="0.01" value={productForm.compareAtPrice} onChange={e => setProductForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>
-                      <div><label style={labelStyle}>Sizes (comma-separated)</label><input style={inputStyle} value={productForm.sizes} onChange={e => setProductForm(f => ({ ...f, sizes: e.target.value }))} placeholder="S, M, L, XL" /></div>
+                      <div>
+                        <label style={labelStyle}>Sizes / Variants</label>
+                        <input
+                          style={{ ...inputStyle, opacity: editProduct?.printifyProductId || editProduct?.shopifyProductId ? 0.72 : 1 }}
+                          value={productForm.sizes}
+                          disabled={!!(editProduct?.printifyProductId || editProduct?.shopifyProductId)}
+                          onChange={e => setProductForm(f => ({ ...f, sizes: e.target.value }))}
+                          placeholder="S, M, L, XL"
+                        />
+                        {(editProduct?.printifyProductId || editProduct?.shopifyProductId) && (
+                          <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
+                            Synced variants are managed by the integration and preserved when saving.
+                          </p>
+                        )}
+                      </div>
                       <div>
                         <label style={labelStyle}>Storefront Status</label>
                         <select style={inputStyle} value={productForm.status} onChange={e => setProductForm(f => ({ ...f, status: e.target.value, inStock: e.target.value === "coming-soon" ? false : f.inStock }))}>
