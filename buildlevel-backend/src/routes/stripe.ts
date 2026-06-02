@@ -116,6 +116,10 @@ type DigitalAccessResult = {
   downloadUrl: string;
   fileName: string | null;
   stripePaymentIntentId: string;
+  downloadLimit: number;
+  downloadCount: number;
+  remainingDownloads: number;
+  expiresAt: string;
   created: boolean;
 };
 
@@ -167,6 +171,69 @@ async function getDigitalDownloadUrl(product: typeof digitalProducts.$inferSelec
   if (product.fileKey) return getProtectedDownloadUrl(product.fileKey);
   if (product.fileUrl) return product.fileUrl;
   throw new Error(`Digital product ${product.id} has no downloadable file configured`);
+}
+
+async function getSettingsMap(keys?: string[]) {
+  const db = await getDb();
+  const rows = await db.select().from(siteSettings);
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    if (!keys || keys.includes(row.key)) map[row.key] = row.value ?? "";
+  }
+  return map;
+}
+
+async function saveSetting(key: string, value: string) {
+  const db = await getDb();
+  const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).limit(1);
+  if (existing.length > 0) {
+    await db.update(siteSettings).set({ value, updatedAt: new Date() }).where(eq(siteSettings.key, key));
+  } else {
+    await db.insert(siteSettings).values({ key, value, updatedAt: new Date() });
+  }
+}
+
+const productDownloadLimitKey = (productId: number) => `digital_product_${productId}_download_limit`;
+const productExpiryDaysKey = (productId: number) => `digital_product_${productId}_expires_days`;
+const purchaseDownloadLimitKey = (purchaseId: number) => `digital_purchase_${purchaseId}_download_limit`;
+const purchaseDownloadCountKey = (purchaseId: number) => `digital_purchase_${purchaseId}_download_count`;
+const purchaseExpiresAtKey = (purchaseId: number) => `digital_purchase_${purchaseId}_expires_at`;
+
+function toPositiveInt(value: unknown, fallback: number) {
+  const parsed = Number.parseInt(String(value ?? ""), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+async function getProductAccessPolicy(productId: number) {
+  const settings = await getSettingsMap([productDownloadLimitKey(productId), productExpiryDaysKey(productId)]);
+  return {
+    downloadLimit: toPositiveInt(settings[productDownloadLimitKey(productId)], toPositiveInt(process.env.DIGITAL_DOWNLOAD_LIMIT_DEFAULT, 5)),
+    expiresDays: toPositiveInt(settings[productExpiryDaysKey(productId)], toPositiveInt(process.env.DIGITAL_DOWNLOAD_EXPIRES_DAYS, 30)),
+  };
+}
+
+async function ensurePurchaseAccessPolicy(purchaseId: number, productId: number) {
+  const settings = await getSettingsMap([purchaseDownloadLimitKey(purchaseId), purchaseDownloadCountKey(purchaseId), purchaseExpiresAtKey(purchaseId)]);
+  let downloadLimit = toPositiveInt(settings[purchaseDownloadLimitKey(purchaseId)], 0);
+  let downloadCount = Math.max(0, Number.parseInt(settings[purchaseDownloadCountKey(purchaseId)] || "0", 10) || 0);
+  let expiresAt = settings[purchaseExpiresAtKey(purchaseId)] || "";
+
+  if (!downloadLimit || !expiresAt) {
+    const policy = await getProductAccessPolicy(productId);
+    downloadLimit = downloadLimit || policy.downloadLimit;
+    const expiryDate = new Date(Date.now() + policy.expiresDays * 24 * 60 * 60 * 1000);
+    expiresAt = expiresAt || expiryDate.toISOString();
+    await saveSetting(purchaseDownloadLimitKey(purchaseId), String(downloadLimit));
+    await saveSetting(purchaseExpiresAtKey(purchaseId), expiresAt);
+  }
+  await saveSetting(purchaseDownloadCountKey(purchaseId), String(downloadCount));
+
+  return {
+    downloadLimit,
+    downloadCount,
+    remainingDownloads: Math.max(0, downloadLimit - downloadCount),
+    expiresAt,
+  };
 }
 
 async function createOrGetDigitalAccess(session: Stripe.Checkout.Session, source: "webhook" | "success-page"): Promise<DigitalAccessResult> {
@@ -237,15 +304,24 @@ async function createOrGetDigitalAccess(session: Stripe.Checkout.Session, source
 
   if (!purchase) throw new Error("Failed to create digital purchase record");
 
+  const accessPolicy = await ensurePurchaseAccessPolicy(purchase.id, productId);
+  if (Date.now() > Date.parse(accessPolicy.expiresAt)) {
+    throw new Error("This digital purchase access has expired");
+  }
+  if (accessPolicy.remainingDownloads <= 0) {
+    throw new Error("Download limit reached for this purchase");
+  }
+
   return {
     purchaseId: purchase.id,
     productId,
     productName: product.name,
     email: purchase.email || email,
     downloadToken: purchase.downloadToken,
-    downloadUrl: await getDigitalDownloadUrl(product),
+    downloadUrl: `/api/digital/download/${purchase.downloadToken}`,
     fileName: product.fileName,
     stripePaymentIntentId,
+    ...accessPolicy,
     created,
   };
 }

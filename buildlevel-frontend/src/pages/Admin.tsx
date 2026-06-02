@@ -90,7 +90,7 @@ export default function Admin() {
   // Digital form
   const [showDigitalForm, setShowDigitalForm] = useState(false);
   const [editDigital, setEditDigital] = useState<Partial<DigitalProduct> | null>(null);
-  const [digitalForm, setDigitalForm] = useState({ name: "", description: "", price: "", category: "mindset", productType: "pdf" as "pdf"|"audiobook"|"video"|"other", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", published: true });
+  const [digitalForm, setDigitalForm] = useState({ name: "", description: "", price: "", category: "mindset", productType: "pdf" as "pdf"|"audiobook"|"video"|"other", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", accessExpiresDays: "30", published: true });
   const [digitalUploadProgress, setDigitalUploadProgress] = useState(0);
   const [thumbnailUploadProgress, setThumbnailUploadProgress] = useState(0);
   const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
@@ -272,8 +272,13 @@ export default function Admin() {
       showToast("Please wait until the digital file finishes uploading before saving.");
       return;
     }
-    const { version: _version, downloadLimit: _downloadLimit, ...digitalPayload } = digitalForm;
-    const data = { ...digitalPayload, price: parseFloat(digitalForm.price) };
+    const { version: _version, ...digitalPayload } = digitalForm;
+    const data = {
+      ...digitalPayload,
+      price: parseFloat(digitalForm.price),
+      downloadLimit: Number.parseInt(digitalForm.downloadLimit, 10) || 5,
+      accessExpiresDays: Number.parseInt(digitalForm.accessExpiresDays, 10) || 30,
+    };
     try {
       if (editDigital?.id) await adminApi.updateDigitalProduct(editDigital.id, data as any);
       else await adminApi.createDigitalProduct(data as any);
@@ -284,7 +289,7 @@ export default function Admin() {
 
   const openEditDigital = (p: DigitalProduct) => {
     setEditDigital(p);
-    setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", fileKey: p.fileKey || "", fileUrl: p.fileUrl || "", fileName: p.fileName || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", version: "1.0", downloadLimit: "5", published: p.published });
+    setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", fileKey: p.fileKey || "", fileUrl: p.fileUrl || "", fileName: p.fileName || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", version: "1.0", downloadLimit: String(p.downloadLimit || 5), accessExpiresDays: String(p.accessExpiresDays || 30), published: p.published });
     setThumbnailPreviews(p.imageUrl ? [p.imageUrl] : []);
     setDigitalFileInfo((p.fileName || p.fileKey || p.fileUrl) ? { name: p.fileName || "Stored digital upload", size: 0, mimeType: "Stored file" } : null);
     setShowDigitalForm(true);
@@ -594,7 +599,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Digital Products ({digital.length})</h3>
-                  <button onClick={() => { setEditDigital(null); setDigitalForm({ name: "", description: "", price: "", category: "mindset", productType: "pdf", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", published: true }); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setShowDigitalForm(true); }} className="btn btn-primary btn-sm">+ Add Digital</button>
+                  <button onClick={() => { setEditDigital(null); setDigitalForm({ name: "", description: "", price: "", category: "mindset", productType: "pdf", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", accessExpiresDays: "30", published: true }); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setShowDigitalForm(true); }} className="btn btn-primary btn-sm">+ Add Digital</button>
                 </div>
 
                 {showDigitalForm && (
@@ -607,6 +612,7 @@ export default function Admin() {
                       <div><label style={labelStyle}>Category</label><input style={inputStyle} value={digitalForm.category} onChange={e => setDigitalForm(f => ({ ...f, category: e.target.value }))} /></div>
                       <div><label style={labelStyle}>Version</label><input style={inputStyle} value={digitalForm.version} onChange={e => setDigitalForm(f => ({ ...f, version: e.target.value }))} placeholder="1.0" /></div>
                       <div><label style={labelStyle}>Download Limit</label><input style={inputStyle} type="number" min="1" value={digitalForm.downloadLimit} onChange={e => setDigitalForm(f => ({ ...f, downloadLimit: e.target.value }))} placeholder="5" /></div>
+                      <div><label style={labelStyle}>Access Expires (days)</label><input style={inputStyle} type="number" min="1" value={digitalForm.accessExpiresDays} onChange={e => setDigitalForm(f => ({ ...f, accessExpiresDays: e.target.value }))} placeholder="30" /></div>
                       <div><label style={labelStyle}>Duration</label><input style={inputStyle} value={digitalForm.duration} onChange={e => setDigitalForm(f => ({ ...f, duration: e.target.value }))} placeholder="2h 30m" /></div>
                       <div><label style={labelStyle}>Badge</label><input style={inputStyle} value={digitalForm.badge} onChange={e => setDigitalForm(f => ({ ...f, badge: e.target.value }))} /></div>
                       <div

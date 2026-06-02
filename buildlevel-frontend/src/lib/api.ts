@@ -80,6 +80,8 @@ export interface DigitalProduct {
   duration?: string;
   badge?: string;
   stripePaymentLink?: string;
+  downloadLimit?: number;
+  accessExpiresDays?: number;
   published: boolean;
   createdAt: string;
 }
@@ -193,6 +195,10 @@ export const publicApi = {
       email: string;
       downloadUrl: string;
       fileName?: string | null;
+      downloadLimit: number;
+      downloadCount: number;
+      remainingDownloads: number;
+      expiresAt: string;
       created: boolean;
     }>(`/stripe/digital-session/${encodeURIComponent(sessionId)}`).then(r => r.data),
   getSocialLinks: () => api.get<{ email: string; links: PublicSocialLink[] }>("/social-links").then(r => r.data),

@@ -11,6 +11,9 @@ type AccessState =
       email: string;
       downloadUrl: string;
       fileName?: string | null;
+      downloadLimit: number;
+      remainingDownloads: number;
+      expiresAt: string;
     };
 
 export default function DigitalSuccess() {
@@ -34,6 +37,9 @@ export default function DigitalSuccess() {
           email: result.email,
           downloadUrl: result.downloadUrl,
           fileName: result.fileName,
+          downloadLimit: result.downloadLimit,
+          remainingDownloads: result.remainingDownloads,
+          expiresAt: result.expiresAt,
         });
       })
       .catch(error => {
@@ -89,7 +95,7 @@ export default function DigitalSuccess() {
                 Download {access.fileName || "Digital Product"}
               </a>
               <p style={{ color: "var(--text3)", fontSize: "0.78rem", lineHeight: 1.6 }}>
-                If the link expires, reopen this page from your checkout success URL or contact support with your receipt.
+                {access.remainingDownloads} of {access.downloadLimit} downloads remaining. Access expires {new Date(access.expiresAt).toLocaleDateString()}.
               </p>
             </div>
           )}

@@ -74,6 +74,30 @@ function cleanProductDescriptionForResponse<T extends { description?: string | n
   return { ...product, description: cleanPrintifyDescription(product.description) };
 }
 
+async function getSettingsMap(keys?: string[]) {
+  const db = await getDb();
+  const rows = await db.select().from(siteSettings);
+  const map: Record<string, string> = {};
+  for (const row of rows) {
+    if (!keys || keys.includes(row.key)) map[row.key] = row.value ?? "";
+  }
+  return map;
+}
+
+async function saveSetting(key: string, value: string) {
+  const db = await getDb();
+  const existing = await db.select().from(siteSettings).where(eq(siteSettings.key, key)).limit(1);
+  if (existing.length > 0) {
+    await db.update(siteSettings).set({ value, updatedAt: new Date() }).where(eq(siteSettings.key, key));
+  } else {
+    await db.insert(siteSettings).values({ key, value, updatedAt: new Date() });
+  }
+}
+
+const purchaseDownloadLimitKey = (purchaseId: number) => `digital_purchase_${purchaseId}_download_limit`;
+const purchaseDownloadCountKey = (purchaseId: number) => `digital_purchase_${purchaseId}_download_count`;
+const purchaseExpiresAtKey = (purchaseId: number) => `digital_purchase_${purchaseId}_expires_at`;
+
 // ─── Products ─────────────────────────────────────────────────────────────────
 router.get("/products", async (req, res) => {
   try {
@@ -174,17 +198,30 @@ router.get("/digital/download/:token", async (req, res) => {
 
     if (!product) { res.status(404).json({ error: "Product not found" }); return; }
 
+    const settings = await getSettingsMap([
+      purchaseDownloadLimitKey(purchase.id),
+      purchaseDownloadCountKey(purchase.id),
+      purchaseExpiresAtKey(purchase.id),
+    ]);
+    const limit = Number.parseInt(settings[purchaseDownloadLimitKey(purchase.id)] || "1", 10);
+    const count = Math.max(0, Number.parseInt(settings[purchaseDownloadCountKey(purchase.id)] || "0", 10) || 0);
+    const expiresAt = settings[purchaseExpiresAtKey(purchase.id)];
+    if (expiresAt && Date.now() > Date.parse(expiresAt)) {
+      res.status(410).json({ error: "This download link has expired" });
+      return;
+    }
+    if (count >= limit) {
+      res.status(403).json({ error: "Download limit reached" });
+      return;
+    }
+
     let url = product.fileUrl || "";
     if (product.fileKey) url = await getProtectedDownloadUrl(product.fileKey);
     if (!url) { res.status(404).json({ error: "No downloadable file configured" }); return; }
 
     await db.update(digitalPurchases).set({ downloadedAt: new Date() }).where(eq(digitalPurchases.id, purchase.id));
-    res.json({
-      url,
-      fileName: product.fileName,
-      productName: product.name,
-      expiresInSeconds: Number(process.env.DOWNLOAD_URL_TTL_SECONDS || 900),
-    });
+    await saveSetting(purchaseDownloadCountKey(purchase.id), String(count + 1));
+    res.redirect(302, url);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

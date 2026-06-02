@@ -1,5 +1,5 @@
 import { Router, Request, Response } from "express";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, desc } from "drizzle-orm";
 import { z } from "zod";
 import Stripe from "stripe";
 import multer from "multer";
@@ -297,7 +297,12 @@ router.get("/digital", requireAdmin, async (req: Request, res: Response) => {
   try {
     const db = await getDb();
     const rows = await db.select().from(digitalProducts).orderBy(asc(digitalProducts.sortOrder), asc(digitalProducts.createdAt));
-    res.json(rows);
+    const settings = await getSettingsMap();
+    res.json(rows.map(row => ({
+      ...row,
+      downloadLimit: Number(settings[getDigitalLimitKey(row.id)] || process.env.DIGITAL_DOWNLOAD_LIMIT_DEFAULT || 5),
+      accessExpiresDays: Number(settings[getDigitalExpiryDaysKey(row.id)] || process.env.DIGITAL_DOWNLOAD_EXPIRES_DAYS || 30),
+    })));
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -315,9 +320,24 @@ const digitalSchema = z.object({
   duration: z.string().optional().nullable(),
   badge: z.string().optional().nullable(),
   stripePaymentLink: z.string().optional().nullable(),
+  downloadLimit: z.number().int().positive().optional(),
+  accessExpiresDays: z.number().int().positive().optional(),
   published: z.boolean().default(false),
   sortOrder: z.number().default(0),
 });
+
+function getDigitalLimitKey(productId: number) {
+  return `digital_product_${productId}_download_limit`;
+}
+
+function getDigitalExpiryDaysKey(productId: number) {
+  return `digital_product_${productId}_expires_days`;
+}
+
+async function saveDigitalAccessSettings(productId: number, data: { downloadLimit?: number; accessExpiresDays?: number }) {
+  if (data.downloadLimit !== undefined) await saveSetting(getDigitalLimitKey(productId), String(data.downloadLimit));
+  if (data.accessExpiresDays !== undefined) await saveSetting(getDigitalExpiryDaysKey(productId), String(data.accessExpiresDays));
+}
 
 router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
   try {
@@ -340,7 +360,8 @@ router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
       published: data.published,
       sortOrder: data.sortOrder,
     });
-    const [inserted] = await db.select({ id: digitalProducts.id }).from(digitalProducts).orderBy(asc(digitalProducts.createdAt)).limit(1);
+    const [inserted] = await db.select({ id: digitalProducts.id }).from(digitalProducts).orderBy(desc(digitalProducts.createdAt)).limit(1);
+    if (inserted?.id) await saveDigitalAccessSettings(inserted.id, data);
     res.json({ success: true, id: inserted?.id ?? 0 });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
@@ -373,9 +394,11 @@ router.put("/digital/:id", requireAdmin, async (req: Request, res: Response) => 
     const id = parseInt(req.params.id as string);
     const data = digitalSchema.partial().parse(req.body);
     const db = await getDb();
-    const updateData: Record<string, unknown> = { ...data, updatedAt: new Date() };
+    const { downloadLimit, accessExpiresDays, ...productData } = data;
+    const updateData: Record<string, unknown> = { ...productData, updatedAt: new Date() };
     if (data.price !== undefined) updateData.price = String(data.price);
     await db.update(digitalProducts).set(updateData).where(eq(digitalProducts.id, id));
+    await saveDigitalAccessSettings(id, { downloadLimit, accessExpiresDays });
     res.json({ success: true });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
