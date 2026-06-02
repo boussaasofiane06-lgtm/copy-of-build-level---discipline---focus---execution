@@ -82,6 +82,17 @@ const getProductOptionLabel = (value: string) => {
 const getDisplaySizes = (sizes?: string[]) =>
   (Array.isArray(sizes) ? sizes : []).map(getProductOptionLabel).filter(Boolean).join(", ");
 
+const isLaunchBadge = (value?: string | null) => {
+  const badge = (value || "").trim().toLowerCase();
+  return badge === "coming soon" || badge === "new release" || badge === "limited edition" || badge === "featured";
+};
+
+const statusBadgeFor = (status: string) =>
+  status === "coming-soon" ? "Coming Soon" :
+  status === "new-release" ? "New Release" :
+  status === "limited-edition" ? "Limited Edition" :
+  "";
+
 const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
 
 export default function Admin() {
@@ -175,11 +186,8 @@ export default function Admin() {
     };
     try {
       const productImages = getProductImages(data.imageUrl);
-      const statusBadge = data.status === "available" ? "" :
-        data.status === "coming-soon" ? "Coming Soon" :
-        data.status === "new-release" ? "New Release" :
-        data.status === "limited-edition" ? "Limited Edition" : data.badge;
-      data.badge = statusBadge || data.badge;
+      const statusBadge = statusBadgeFor(data.status);
+      data.badge = statusBadge || (data.status === "available" && isLaunchBadge(data.badge) ? "" : data.badge);
       data.inStock = data.status === "coming-soon" ? false : data.inStock;
       if (!data.published) {
         (data as any).hidden = true;
@@ -549,14 +557,38 @@ export default function Admin() {
                           placeholder="S, M, L, XL"
                         />
                         {(editProduct?.printifyProductId || editProduct?.shopifyProductId) && (
-                          <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
-                            Synced variants are managed by the integration and preserved when saving.
-                          </p>
+                          <>
+                            <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
+                              Synced variants are managed by the integration and preserved when saving.
+                            </p>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
+                              {(editProduct.sizes || []).map((size, index) => {
+                                const label = getProductOptionLabel(size);
+                                return label ? (
+                                  <span key={`${label}-${index}`} style={{ border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", color: "var(--text2)", fontSize: "0.72rem" }}>
+                                    {label}
+                                  </span>
+                                ) : null;
+                              })}
+                            </div>
+                          </>
                         )}
                       </div>
                       <div>
                         <label style={labelStyle}>Storefront Status</label>
-                        <select style={inputStyle} value={productForm.status} onChange={e => setProductForm(f => ({ ...f, status: e.target.value, inStock: e.target.value === "coming-soon" ? false : f.inStock }))}>
+                        <select
+                          style={inputStyle}
+                          value={productForm.status}
+                          onChange={e => {
+                            const status = e.target.value;
+                            setProductForm(f => ({
+                              ...f,
+                              status,
+                              badge: statusBadgeFor(status) || (isLaunchBadge(f.badge) ? "" : f.badge),
+                              inStock: status === "coming-soon" ? false : f.inStock,
+                            }));
+                          }}
+                        >
                           <option value="available">Available</option>
                           <option value="coming-soon">Coming Soon</option>
                           <option value="new-release">New Release</option>
