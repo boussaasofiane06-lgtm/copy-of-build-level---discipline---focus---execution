@@ -18,6 +18,39 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2026-05-27.dahlia",
 });
 
+function isLocalhostUrl(value: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(value);
+}
+
+function isBackendHost(host: string) {
+  return /onrender\.com$/i.test(host) || /^build-level-backend/i.test(host);
+}
+
+function normalizeOrigin(value?: string | string[]) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return "";
+  try {
+    const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "";
+  }
+}
+
+function getFrontendOrigin(req: any) {
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "");
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "https").replace(":", "") || "https";
+  if (forwardedHost && !isBackendHost(forwardedHost)) return `${forwardedProto}://${forwardedHost}`;
+
+  const requestOrigin = normalizeOrigin(req.headers.origin);
+  if (requestOrigin && (process.env.NODE_ENV !== "production" || !isLocalhostUrl(requestOrigin))) return requestOrigin;
+
+  const envOrigin = normalizeOrigin(process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || process.env.SITE_URL);
+  if (envOrigin && (process.env.NODE_ENV !== "production" || !isLocalhostUrl(envOrigin))) return envOrigin;
+
+  return process.env.NODE_ENV === "production" ? "https://thebuildlevel.com" : "http://localhost:3000";
+}
+
 // PayPal client
 const paypalClient = new Client({
   clientCredentialsAuthCredentials: {
@@ -59,7 +92,7 @@ export const appRouter = router({
         })
       )
       .mutation(async ({ input, ctx }) => {
-        const origin = ctx.req.headers.origin || "http://localhost:3000";
+        const origin = getFrontendOrigin(ctx.req);
 
         const lineItems = input.items.map((item) => ({
           price_data: {
@@ -400,7 +433,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         const rows = await db.select().from(digitalProducts).where(eq(digitalProducts.id, input.productId));
         const product = rows[0];
         if (!product || !product.published) throw new Error("Product not found");
-        const origin = ctx.req.headers.origin || "http://localhost:3000";
+        const origin = getFrontendOrigin(ctx.req);
         const downloadToken = crypto.randomBytes(32).toString("hex");
         // Store pending purchase
         await db.insert(digitalPurchases).values({

@@ -48,6 +48,41 @@ function getStripe() {
   });
 }
 
+function isLocalhostUrl(value: string) {
+  return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(value);
+}
+
+function isBackendHost(host: string) {
+  return /onrender\.com$/i.test(host) || /^build-level-backend/i.test(host);
+}
+
+function normalizeOrigin(value?: string | string[]) {
+  const raw = Array.isArray(value) ? value[0] : value;
+  if (!raw) return "";
+  try {
+    const url = new URL(raw.startsWith("http") ? raw : `https://${raw}`);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "";
+  }
+}
+
+function getFrontendOrigin(req: Request) {
+  const forwardedHost = String(req.headers["x-forwarded-host"] || "");
+  const forwardedProto = String(req.headers["x-forwarded-proto"] || "https").replace(":", "") || "https";
+  if (forwardedHost && !isBackendHost(forwardedHost)) {
+    return `${forwardedProto}://${forwardedHost}`;
+  }
+
+  const requestOrigin = normalizeOrigin(req.headers.origin);
+  if (requestOrigin && (process.env.NODE_ENV !== "production" || !isLocalhostUrl(requestOrigin))) return requestOrigin;
+
+  const envOrigin = normalizeOrigin(process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || process.env.SITE_URL);
+  if (envOrigin && (process.env.NODE_ENV !== "production" || !isLocalhostUrl(envOrigin))) return envOrigin;
+
+  return process.env.NODE_ENV === "production" ? "https://thebuildlevel.com" : "http://localhost:5173";
+}
+
 type CheckoutLineItem = {
   name: string;
   unitAmount: number;
@@ -484,7 +519,7 @@ router.post("/checkout", async (req: Request, res: Response) => {
       return;
     }
     const { items, currency = "usd", customerEmail } = req.body;
-    const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
+    const origin = getFrontendOrigin(req);
 
     if (!Array.isArray(items) || items.length === 0) {
       res.status(400).json({ error: "Checkout requires at least one item" });
@@ -541,7 +576,7 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
       return;
     }
     const { productId, customerEmail } = req.body;
-    const origin = req.headers.origin || process.env.FRONTEND_URL || "http://localhost:5173";
+    const origin = getFrontendOrigin(req);
     const parsedProductId = Number(productId);
     if (!Number.isInteger(parsedProductId) || parsedProductId <= 0) {
       res.status(400).json({ error: "Valid productId is required", debug: { ...debugContext, receivedProductId: productId } });
