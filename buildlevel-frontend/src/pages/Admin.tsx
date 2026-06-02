@@ -32,6 +32,13 @@ type DigitalUploadConfig = {
   storage: { configured: boolean; provider: string };
 };
 
+type ProductVariantRow = {
+  label: string;
+  price: string;
+  variantId?: string;
+  raw?: string;
+};
+
 const storageImageUrl = (value?: string | null) => {
   if (!value) return "";
   if (value.startsWith("storage:")) {
@@ -79,6 +86,48 @@ const getProductOptionLabel = (value: string) => {
   return trimmed.replace(/^"+|"+$/g, "");
 };
 
+const parseProductVariantRow = (value: string, fallbackPrice = ""): ProductVariantRow | null => {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^"?variantId"?\s*:/i.test(trimmed) || /^"?price"?\s*:/i.test(trimmed)) return null;
+
+  if (trimmed.startsWith("{")) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      const label = String(parsed?.label || "").trim();
+      if (!label) return null;
+      return {
+        label,
+        price: parsed?.price ? String(parsed.price) : fallbackPrice,
+        variantId: parsed?.variantId ? String(parsed.variantId) : undefined,
+        raw: value,
+      };
+    } catch {
+      const labelMatch = trimmed.match(/"label"\s*:\s*"([^"]+)/i);
+      if (!labelMatch?.[1]) return null;
+      return { label: labelMatch[1], price: fallbackPrice, raw: value };
+    }
+  }
+
+  const label = trimmed.replace(/^"+|"+$/g, "");
+  return label ? { label, price: fallbackPrice, raw: value } : null;
+};
+
+const getProductVariantRows = (sizes?: string[], fallbackPrice = "") =>
+  (Array.isArray(sizes) ? sizes : [])
+    .map(size => parseProductVariantRow(size, fallbackPrice))
+    .filter((row): row is ProductVariantRow => !!row && !!row.label);
+
+const serializeProductVariantRows = (rows: ProductVariantRow[]) =>
+  rows
+    .map(row => ({
+      label: row.label.trim(),
+      variantId: row.variantId,
+      price: row.price ? String(row.price).trim() : undefined,
+    }))
+    .filter(row => row.label)
+    .map(row => row.variantId || row.price ? JSON.stringify(row) : row.label);
+
 const getDisplaySizes = (sizes?: string[]) =>
   (Array.isArray(sizes) ? sizes : []).map(getProductOptionLabel).filter(Boolean).join(", ");
 
@@ -115,6 +164,7 @@ export default function Admin() {
   const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as ApparelAudience, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false });
   const [customProductCategory, setCustomProductCategory] = useState("");
   const [productImagePreviews, setProductImagePreviews] = useState<string[]>([]);
+  const [productVariantRows, setProductVariantRows] = useState<ProductVariantRow[]>([]);
 
   // Digital form
   const [showDigitalForm, setShowDigitalForm] = useState(false);
@@ -175,13 +225,13 @@ export default function Admin() {
     e.preventDefault();
     const { audience: _audience, ...productPayload } = productForm;
     const syncedProduct = !!(editProduct?.printifyProductId || editProduct?.shopifyProductId);
-    const preservedSyncedSizes = Array.isArray(editProduct?.sizes) ? editProduct.sizes : [];
+    const editedSyncedSizes = serializeProductVariantRows(productVariantRows);
     const data = {
       ...productPayload,
       price: parseFloat(productForm.price),
       compareAtPrice: productForm.compareAtPrice ? parseFloat(productForm.compareAtPrice) : undefined,
-      sizes: syncedProduct && preservedSyncedSizes.length > 0
-        ? preservedSyncedSizes
+      sizes: syncedProduct && editedSyncedSizes.length > 0
+        ? editedSyncedSizes
         : productForm.sizes.split(",").map(s => s.trim()).filter(Boolean),
     };
     try {
@@ -213,6 +263,7 @@ export default function Admin() {
       setShowProductForm(false); setEditProduct(null);
       setCustomProductCategory("");
       setProductImagePreviews([]);
+      setProductVariantRows([]);
       loadData();
     } catch (error: any) {
       showToast(error?.response?.data?.error || error?.message || "Error saving product");
@@ -296,6 +347,7 @@ export default function Admin() {
     setEditProduct(p);
     setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: getDisplaySizes(p.sizes), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
     setCustomProductCategory(getCategoryBySlug(p.category) ? "" : getCategoryLabel(p.category));
+    setProductVariantRows(getProductVariantRows(p.sizes, p.price));
     setProductImagePreviews(getProductImages(p.imageUrl));
     setShowProductForm(true);
   };
@@ -485,7 +537,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Apparel Products ({products.length})</h3>
-                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false }); setCustomProductCategory(""); setProductImagePreviews([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
+                  <button onClick={() => { setEditProduct(null); setProductForm({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false }); setCustomProductCategory(""); setProductImagePreviews([]); setProductVariantRows([]); setShowProductForm(true); }} className="btn btn-primary btn-sm">+ Add Product</button>
                 </div>
 
                 {showProductForm && (
@@ -549,29 +601,49 @@ export default function Admin() {
                       <div><label style={labelStyle}>Compare At Price</label><input style={inputStyle} type="number" step="0.01" value={productForm.compareAtPrice} onChange={e => setProductForm(f => ({ ...f, compareAtPrice: e.target.value }))} /></div>
                       <div>
                         <label style={labelStyle}>Sizes / Variants</label>
-                        <input
-                          style={{ ...inputStyle, opacity: editProduct?.printifyProductId || editProduct?.shopifyProductId ? 0.72 : 1 }}
-                          value={productForm.sizes}
-                          disabled={!!(editProduct?.printifyProductId || editProduct?.shopifyProductId)}
-                          onChange={e => setProductForm(f => ({ ...f, sizes: e.target.value }))}
-                          placeholder="S, M, L, XL"
-                        />
-                        {(editProduct?.printifyProductId || editProduct?.shopifyProductId) && (
+                        {editProduct?.printifyProductId || editProduct?.shopifyProductId ? (
                           <>
                             <p style={{ color: "var(--text3)", fontSize: "0.72rem", marginTop: 6 }}>
-                              Synced variants are managed by the integration and preserved when saving.
+                              Edit customer-facing labels and prices. Variant IDs are preserved for checkout and fulfillment.
                             </p>
-                            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginTop: 8 }}>
-                              {(editProduct.sizes || []).map((size, index) => {
-                                const label = getProductOptionLabel(size);
-                                return label ? (
-                                  <span key={`${label}-${index}`} style={{ border: "1px solid var(--border)", borderRadius: 4, padding: "4px 8px", color: "var(--text2)", fontSize: "0.72rem" }}>
-                                    {label}
-                                  </span>
-                                ) : null;
-                              })}
+                            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+                              {productVariantRows.map((row, index) => (
+                                <div key={`${row.variantId || row.label}-${index}`} style={{ display: "grid", gridTemplateColumns: "minmax(160px, 1fr) 110px auto", gap: 8, alignItems: "center" }}>
+                                  <input
+                                    style={inputStyle}
+                                    value={row.label}
+                                    onChange={e => setProductVariantRows(rows => rows.map((item, i) => i === index ? { ...item, label: e.target.value } : item))}
+                                    placeholder="Variant label"
+                                  />
+                                  <input
+                                    style={inputStyle}
+                                    type="number"
+                                    min="0"
+                                    step="0.01"
+                                    value={row.price}
+                                    onChange={e => setProductVariantRows(rows => rows.map((item, i) => i === index ? { ...item, price: e.target.value } : item))}
+                                    placeholder="Price"
+                                  />
+                                  <button type="button" className="btn btn-outline btn-sm" onClick={() => setProductVariantRows(rows => rows.filter((_, i) => i !== index))}>Remove</button>
+                                  {row.variantId && <p style={{ gridColumn: "1/-1", color: "var(--text3)", fontSize: "0.68rem", marginTop: -4 }}>Variant ID: {row.variantId}</p>}
+                                </div>
+                              ))}
+                              <button
+                                type="button"
+                                className="btn btn-outline btn-sm"
+                                onClick={() => setProductVariantRows(rows => [...rows, { label: "New Option", price: productForm.price || "", variantId: undefined }])}
+                              >
+                                + Add Website Option
+                              </button>
                             </div>
                           </>
+                        ) : (
+                          <input
+                            style={inputStyle}
+                            value={productForm.sizes}
+                            onChange={e => setProductForm(f => ({ ...f, sizes: e.target.value }))}
+                            placeholder="S, M, L, XL"
+                          />
                         )}
                       </div>
                       <div>
@@ -635,7 +707,7 @@ export default function Admin() {
                       </div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
                         <button type="submit" className="btn btn-primary btn-sm">Save Product</button>
-                        <button type="button" onClick={() => { setShowProductForm(false); setEditProduct(null); setProductImagePreviews([]); }} className="btn btn-outline btn-sm">Cancel</button>
+                        <button type="button" onClick={() => { setShowProductForm(false); setEditProduct(null); setProductImagePreviews([]); setProductVariantRows([]); }} className="btn btn-outline btn-sm">Cancel</button>
                       </div>
                     </form>
                   </div>
