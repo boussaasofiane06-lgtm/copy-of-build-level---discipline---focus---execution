@@ -47,6 +47,25 @@ export default function Footer() {
               <a href="mailto:info@thebuildlevel.com" style={{ color: "var(--text3)", fontSize: "0.85rem", transition: "color 0.2s" }}>info@thebuildlevel.com</a>
             </div>
           </div>
+          <div>
+            <div style={{ fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.15em", color: "var(--text2)", marginBottom: 16, textTransform: "uppercase" }}>Policies</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {[
+                ["Policy Center", "/policies"],
+                ["Returns & Refunds", "/policies/return-refund-policy"],
+                ["Shipping", "/policies/shipping-policy"],
+                ["Digital Products", "/policies/digital-product-policy"],
+                ["Privacy", "/policies/privacy-policy"],
+                ["Terms", "/policies/terms-conditions"],
+                ["FAQ", "/faq"],
+              ].map(([label, to]) => (
+                <Link key={to} to={to} style={{ color: "var(--text3)", fontSize: "0.85rem", transition: "color 0.2s" }}
+                  onMouseEnter={e => (e.currentTarget.style.color = "var(--text)")}
+                  onMouseLeave={e => (e.currentTarget.style.color = "var(--text3)")}
+                >{label}</Link>
+              ))}
+            </div>
+          </div>
         </div>
         <div style={{ borderTop: "1px solid var(--border)", paddingTop: 24, display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 12 }}>
           <p style={{ color: "var(--text3)", fontSize: "0.8rem" }}>© {new Date().getFullYear()} BUILD LEVEL. All rights reserved.</p>

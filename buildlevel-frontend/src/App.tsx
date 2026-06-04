@@ -15,6 +15,7 @@ import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Admin from "./pages/Admin";
 import Maintenance from "./pages/Maintenance";
+import PolicyPage, { FAQPage, PolicyCenter } from "./pages/PolicyPage";
 import { MaintenanceConfig, publicApi } from "./lib/api";
 
 function RouteInteractionCleanup() {
@@ -42,6 +43,9 @@ function PublicRoutes() {
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/about" element={<About />} />
           <Route path="/contact" element={<Contact />} />
+          <Route path="/policies" element={<PolicyCenter />} />
+          <Route path="/policies/:slug" element={<PolicyPage />} />
+          <Route path="/faq" element={<FAQPage />} />
           <Route path="*" element={
             <div style={{ textAlign: "center", padding: 120 }}>
               <h1 style={{ marginBottom: 16 }}>404</h1>
