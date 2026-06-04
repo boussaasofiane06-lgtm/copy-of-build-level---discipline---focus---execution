@@ -91,7 +91,7 @@ export default function DigitalSuccess() {
             <div>
               <h2 style={{ fontSize: "1.2rem", marginBottom: 8 }}>{access.productName}</h2>
               <p style={{ color: "var(--text2)", marginBottom: 18 }}>Access granted for {access.email}.</p>
-              <a href={access.downloadUrl} target="_blank" rel="noreferrer" className="btn btn-primary" style={{ width: "100%", justifyContent: "center", marginBottom: 12 }}>
+              <a href={access.downloadUrl} download className="btn btn-primary" style={{ width: "100%", justifyContent: "center", marginBottom: 12 }}>
                 Download {access.fileName || "Digital Product"}
               </a>
               <p style={{ color: "var(--text3)", fontSize: "0.78rem", lineHeight: 1.6 }}>

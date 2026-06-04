@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { eq, asc, and } from "drizzle-orm";
 import { z } from "zod";
+import { Readable } from "stream";
 import { getDb } from "../db/index.js";
 import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
@@ -168,6 +169,26 @@ const purchaseDownloadLimitKey = (purchaseId: number) => `digital_purchase_${pur
 const purchaseDownloadCountKey = (purchaseId: number) => `digital_purchase_${purchaseId}_download_count`;
 const purchaseExpiresAtKey = (purchaseId: number) => `digital_purchase_${purchaseId}_expires_at`;
 
+function safeDownloadFileName(value?: string | null) {
+  const fileName = (value || "build-level-digital-product").trim();
+  return fileName.replace(/[^\w.\- ()]+/g, "_").slice(0, 180) || "build-level-digital-product";
+}
+
+async function streamDownload(res: any, url: string, fileName?: string | null) {
+  const upstream = await fetch(url);
+  if (!upstream.ok || !upstream.body) {
+    throw new Error(`Download source unavailable (${upstream.status})`);
+  }
+
+  res.setHeader("Content-Type", upstream.headers.get("content-type") || "application/octet-stream");
+  const contentLength = upstream.headers.get("content-length");
+  if (contentLength) res.setHeader("Content-Length", contentLength);
+  res.setHeader("Content-Disposition", `attachment; filename="${safeDownloadFileName(fileName)}"`);
+  res.setHeader("Cache-Control", "private, no-store");
+
+  Readable.fromWeb(upstream.body as any).pipe(res);
+}
+
 // ─── Products ─────────────────────────────────────────────────────────────────
 router.get("/products", async (req, res) => {
   try {
@@ -289,9 +310,9 @@ router.get("/digital/download/:token", async (req, res) => {
     if (product.fileKey) url = await getProtectedDownloadUrl(product.fileKey);
     if (!url) { res.status(404).json({ error: "No downloadable file configured" }); return; }
 
+    await streamDownload(res, url, product.fileName || product.name);
     await db.update(digitalPurchases).set({ downloadedAt: new Date() }).where(eq(digitalPurchases.id, purchase.id));
     await saveSetting(purchaseDownloadCountKey(purchase.id), String(count + 1));
-    res.redirect(302, url);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }
