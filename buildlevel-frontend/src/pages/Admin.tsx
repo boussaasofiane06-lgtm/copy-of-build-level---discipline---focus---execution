@@ -143,33 +143,7 @@ const statusBadgeFor = (status: string) =>
   "";
 
 const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
-const DEFAULT_DIGITAL_FILE_TYPES = [
-  ".pdf",
-  ".zip",
-  ".mp3",
-  ".m4a",
-  ".aac",
-  ".wav",
-  ".ogg",
-  ".flac",
-  ".mp4",
-  ".mov",
-  ".png",
-  ".jpg",
-  ".jpeg",
-  ".webp",
-  ".docx",
-  ".pptx",
-  ".xlsx",
-];
-
-const getFileExtension = (fileName: string) => {
-  const dotIndex = fileName.lastIndexOf(".");
-  return dotIndex >= 0 ? fileName.slice(dotIndex).toLowerCase() : "";
-};
-
-const formatAllowedFileTypes = (extensions: string[]) =>
-  extensions.map(extension => extension.replace(/^\./, "").toUpperCase()).join(", ");
+const DIGITAL_FILE_TYPE_EXAMPLES = "PDF, ZIP, MP3, M4A, WAV, MP4, MOV, PNG, JPG, DOCX, PPTX, XLSX";
 
 export default function Admin() {
   const [authed, setAuthed] = useState(false);
@@ -202,9 +176,6 @@ export default function Admin() {
   const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
   const [digitalFileInfo, setDigitalFileInfo] = useState<{ name: string; size: number; mimeType: string } | null>(null);
   const [digitalUploadConfig, setDigitalUploadConfig] = useState<DigitalUploadConfig | null>(null);
-  const allowedDigitalFileTypes = digitalUploadConfig?.allowedFileTypes?.length ? digitalUploadConfig.allowedFileTypes : DEFAULT_DIGITAL_FILE_TYPES;
-  const allowedDigitalFileAccept = allowedDigitalFileTypes.join(",");
-  const allowedDigitalFileTypeLabel = formatAllowedFileTypes(allowedDigitalFileTypes);
 
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
@@ -425,12 +396,6 @@ export default function Admin() {
   };
 
   const uploadDigitalFile = async (file: File) => {
-    const extension = getFileExtension(file.name);
-    if (!allowedDigitalFileTypes.includes(extension)) {
-      setDigitalUploadProgress(0);
-      showToast(`Unsupported file type: ${extension || "unknown"}. Allowed types: ${allowedDigitalFileTypeLabel}`);
-      return;
-    }
     if (file.size > DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES) {
       setDigitalUploadProgress(0);
       showToast(`This file is ${formatBytes(file.size)}. Large videos must be uploaded directly to R2/S3 or pasted as a Digital File URL.`);
@@ -815,14 +780,13 @@ export default function Admin() {
                             Upload storage is not configured on Render. Add R2/S3 upload env vars to upload videos/PDFs directly, or paste a hosted file URL below.
                           </div>
                         )}
-                        <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop a supported digital file here, or tap to select from mobile/desktop. Allowed: {allowedDigitalFileTypeLabel}.</p>
+                        <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop any digital file here, or tap to select from mobile/desktop. Common types: {DIGITAL_FILE_TYPE_EXAMPLES}.</p>
                         <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginBottom: 12 }}>
                           Large videos over {formatBytes(DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES)} should be uploaded to R2/S3 first, then pasted in Digital File URL. Browser uploads pass through Cloudflare/Render request limits.
                         </p>
                         <input
                           style={inputStyle}
                           type="file"
-                          accept={allowedDigitalFileAccept}
                           disabled={digitalUploadConfig?.storage.configured === false}
                           onChange={e => { const file = e.target.files?.[0]; if (file) uploadDigitalFile(file); }}
                         />

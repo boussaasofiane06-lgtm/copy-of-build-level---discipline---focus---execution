@@ -9,7 +9,7 @@ import {
   membershipTiers, siteSettings, aiVideos
 } from "../db/schema.js";
 import { requireAdmin, verifyAdminPassword, signAdminToken, ADMIN_COOKIE } from "../middleware/adminAuth.js";
-import { ALLOWED_IMAGE_EXTENSIONS, ALLOWED_UPLOAD_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, isStorageConfigured, uploadObject } from "../storage/objectStorage.js";
+import { ALLOWED_IMAGE_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, isStorageConfigured, uploadObject } from "../storage/objectStorage.js";
 
 const router = Router();
 const upload = multer({
@@ -369,7 +369,7 @@ router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
 router.get("/digital/upload-config", requireAdmin, (req: Request, res: Response) => {
   res.json({
     maxDigitalFileSizeBytes: MAX_DIGITAL_FILE_SIZE_BYTES,
-    allowedFileTypes: ALLOWED_UPLOAD_EXTENSIONS,
+    allowedFileTypes: [],
     allowedThumbnailTypes: ALLOWED_IMAGE_EXTENSIONS,
     storage: {
       configured: isStorageConfigured(),

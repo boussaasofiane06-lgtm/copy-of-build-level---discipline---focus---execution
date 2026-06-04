@@ -84,10 +84,9 @@ function normalizeName(name: string) {
 
 export function validateUploadFile(file: UploadedFile, kind: UploadKind) {
   const ext = path.extname(file.originalname).toLowerCase();
-  const allowedExtensions = kind === "thumbnail" ? ALLOWED_IMAGE_EXTENSIONS : ALLOWED_UPLOAD_EXTENSIONS;
   const maxSize = kind === "thumbnail" ? MAX_THUMBNAIL_SIZE_BYTES : MAX_DIGITAL_FILE_SIZE_BYTES;
 
-  if (!allowedExtensions.includes(ext)) {
+  if (kind === "thumbnail" && !ALLOWED_IMAGE_EXTENSIONS.includes(ext)) {
     throw new Error(`Unsupported file type: ${ext || "unknown"}`);
   }
 
