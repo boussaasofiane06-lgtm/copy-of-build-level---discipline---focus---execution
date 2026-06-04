@@ -6,6 +6,28 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 export const ALLOWED_UPLOAD_EXTENSIONS = [
   ".pdf",
   ".zip",
+  ".mp3",
+  ".m4a",
+  ".m4b",
+  ".m4p",
+  ".aac",
+  ".wav",
+  ".wave",
+  ".ogg",
+  ".oga",
+  ".opus",
+  ".flac",
+  ".alac",
+  ".aiff",
+  ".aif",
+  ".aifc",
+  ".wma",
+  ".amr",
+  ".weba",
+  ".mid",
+  ".midi",
+  ".3gp",
+  ".3g2",
   ".mp4",
   ".mov",
   ".png",
@@ -80,8 +102,9 @@ export function validateUploadFile(file: UploadedFile, kind: UploadKind) {
   const ext = path.extname(file.originalname).toLowerCase();
   const allowedExtensions = kind === "thumbnail" ? ALLOWED_IMAGE_EXTENSIONS : ALLOWED_UPLOAD_EXTENSIONS;
   const maxSize = kind === "thumbnail" ? MAX_THUMBNAIL_SIZE_BYTES : MAX_DIGITAL_FILE_SIZE_BYTES;
+  const isSupportedAudio = kind === "digital" && file.mimetype.toLowerCase().startsWith("audio/");
 
-  if (!allowedExtensions.includes(ext)) {
+  if (!allowedExtensions.includes(ext) && !isSupportedAudio) {
     throw new Error(`Unsupported file type: ${ext || "unknown"}`);
   }
 
