@@ -27,8 +27,8 @@ export default function BlogPostPage() {
   return (
     <div>
       {post.imageUrl && (
-        <div style={{ height: 400, overflow: "hidden" }}>
-          <img src={post.imageUrl} alt={post.title} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <div className="blog-detail-hero">
+          <img src={post.imageUrl} alt={post.title} />
         </div>
       )}
       <div className="container" style={{ maxWidth: 720, padding: "64px 24px" }}>
