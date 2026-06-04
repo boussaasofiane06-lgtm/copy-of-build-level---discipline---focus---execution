@@ -6,11 +6,19 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 export const ALLOWED_UPLOAD_EXTENSIONS = [
   ".pdf",
   ".zip",
+  ".aa",
+  ".aax",
   ".mp3",
+  ".mp2",
+  ".mp1",
+  ".mpga",
+  ".mpeg",
   ".m4a",
   ".m4b",
   ".m4p",
   ".aac",
+  ".ac3",
+  ".eac3",
   ".wav",
   ".wave",
   ".ogg",
@@ -18,11 +26,27 @@ export const ALLOWED_UPLOAD_EXTENSIONS = [
   ".opus",
   ".flac",
   ".alac",
+  ".caf",
   ".aiff",
   ".aif",
   ".aifc",
   ".wma",
   ".amr",
+  ".ape",
+  ".au",
+  ".snd",
+  ".ra",
+  ".ram",
+  ".mka",
+  ".mks",
+  ".m3u",
+  ".m3u8",
+  ".pls",
+  ".spx",
+  ".voc",
+  ".gsm",
+  ".qcp",
+  ".dts",
   ".weba",
   ".mid",
   ".midi",
@@ -52,6 +76,11 @@ type UploadedFile = {
   size: number;
   buffer: Buffer;
 };
+
+function getUploadExtension(fileName: string) {
+  const cleanName = fileName.trim().split(/[?#]/, 1)[0] || fileName.trim();
+  return path.extname(cleanName).trim().toLowerCase();
+}
 
 function storageConfig() {
   const bucket = process.env.UPLOAD_BUCKET || process.env.R2_BUCKET || process.env.S3_BUCKET;
@@ -99,13 +128,17 @@ function normalizeName(name: string) {
 }
 
 export function validateUploadFile(file: UploadedFile, kind: UploadKind) {
-  const ext = path.extname(file.originalname).toLowerCase();
+  const ext = getUploadExtension(file.originalname);
   const allowedExtensions = kind === "thumbnail" ? ALLOWED_IMAGE_EXTENSIONS : ALLOWED_UPLOAD_EXTENSIONS;
   const maxSize = kind === "thumbnail" ? MAX_THUMBNAIL_SIZE_BYTES : MAX_DIGITAL_FILE_SIZE_BYTES;
-  const isSupportedAudio = kind === "digital" && file.mimetype.toLowerCase().startsWith("audio/");
+  const normalizedMime = file.mimetype.toLowerCase();
+  const isSupportedAudio = kind === "digital" && (
+    normalizedMime.startsWith("audio/") ||
+    (normalizedMime === "application/octet-stream" && allowedExtensions.includes(ext))
+  );
 
   if (!allowedExtensions.includes(ext) && !isSupportedAudio) {
-    throw new Error(`Unsupported file type: ${ext || "unknown"}`);
+    throw new Error(`Unsupported file type: ${ext || "unknown"} (${file.mimetype || "unknown MIME"})`);
   }
 
   if (file.size > maxSize) {
@@ -117,7 +150,7 @@ export async function uploadObject(file: UploadedFile, kind: UploadKind) {
   validateUploadFile(file, kind);
 
   const { client, bucket, publicBaseUrl } = createClient();
-  const ext = path.extname(file.originalname).toLowerCase();
+  const ext = getUploadExtension(file.originalname);
   const safeName = normalizeName(path.basename(file.originalname, ext)) || "upload";
   const key = `${kind}/${new Date().toISOString().slice(0, 10)}/${randomUUID()}-${safeName}${ext}`;
 
