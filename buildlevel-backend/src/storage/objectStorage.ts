@@ -6,6 +6,12 @@ import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 export const ALLOWED_UPLOAD_EXTENSIONS = [
   ".pdf",
   ".zip",
+  ".mp3",
+  ".m4a",
+  ".aac",
+  ".wav",
+  ".ogg",
+  ".flac",
   ".mp4",
   ".mov",
   ".png",
