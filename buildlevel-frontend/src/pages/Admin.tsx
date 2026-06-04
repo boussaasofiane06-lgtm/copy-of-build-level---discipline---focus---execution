@@ -143,6 +143,65 @@ const statusBadgeFor = (status: string) =>
   "";
 
 const DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES = 95 * 1024 * 1024;
+const DEFAULT_DIGITAL_FILE_ACCEPT_TYPES = [
+  ".pdf",
+  ".zip",
+  ".aa",
+  ".aax",
+  ".mp3",
+  ".mp2",
+  ".mp1",
+  ".mpga",
+  ".mpeg",
+  ".m4a",
+  ".m4b",
+  ".m4p",
+  ".aac",
+  ".ac3",
+  ".eac3",
+  ".wav",
+  ".wave",
+  ".ogg",
+  ".oga",
+  ".opus",
+  ".flac",
+  ".alac",
+  ".caf",
+  ".aiff",
+  ".aif",
+  ".aifc",
+  ".wma",
+  ".amr",
+  ".ape",
+  ".au",
+  ".snd",
+  ".ra",
+  ".ram",
+  ".mka",
+  ".mks",
+  ".m3u",
+  ".m3u8",
+  ".pls",
+  ".spx",
+  ".voc",
+  ".gsm",
+  ".qcp",
+  ".dts",
+  ".weba",
+  ".mid",
+  ".midi",
+  ".3gp",
+  ".3g2",
+  ".mp4",
+  ".mov",
+  ".png",
+  ".jpg",
+  ".jpeg",
+  ".webp",
+  ".docx",
+  ".pptx",
+  ".xlsx",
+];
 
 export default function Admin() {
   const [authed, setAuthed] = useState(false);
@@ -175,6 +234,12 @@ export default function Admin() {
   const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
   const [digitalFileInfo, setDigitalFileInfo] = useState<{ name: string; size: number; mimeType: string } | null>(null);
   const [digitalUploadConfig, setDigitalUploadConfig] = useState<DigitalUploadConfig | null>(null);
+  const digitalFileAccept = [
+    "audio/*",
+    ...(digitalUploadConfig?.allowedFileTypes?.length
+      ? digitalUploadConfig.allowedFileTypes
+      : DEFAULT_DIGITAL_FILE_ACCEPT_TYPES),
+  ].join(",");
 
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
@@ -779,14 +844,14 @@ export default function Admin() {
                             Upload storage is not configured on Render. Add R2/S3 upload env vars to upload videos/PDFs directly, or paste a hosted file URL below.
                           </div>
                         )}
-                        <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop a PDF, ZIP, video, image, DOCX, PPTX, or XLSX file here, or tap to select from mobile/desktop.</p>
+                        <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginBottom: 12 }}>Drop a PDF, ZIP, audio/audiobook, video, image, DOCX, PPTX, or XLSX file here, or tap to select from mobile/desktop.</p>
                         <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginBottom: 12 }}>
-                          Large videos over {formatBytes(DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES)} should be uploaded to R2/S3 first, then pasted in Digital File URL. Browser uploads pass through Cloudflare/Render request limits.
+                          Large audio or video files over {formatBytes(DIRECT_SERVER_UPLOAD_RECOMMENDED_MAX_BYTES)} should be uploaded to R2/S3 first, then pasted in Digital File URL. Browser uploads pass through Cloudflare/Render request limits.
                         </p>
                         <input
                           style={inputStyle}
                           type="file"
-                          accept=".pdf,.zip,.mp4,.mov,.png,.jpg,.jpeg,.webp,.docx,.pptx,.xlsx"
+                          accept={digitalFileAccept}
                           disabled={digitalUploadConfig?.storage.configured === false}
                           onChange={e => { const file = e.target.files?.[0]; if (file) uploadDigitalFile(file); }}
                         />
