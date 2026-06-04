@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { adminApi, Product, BlogPost, DigitalProduct, MaintenanceConfig } from "../lib/api";
 import AdminIntegrationsPanel from "../components/AdminIntegrationsPanel";
+import AdminModerationPanel from "../components/AdminModerationPanel";
 import {
   APPAREL_AUDIENCES,
   DEFAULT_AUDIENCE,
@@ -15,7 +16,7 @@ import {
 } from "../lib/apparelCategories";
 import { BLOG_CATEGORIES, DEFAULT_BLOG_CATEGORY, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
 
-type Tab = "products" | "digital" | "blog" | "integrations" | "maintenance";
+type Tab = "products" | "digital" | "blog" | "integrations" | "moderation" | "maintenance";
 
 const defaultMaintenanceConfig: MaintenanceConfig = {
   enabled: false,
@@ -517,14 +518,14 @@ export default function Admin() {
       {/* Tabs */}
       <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg2)" }}>
         <div className="container" style={{ display: "flex", gap: 0, flexWrap: "wrap", rowGap: 4 }}>
-          {(["products", "digital", "blog", "integrations", "maintenance"] as Tab[]).map(t => (
+          {(["products", "digital", "blog", "integrations", "moderation", "maintenance"] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: "14px 24px", background: "none", border: "none", cursor: "pointer",
               fontFamily: "var(--font-display)", fontSize: "0.8rem", letterSpacing: "0.1em", textTransform: "uppercase",
               color: tab === t ? "var(--text)" : "var(--text2)",
               borderBottom: tab === t ? "2px solid var(--red)" : "2px solid transparent",
             }}>
-              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : t === "integrations" ? "Integrations" : "Maintenance"}
+              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : t === "integrations" ? "Integrations" : t === "moderation" ? "Moderation" : "Maintenance"}
             </button>
           ))}
         </div>
@@ -962,6 +963,10 @@ export default function Admin() {
 
             {tab === "integrations" && (
               <AdminIntegrationsPanel showToast={showToast} />
+            )}
+
+            {tab === "moderation" && (
+              <AdminModerationPanel showToast={showToast} />
             )}
 
             {tab === "maintenance" && (

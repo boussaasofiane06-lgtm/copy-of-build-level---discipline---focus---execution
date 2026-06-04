@@ -2,15 +2,19 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { Reveal } from "../components/Motion";
+import { Stars } from "../components/Engagement";
 import { BuildLevelHero, GymMotivationSection, MountainLegacySection } from "../components/PromoVisualSections";
-import { publicApi, Product } from "../lib/api";
+import { publicApi, Product, Review } from "../lib/api";
 
 export default function Home() {
   const [featured, setFeatured] = useState<Product[]>([]);
+  const [reviews, setReviews] = useState<Review[]>([]);
+  const [reviewStats, setReviewStats] = useState({ averageRating: 0, count: 0 });
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     publicApi.getProducts().then(p => setFeatured(p.filter(x => x.featured).slice(0, 3))).catch(() => {});
+    publicApi.getReviews({ featured: true, limit: 8 }).then(result => { setReviews(result.reviews); setReviewStats({ averageRating: result.averageRating, count: result.count }); }).catch(() => {});
   }, []);
 
   return (
@@ -83,6 +87,61 @@ export default function Home() {
       </section>
 
       <MountainLegacySection />
+
+      {reviews.length > 0 && (
+        <section className="section" style={{ background: "var(--bg2)" }}>
+          <script
+            type="application/ld+json"
+            dangerouslySetInnerHTML={{
+              __html: JSON.stringify({
+                "@context": "https://schema.org",
+                "@type": "Organization",
+                name: "Build Level",
+                aggregateRating: {
+                  "@type": "AggregateRating",
+                  ratingValue: reviewStats.averageRating,
+                  reviewCount: reviewStats.count,
+                },
+                review: reviews.slice(0, 5).map(review => ({
+                  "@type": "Review",
+                  author: review.customerName,
+                  reviewRating: { "@type": "Rating", ratingValue: review.rating, bestRating: 5 },
+                  reviewBody: review.reviewText,
+                  datePublished: review.createdAt,
+                })),
+              }),
+            }}
+          />
+          <div className="container">
+            <Reveal style={{ textAlign: "center", maxWidth: 760, margin: "0 auto 36px" }}>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.2em", color: "var(--red)", marginBottom: 8, textTransform: "uppercase" }}>Trusted by Customers</div>
+              <h2 style={{ marginBottom: 12 }}>Build Level Reviews</h2>
+              <div style={{ display: "inline-flex", alignItems: "center", gap: 10, color: "var(--text2)" }}>
+                <Stars value={reviewStats.averageRating} size={22} />
+                <span>{reviewStats.averageRating.toFixed(1)} average from {reviewStats.count} reviews</span>
+              </div>
+            </Reveal>
+            <div className="grid-3">
+              {reviews.slice(0, 3).map((review, index) => (
+                <Reveal key={review.id} delay={index * 0.08} className="card" style={{ padding: 22 }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 }}>
+                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                      {review.avatarUrl ? <img src={review.avatarUrl} alt={review.customerName} style={{ width: 42, height: 42, borderRadius: 999, objectFit: "cover" }} /> : <div style={{ width: 42, height: 42, borderRadius: 999, background: "var(--red)", color: "#fff", display: "flex", alignItems: "center", justifyContent: "center", fontFamily: "var(--font-display)" }}>{review.customerName.charAt(0)}</div>}
+                      <div>
+                        <strong>{review.customerName}</strong>
+                        {review.verifiedPurchase && <div className="badge badge-dark" style={{ marginTop: 4 }}>Verified Purchase</div>}
+                      </div>
+                    </div>
+                    <Stars value={review.rating} />
+                  </div>
+                  <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 12 }}>{review.reviewText}</p>
+                  <p style={{ color: "var(--text3)", fontSize: "0.75rem" }}>{new Date(review.createdAt).toLocaleDateString()}</p>
+                </Reveal>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* CTA */}
       <section className="section">

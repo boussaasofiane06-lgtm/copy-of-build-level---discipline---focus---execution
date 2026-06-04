@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useParams, Link } from "react-router-dom";
 import { publicApi, BlogPost } from "../lib/api";
 import { getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
+import { BlogEngagement } from "../components/Engagement";
 
 export default function BlogPostPage() {
   const { slug } = useParams<{ slug: string }>();
@@ -48,6 +49,7 @@ export default function BlogPostPage() {
         ) : (
           <p style={{ color: "var(--text2)" }}>{post.excerpt}</p>
         )}
+        <BlogEngagement postId={post.id} />
       </div>
     </div>
   );

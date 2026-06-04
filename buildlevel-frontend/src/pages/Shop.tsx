@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GymMotivationSection } from "../components/PromoVisualSections";
-import { publicApi, Product } from "../lib/api";
+import { Stars } from "../components/Engagement";
+import { publicApi, Product, Review } from "../lib/api";
 import {
   APPAREL_AUDIENCES,
   getAudienceLabel,
@@ -139,6 +140,7 @@ export default function Shop() {
   const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [viewImage, setViewImage] = useState("");
+  const [productReviews, setProductReviews] = useState<{ reviews: Review[]; averageRating: number; count: number }>({ reviews: [], averageRating: 0, count: 0 });
   const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
@@ -170,6 +172,9 @@ export default function Shop() {
     if (!viewProduct) return;
     const firstImage = getProductCoverImage(viewProduct);
     setViewImage(firstImage);
+    publicApi.getReviews({ targetType: "product", targetId: viewProduct.id, limit: 6 })
+      .then(setProductReviews)
+      .catch(() => setProductReviews({ reviews: [], averageRating: 0, count: 0 }));
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -402,7 +407,26 @@ export default function Shop() {
                   {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
                 </div>
               )}
+              {productReviews.count > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text2)", marginBottom: 14 }}>
+                  <Stars value={productReviews.averageRating} />
+                  <span>{productReviews.averageRating.toFixed(1)} ({productReviews.count} reviews)</span>
+                </div>
+              )}
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
+              {productReviews.reviews.length > 0 && (
+                <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
+                  {productReviews.reviews.slice(0, 3).map(review => (
+                    <div key={review.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "rgba(255,255,255,0.025)" }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
+                        <strong>{review.customerName}</strong>
+                        <Stars value={review.rating} size={14} />
+                      </div>
+                      <p style={{ color: "var(--text2)", fontSize: "0.82rem", marginTop: 6 }}>{review.reviewText}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
               {!shouldHideOptions(viewProduct) && getProductOptions(viewProduct).length > 0 && (
                 <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
                   {getProductOptions(viewProduct).map(option => (

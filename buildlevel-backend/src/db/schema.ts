@@ -156,3 +156,80 @@ export const siteSettings = mysqlTable("site_settings", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 export type SiteSetting = typeof siteSettings.$inferSelect;
+
+// ─── Engagement / Reviews / Moderation ────────────────────────────────────────
+export const reviews = mysqlTable("reviews", {
+  id: serial("id").primaryKey(),
+  targetType: mysqlEnum("targetType", ["site", "product", "digital"]).notNull().default("site"),
+  targetId: int("targetId"),
+  customerName: varchar("customerName", { length: 160 }).notNull(),
+  email: varchar("email", { length: 320 }),
+  rating: int("rating").notNull(),
+  reviewText: text("reviewText").notNull(),
+  avatarUrl: text("avatarUrl"),
+  verifiedPurchase: boolean("verifiedPurchase").notNull().default(false),
+  featured: boolean("featured").notNull().default(false),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "hidden", "spam", "blocked"]).notNull().default("pending"),
+  ipAddress: varchar("ipAddress", { length: 128 }),
+  sessionId: varchar("sessionId", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Review = typeof reviews.$inferSelect;
+
+export const blogLikes = mysqlTable("blog_likes", {
+  id: serial("id").primaryKey(),
+  postId: int("postId").notNull(),
+  sessionId: varchar("sessionId", { length: 128 }).notNull(),
+  ipAddress: varchar("ipAddress", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type BlogLike = typeof blogLikes.$inferSelect;
+
+export const blogComments = mysqlTable("blog_comments", {
+  id: serial("id").primaryKey(),
+  postId: int("postId").notNull(),
+  parentId: int("parentId"),
+  name: varchar("name", { length: 160 }).notNull(),
+  email: varchar("email", { length: 320 }).notNull(),
+  comment: text("comment").notNull(),
+  adminReply: boolean("adminReply").notNull().default(false),
+  status: mysqlEnum("status", ["pending", "approved", "rejected", "hidden", "spam", "blocked"]).notNull().default("pending"),
+  ipAddress: varchar("ipAddress", { length: 128 }),
+  sessionId: varchar("sessionId", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type BlogComment = typeof blogComments.$inferSelect;
+
+export const blogRatings = mysqlTable("blog_ratings", {
+  id: serial("id").primaryKey(),
+  postId: int("postId").notNull(),
+  rating: int("rating").notNull(),
+  sessionId: varchar("sessionId", { length: 128 }).notNull(),
+  ipAddress: varchar("ipAddress", { length: 128 }),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type BlogRating = typeof blogRatings.$inferSelect;
+
+export const blockedUsers = mysqlTable("blocked_users", {
+  id: serial("id").primaryKey(),
+  blockType: mysqlEnum("blockType", ["email", "ip", "session"]).notNull(),
+  value: varchar("value", { length: 320 }).notNull(),
+  reason: text("reason"),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type BlockedUser = typeof blockedUsers.$inferSelect;
+
+export const moderationLogs = mysqlTable("moderation_logs", {
+  id: serial("id").primaryKey(),
+  targetType: mysqlEnum("targetType", ["review", "comment", "rating", "like", "blocked_user"]).notNull(),
+  targetId: int("targetId").notNull(),
+  action: varchar("action", { length: 64 }).notNull(),
+  details: text("details"),
+  moderator: varchar("moderator", { length: 160 }).default("admin"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type ModerationLog = typeof moderationLogs.$inferSelect;

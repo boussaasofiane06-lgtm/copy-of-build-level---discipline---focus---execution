@@ -175,6 +175,44 @@ export interface MaintenanceConfig {
   contactEmail: string;
 }
 
+export interface BlogEngagement {
+  likes: number;
+  liked: boolean;
+  comments: number;
+  ratingAverage: number;
+  ratingCount: number;
+  userRating: number;
+  commentTree?: BlogComment[];
+}
+
+export interface BlogComment {
+  id: number;
+  postId: number;
+  parentId?: number | null;
+  name: string;
+  email: string;
+  comment: string;
+  adminReply: boolean;
+  status: string;
+  createdAt: string;
+  replies?: BlogComment[];
+}
+
+export interface Review {
+  id: number;
+  targetType: "site" | "product" | "digital";
+  targetId?: number | null;
+  customerName: string;
+  email?: string | null;
+  rating: number;
+  reviewText: string;
+  avatarUrl?: string | null;
+  verifiedPurchase: boolean;
+  featured: boolean;
+  status: string;
+  createdAt: string;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -206,6 +244,20 @@ export const publicApi = {
   getMaintenanceConfig: () => api.get<MaintenanceConfig>("/maintenance").then(r => r.data),
   sendContact: (data: { name: string; email: string; message: string }) =>
     api.post<{ success: true }>("/contact", data).then(r => r.data),
+  getBlogEngagement: (postId: number, sessionId: string) =>
+    api.get<BlogEngagement>(`/engagement/blog/${postId}`, { params: { sessionId } }).then(r => r.data),
+  getBlogEngagementSummary: (ids: number[], sessionId: string) =>
+    api.get<Record<string, BlogEngagement>>("/engagement/blog-summary", { params: { ids: ids.join(","), sessionId } }).then(r => r.data),
+  likeBlogPost: (postId: number, sessionId: string) =>
+    api.post<BlogEngagement>(`/engagement/blog/${postId}/like`, { sessionId }).then(r => r.data),
+  rateBlogPost: (postId: number, rating: number, sessionId: string) =>
+    api.post<{ success: true; message: string } & BlogEngagement>(`/engagement/blog/${postId}/rating`, { rating, sessionId }).then(r => r.data),
+  submitBlogComment: (postId: number, data: { name: string; email: string; comment: string; parentId?: number | null; sessionId: string }) =>
+    api.post<{ success: true; status: string; message: string }>(`/engagement/blog/${postId}/comments`, data).then(r => r.data),
+  getReviews: (params?: { targetType?: string; targetId?: number; featured?: boolean; limit?: number }) =>
+    api.get<{ reviews: Review[]; averageRating: number; count: number }>("/reviews", { params }).then(r => r.data),
+  submitReview: (data: { targetType?: "site" | "product" | "digital"; targetId?: number | null; customerName: string; email?: string; rating: number; reviewText: string; avatarUrl?: string; sessionId: string }) =>
+    api.post<{ success: true; status: string; message: string }>("/reviews", data).then(r => r.data),
 };
 
 // ─── Admin API ────────────────────────────────────────────────────────────────
@@ -283,6 +335,16 @@ export const adminApi = {
   getMaintenanceSettings: () => api.get<MaintenanceConfig>("/admin/maintenance").then(r => r.data),
   saveMaintenanceSettings: (data: MaintenanceConfig) =>
     api.post<{ success: true }>("/admin/maintenance", data).then(r => r.data),
+  getEngagementAnalytics: () => api.get<unknown>("/admin/engagement/analytics").then(r => r.data),
+  getModerationQueue: (status?: string) => api.get<{ comments: BlogComment[]; reviews: Review[] }>("/admin/engagement/moderation", { params: { status } }).then(r => r.data),
+  updateCommentModeration: (id: number, data: { status?: string; comment?: string }) => api.patch<{ success: true }>(`/admin/engagement/comments/${id}`, data).then(r => r.data),
+  replyToComment: (id: number, comment: string) => api.post<{ success: true }>(`/admin/engagement/comments/${id}/reply`, { comment }).then(r => r.data),
+  deleteComment: (id: number) => api.delete<{ success: true }>(`/admin/engagement/comments/${id}`).then(r => r.data),
+  updateReviewModeration: (id: number, data: { status?: string; featured?: boolean; reviewText?: string }) => api.patch<{ success: true }>(`/admin/engagement/reviews/${id}`, data).then(r => r.data),
+  deleteReview: (id: number) => api.delete<{ success: true }>(`/admin/engagement/reviews/${id}`).then(r => r.data),
+  getEngagementSettings: () => api.get<{ bannedWords: string; blockedUsers: unknown[] }>("/admin/engagement/settings").then(r => r.data),
+  saveEngagementSettings: (data: { bannedWords: string }) => api.post<{ success: true }>("/admin/engagement/settings", data).then(r => r.data),
+  createAdminReview: (data: Partial<Review> & { customerName: string; rating: number; reviewText: string }) => api.post<{ success: true }>("/admin/engagement/reviews", data).then(r => r.data),
 
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),

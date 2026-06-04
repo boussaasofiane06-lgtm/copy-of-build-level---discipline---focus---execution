@@ -1,10 +1,12 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { BLOG_CATEGORIES, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
-import { publicApi, BlogPost } from "../lib/api";
+import { publicApi, BlogPost, BlogEngagement as BlogEngagementData } from "../lib/api";
+import { getEngagementSessionId, Stars } from "../components/Engagement";
 
 export default function Blog() {
   const [posts, setPosts] = useState<BlogPost[]>([]);
+  const [engagement, setEngagement] = useState<Record<string, BlogEngagementData>>({});
   const [loading, setLoading] = useState(true);
   const [searchParams] = useSearchParams();
   const activeCategory = normalizeBlogCategory(searchParams.get("category"));
@@ -12,6 +14,13 @@ export default function Blog() {
   useEffect(() => {
     publicApi.getBlogPosts().then(p => { setPosts(p); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (posts.length === 0) return;
+    publicApi.getBlogEngagementSummary(posts.map(post => post.id), getEngagementSessionId())
+      .then(setEngagement)
+      .catch(() => undefined);
+  }, [posts]);
 
   const categoryCounts = posts.reduce<Record<string, number>>((counts, post) => {
     const category = normalizeBlogCategory(post.category);
@@ -81,6 +90,11 @@ export default function Blog() {
                       <h3 style={{ fontSize: "1rem", marginBottom: 8, lineHeight: 1.3 }}>{p.title}</h3>
                     </Link>
                     {p.excerpt && <p style={{ color: "var(--text2)", fontSize: "0.85rem", lineHeight: 1.6 }}>{p.excerpt}</p>}
+                    <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center", marginTop: 12, color: "var(--text3)", fontSize: "0.75rem" }}>
+                      <span>❤️ {engagement[p.id]?.likes ?? 0}</span>
+                      <span>💬 {engagement[p.id]?.comments ?? 0}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 4 }}><Stars value={engagement[p.id]?.ratingAverage || 0} size={13} /> {engagement[p.id]?.ratingAverage?.toFixed?.(1) || "0.0"}</span>
+                    </div>
                     <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 12 }}>
                       {new Date(p.createdAt).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}
                     </p>
