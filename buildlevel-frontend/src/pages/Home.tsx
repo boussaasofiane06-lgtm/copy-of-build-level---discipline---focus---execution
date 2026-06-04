@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useReducedMotion } from "framer-motion";
 import { Reveal } from "../components/Motion";
-import { Stars } from "../components/Engagement";
+import { ProductReviewSummary, Stars, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { BuildLevelHero, GymMotivationSection, MountainLegacySection } from "../components/PromoVisualSections";
 import { publicApi, Product, Review } from "../lib/api";
 
@@ -10,12 +10,22 @@ export default function Home() {
   const [featured, setFeatured] = useState<Product[]>([]);
   const [reviews, setReviews] = useState<Review[]>([]);
   const [reviewStats, setReviewStats] = useState({ averageRating: 0, count: 0 });
+  const [productReviews, setProductReviews] = useState<Record<number, ReviewSummaryData>>({});
   const reduceMotion = useReducedMotion();
 
   useEffect(() => {
     publicApi.getProducts().then(p => setFeatured(p.filter(x => x.featured).slice(0, 3))).catch(() => {});
     publicApi.getReviews({ featured: true, limit: 8 }).then(result => { setReviews(result.reviews); setReviewStats({ averageRating: result.averageRating, count: result.count }); }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!featured.length) return;
+    Promise.all(featured.map(product =>
+      publicApi.getReviews({ targetType: "product", targetId: product.id, limit: 3 })
+        .then(summary => [product.id, summary] as const)
+        .catch(() => [product.id, { reviews: [], averageRating: 0, count: 0 }] as const)
+    )).then(entries => setProductReviews(Object.fromEntries(entries)));
+  }, [featured]);
 
   return (
     <div className="page-chrome">
@@ -58,10 +68,12 @@ export default function Home() {
                   <div style={{ padding: 20 }}>
                     {p.badge && <span className="badge badge-red" style={{ marginBottom: 8 }}>{p.badge}</span>}
                     <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>{p.name}</h3>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <ProductReviewSummary summary={productReviews[p.id]} compact />
+                    <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
                       <span style={{ fontFamily: "var(--font-display)", fontSize: "1.1rem", color: "var(--text)" }}>${parseFloat(p.price).toFixed(2)}</span>
                       {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.85rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
                     </div>
+                    <div style={{ marginTop: 12 }}><TrustBadges type="apparel" /></div>
                   </div>
                 </Reveal>
               ))}

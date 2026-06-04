@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GymMotivationSection } from "../components/PromoVisualSections";
-import { Stars } from "../components/Engagement";
-import { publicApi, Product, Review } from "../lib/api";
+import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
+import { publicApi, Product } from "../lib/api";
 import {
   APPAREL_AUDIENCES,
   getAudienceLabel,
@@ -140,7 +140,8 @@ export default function Shop() {
   const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [viewImage, setViewImage] = useState("");
-  const [productReviews, setProductReviews] = useState<{ reviews: Review[]; averageRating: number; count: number }>({ reviews: [], averageRating: 0, count: 0 });
+  const [productReviews, setProductReviews] = useState<ReviewSummaryData>({ reviews: [], averageRating: 0, count: 0 });
+  const [reviewSummaries, setReviewSummaries] = useState<Record<number, ReviewSummaryData>>({});
   const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
@@ -148,6 +149,15 @@ export default function Shop() {
   useEffect(() => {
     publicApi.getProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!products.length) return;
+    Promise.all(products.slice(0, 24).map(product =>
+      publicApi.getReviews({ targetType: "product", targetId: product.id, limit: 4 })
+        .then(summary => [product.id, summary] as const)
+        .catch(() => [product.id, { reviews: [], averageRating: 0, count: 0 }] as const)
+    )).then(entries => setReviewSummaries(Object.fromEntries(entries)));
+  }, [products]);
 
   useEffect(() => {
     if (!cartOpen) return;
@@ -225,6 +235,12 @@ export default function Shop() {
   };
   const availableCategories = sortCategories(Array.from(new Set(audienceFiltered.map(p => p.category).filter(Boolean))));
   const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => p.category === category);
+  const getRecommendations = (product: Product) =>
+    storefrontProducts
+      .filter(item => item.id !== product.id)
+      .sort((a, b) => Number(b.featured) - Number(a.featured))
+      .filter(item => item.category === product.category || item.featured)
+      .slice(0, 4);
 
   const addToCart = (product: Product) => {
     const options = getProductOptions(product);
@@ -409,24 +425,17 @@ export default function Shop() {
               )}
               {productReviews.count > 0 && (
                 <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text2)", marginBottom: 14 }}>
-                  <Stars value={productReviews.averageRating} />
-                  <span>{productReviews.averageRating.toFixed(1)} ({productReviews.count} reviews)</span>
+                  <ProductReviewSummary summary={productReviews} />
                 </div>
               )}
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
-              {productReviews.reviews.length > 0 && (
-                <div style={{ display: "grid", gap: 10, marginBottom: 18 }}>
-                  {productReviews.reviews.slice(0, 3).map(review => (
-                    <div key={review.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "rgba(255,255,255,0.025)" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", gap: 8 }}>
-                        <strong>{review.customerName}</strong>
-                        <Stars value={review.rating} size={14} />
-                      </div>
-                      <p style={{ color: "var(--text2)", fontSize: "0.82rem", marginTop: 6 }}>{review.reviewText}</p>
-                    </div>
-                  ))}
-                </div>
-              )}
+              <div style={{ marginBottom: 18 }}><TrustBadges type="apparel" /></div>
+              <ProductReviews summary={productReviews} />
+              <RecommendationStrip title="Customers Also Bought" products={getRecommendations(viewProduct)} hrefBase="/shop" />
+              <div style={{ border: "1px solid rgba(255,102,0,0.35)", borderRadius: 10, padding: 12, margin: "18px 0", background: "rgba(255,102,0,0.06)" }}>
+                <strong>Build Level Promise</strong>
+                <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginTop: 6 }}>Premium standards, secure checkout, and products selected for Discipline • Focus • Execution.</p>
+              </div>
               {!shouldHideOptions(viewProduct) && getProductOptions(viewProduct).length > 0 && (
                 <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
                   {getProductOptions(viewProduct).map(option => (
@@ -534,6 +543,7 @@ export default function Shop() {
                     {getCategoryAudienceLabel(p.category)} / {getCategoryLabel(p.category)}
                   </div>
                   <h3 style={{ fontSize: "0.95rem", marginBottom: 6 }}>{p.name}</h3>
+                  <div style={{ marginBottom: 10 }}><ProductReviewSummary summary={reviewSummaries[p.id]} compact /></div>
                   {!shouldHidePrice(p) && (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
                       <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>{getProductDisplayPrice(p, selectedSizes)}</span>

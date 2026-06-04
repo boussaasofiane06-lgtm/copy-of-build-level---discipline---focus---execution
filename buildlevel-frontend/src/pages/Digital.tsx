@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { MountainLegacySection } from "../components/PromoVisualSections";
+import { ProductReviewSummary, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, DigitalProduct } from "../lib/api";
 
 const storageImageUrl = (value?: string | null) => {
@@ -14,10 +15,20 @@ export default function Digital() {
   const [products, setProducts] = useState<DigitalProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingProductId, setPendingProductId] = useState<number | null>(null);
+  const [reviewSummaries, setReviewSummaries] = useState<Record<number, ReviewSummaryData>>({});
 
   useEffect(() => {
     publicApi.getDigitalProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
   }, []);
+
+  useEffect(() => {
+    if (!products.length) return;
+    Promise.all(products.map(product =>
+      publicApi.getReviews({ targetType: "digital", targetId: product.id, limit: 4 })
+        .then(summary => [product.id, summary] as const)
+        .catch(() => [product.id, { reviews: [], averageRating: 0, count: 0 }] as const)
+    )).then(entries => setReviewSummaries(Object.fromEntries(entries)));
+  }, [products]);
 
   const handleBuy = async (product: DigitalProduct) => {
     if (pendingProductId !== null) return;
@@ -79,7 +90,9 @@ export default function Digital() {
                     {p.duration && <span style={{ color: "var(--text3)", fontSize: "0.75rem", marginLeft: 8 }}>{p.duration}</span>}
                   </div>
                   <h3 style={{ fontSize: "1rem", marginBottom: 8 }}>{p.name}</h3>
+                  <div style={{ marginBottom: 10 }}><ProductReviewSummary summary={reviewSummaries[p.id]} compact /></div>
                   {p.description && <p style={{ color: "var(--text2)", fontSize: "0.85rem", lineHeight: 1.6, marginBottom: 16, flex: 1 }}>{p.description}</p>}
+                  <div style={{ marginBottom: 16 }}><TrustBadges type="digital" /></div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem" }}>${parseFloat(p.price).toFixed(2)}</span>
                     <button onClick={() => handleBuy(p)} disabled={pendingProductId !== null} className="btn btn-primary btn-sm">
@@ -90,6 +103,9 @@ export default function Digital() {
               </div>
             ))}
           </div>
+        )}
+        {!loading && products.length > 1 && (
+          <RecommendationStrip title="Popular Digital Guides" products={products.map(product => ({ ...product, price: product.price }))} hrefBase="/digital" />
         )}
       </div>
     </div>

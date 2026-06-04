@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { FormEvent } from "react";
-import { publicApi, BlogComment, BlogEngagement as BlogEngagementData } from "../lib/api";
+import { Link } from "react-router-dom";
+import { publicApi, BlogComment, BlogEngagement as BlogEngagementData, Review } from "../lib/api";
 
 export function getEngagementSessionId() {
   const key = "buildlevel_engagement_session";
@@ -28,6 +29,104 @@ export function Stars({ value, onSelect, size = 18 }: { value: number; onSelect?
         </button>
       ))}
     </span>
+  );
+}
+
+export type ReviewSummaryData = {
+  reviews: Review[];
+  averageRating: number;
+  count: number;
+};
+
+export function ProductReviewSummary({ summary, compact = false }: { summary?: ReviewSummaryData; compact?: boolean }) {
+  const average = summary?.averageRating || 0;
+  const count = summary?.count || 0;
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text2)", fontSize: compact ? "0.74rem" : "0.85rem", flexWrap: "wrap" }}>
+      <Stars value={average} size={compact ? 13 : 17} />
+      <span>{average ? average.toFixed(1) : "0.0"}</span>
+      <span style={{ color: "var(--text3)" }}>Based on {count} verified review{count === 1 ? "" : "s"}</span>
+    </div>
+  );
+}
+
+export function RatingBreakdown({ reviews }: { reviews: Review[] }) {
+  const total = reviews.length || 0;
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      {[5, 4, 3, 2, 1].map(star => {
+        const count = reviews.filter(review => review.rating === star).length;
+        const width = total ? `${Math.round((count / total) * 100)}%` : "0%";
+        return (
+          <div key={star} style={{ display: "grid", gridTemplateColumns: "52px 1fr 32px", gap: 8, alignItems: "center", color: "var(--text3)", fontSize: "0.75rem" }}>
+            <span>{star} star</span>
+            <span style={{ height: 7, background: "var(--bg3)", borderRadius: 999, overflow: "hidden" }}>
+              <span style={{ display: "block", height: "100%", width, background: "#ff6600" }} />
+            </span>
+            <span>{count}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+export function TrustBadges({ type }: { type: "apparel" | "digital" }) {
+  const badges = type === "digital"
+    ? ["Verified Reviews", "Secure Checkout", "Instant Digital Download", "PDF / Audiobook Access", "Customer Approved", "Build Level Promise"]
+    : ["Verified Reviews", "Secure Checkout", "Premium Quality", "Printify Fulfillment", "Tracking Available", "Trusted by Builders"];
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 7 }}>
+      {badges.map(badge => <span key={badge} className="badge badge-dark" style={{ borderColor: "rgba(255,102,0,0.35)" }}>{badge}</span>)}
+    </div>
+  );
+}
+
+export function ProductReviews({ summary }: { summary?: ReviewSummaryData }) {
+  const reviews = summary?.reviews || [];
+  if (reviews.length === 0) return null;
+  return (
+    <div style={{ display: "grid", gap: 12 }}>
+      <div>
+        <ProductReviewSummary summary={summary} />
+        <div style={{ marginTop: 10 }}><RatingBreakdown reviews={reviews} /></div>
+      </div>
+      {reviews.slice(0, 4).map(review => (
+        <div key={review.id} style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, background: "rgba(255,255,255,0.025)" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, marginBottom: 7 }}>
+            <strong>{review.customerName}</strong>
+            <Stars value={review.rating} size={14} />
+          </div>
+          <p style={{ color: "var(--text2)", fontSize: "0.86rem", lineHeight: 1.6 }}>{review.reviewText}</p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", color: "var(--text3)", fontSize: "0.72rem", marginTop: 8 }}>
+            <span>{new Date(review.createdAt).toLocaleDateString()}</span>
+            {review.verifiedPurchase && <span className="badge badge-dark">Verified Purchase</span>}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function RecommendationStrip<T extends { id: number; name: string; imageUrl?: string; price: string; category?: string }>(
+  { title, products, hrefBase }: { title: string; products: T[]; hrefBase: "/shop" | "/digital" }
+) {
+  if (!products.length) return null;
+  return (
+    <div style={{ marginTop: 22 }}>
+      <h3 style={{ fontSize: "0.95rem", marginBottom: 12 }}>{title}</h3>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
+        {products.slice(0, 4).map(product => (
+          <Link key={product.id} to={hrefBase} className="card" style={{ padding: 10 }}>
+            <div style={{ aspectRatio: "1", background: "var(--bg3)", borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
+              {product.imageUrl && <img src={product.imageUrl.startsWith("storage:") ? `/api/digital/thumbnail/${encodeURIComponent(product.imageUrl.slice("storage:".length))}` : product.imageUrl} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+            </div>
+            <p style={{ fontSize: "0.78rem", lineHeight: 1.25 }}>{product.name}</p>
+            <p style={{ color: "#ff6600", fontFamily: "var(--font-display)", fontSize: "0.78rem", marginTop: 4 }}>${Number.parseFloat(product.price).toFixed(2)}</p>
+          </Link>
+        ))}
+      </div>
+    </div>
   );
 }
 
