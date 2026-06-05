@@ -213,6 +213,42 @@ export interface Review {
   createdAt: string;
 }
 
+export interface FulfillmentOrder {
+  id: number;
+  customerName?: string | null;
+  customerEmail: string;
+  customerPhone?: string | null;
+  stripePaymentStatus?: string | null;
+  stripeCheckoutSessionId?: string | null;
+  stripePaymentIntentId?: string | null;
+  orderTotal?: string | null;
+  currency?: string | null;
+  orderType: string;
+  fulfillmentStatus: string;
+  printifyOrderId?: string | null;
+  printifyExternalId?: string | null;
+  printifyStatus?: string | null;
+  errorMessage?: string | null;
+  retryCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FulfillmentOrderItem {
+  id: number;
+  orderId: number;
+  productId?: number | null;
+  productName: string;
+  productType: string;
+  quantity: number;
+  selectedSize?: string | null;
+  selectedColor?: string | null;
+  printifyProductId?: string | null;
+  printifyVariantId?: string | null;
+  unitPrice?: string | null;
+  fulfillmentSource: string;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -345,6 +381,13 @@ export const adminApi = {
   getEngagementSettings: () => api.get<{ bannedWords: string; blockedUsers: unknown[] }>("/admin/engagement/settings").then(r => r.data),
   saveEngagementSettings: (data: { bannedWords: string }) => api.post<{ success: true }>("/admin/engagement/settings", data).then(r => r.data),
   createAdminReview: (data: Partial<Review> & { customerName: string; rating: number; reviewText: string }) => api.post<{ success: true }>("/admin/engagement/reviews", data).then(r => r.data),
+  getFulfillmentOrders: (status?: string) => api.get<FulfillmentOrder[]>("/admin/fulfillment/orders", { params: { status } }).then(r => r.data),
+  getFulfillmentOrder: (id: number) => api.get<{ order: FulfillmentOrder; items: FulfillmentOrderItem[]; attempts: unknown[]; events: unknown[] }>(`/admin/fulfillment/orders/${id}`).then(r => r.data),
+  holdFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/hold`).then(r => r.data),
+  releaseFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/release`).then(r => r.data),
+  resolveFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/resolve`).then(r => r.data),
+  refreshFulfillmentOrder: (id: number) => api.post<{ success: true; data?: unknown }>(`/admin/fulfillment/orders/${id}/refresh`).then(r => r.data),
+  retryFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/retry`).then(r => r.data),
 
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),

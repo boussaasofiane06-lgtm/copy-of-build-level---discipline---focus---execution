@@ -1,9 +1,9 @@
 import { Router, Request, Response } from "express";
 import Stripe from "stripe";
 import crypto from "crypto";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db/index.js";
-import { digitalProducts, digitalPurchases, products, siteSettings } from "../db/schema.js";
+import { digitalProducts, digitalPurchases, products, siteSettings, orders, orderItems, fulfillmentAttempts, orderEvents, productVariants } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 
 const router = Router();
@@ -123,6 +123,20 @@ type DigitalAccessResult = {
   created: boolean;
 };
 
+type OrderStatus =
+  | "Payment Pending"
+  | "Paid"
+  | "Awaiting Fulfillment"
+  | "Processing"
+  | "Printify Order Created"
+  | "Awaiting Production Approval"
+  | "Sent to Production"
+  | "Requires Admin Review"
+  | "Failed"
+  | "Cancelled"
+  | "Shipped"
+  | "Delivered";
+
 function isStripeImageUrl(value?: string) {
   return !!value && /^https?:\/\//i.test(value);
 }
@@ -148,6 +162,106 @@ function logStripeCheckoutFailure(context: Record<string, unknown>, error: unkno
     ? { message: error.message, status: error.status, requestId: error.requestId, stripeError: error.stripeError }
     : { message: error instanceof Error ? error.message : String(error) };
   console.error("[Stripe Checkout] Failed to create session", { ...context, ...details });
+}
+
+let fulfillmentTablesEnsured = false;
+async function ensureFulfillmentTables() {
+  if (fulfillmentTablesEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS product_variants (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      productId INT NOT NULL,
+      source ENUM('manual','printify','shopify') NOT NULL DEFAULT 'manual',
+      printifyProductId VARCHAR(128) NULL,
+      printifyVariantId VARCHAR(128) NULL,
+      shopifyProductId VARCHAR(128) NULL,
+      shopifyVariantId VARCHAR(128) NULL,
+      label VARCHAR(255) NOT NULL,
+      size VARCHAR(128) NULL,
+      color VARCHAR(128) NULL,
+      price DECIMAL(10,2) NOT NULL,
+      available BOOLEAN NOT NULL DEFAULT true,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      printProviderId VARCHAR(128) NULL,
+      blueprintId VARCHAR(128) NULL,
+      imageUrl TEXT NULL,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY unique_printify_variant (printifyProductId, printifyVariantId),
+      INDEX idx_product_variants_product (productId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customerName VARCHAR(255) NULL,
+      customerEmail VARCHAR(320) NOT NULL,
+      customerPhone VARCHAR(64) NULL,
+      shippingAddress JSON NULL,
+      stripeEventId VARCHAR(128) NULL UNIQUE,
+      stripeCheckoutSessionId VARCHAR(128) NULL UNIQUE,
+      stripePaymentIntentId VARCHAR(128) NULL UNIQUE,
+      stripePaymentStatus VARCHAR(64) NULL,
+      orderTotal DECIMAL(10,2) NULL,
+      currency VARCHAR(8) DEFAULT 'usd',
+      orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
+      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
+      printifyOrderId VARCHAR(128) NULL,
+      printifyExternalId VARCHAR(128) NULL,
+      printifyStatus VARCHAR(128) NULL,
+      printifyApiResponse JSON NULL,
+      errorMessage TEXT NULL,
+      retryCount INT NOT NULL DEFAULT 0,
+      processing BOOLEAN NOT NULL DEFAULT false,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      productId INT NULL,
+      productName VARCHAR(255) NOT NULL,
+      productType ENUM('apparel','digital') NOT NULL DEFAULT 'apparel',
+      quantity INT NOT NULL DEFAULT 1,
+      selectedSize VARCHAR(255) NULL,
+      selectedColor VARCHAR(128) NULL,
+      printifyProductId VARCHAR(128) NULL,
+      printifyVariantId VARCHAR(128) NULL,
+      unitPrice DECIMAL(10,2) NULL,
+      fulfillmentSource ENUM('printify','digital','manual','none') NOT NULL DEFAULT 'none',
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_order_items_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS fulfillment_attempts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      attemptNumber INT NOT NULL DEFAULT 1,
+      action VARCHAR(128) NOT NULL,
+      status ENUM('pending','success','failed','skipped') NOT NULL DEFAULT 'pending',
+      requestPayload JSON NULL,
+      responsePayload JSON NULL,
+      errorMessage TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_fulfillment_attempts_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NULL,
+      eventType VARCHAR(128) NOT NULL,
+      stripeEventId VARCHAR(128) NULL UNIQUE,
+      printifyEventId VARCHAR(128) NULL,
+      payload JSON NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_order_events_order (orderId)
+    )
+  `));
+  fulfillmentTablesEnsured = true;
 }
 
 function getSessionCustomerEmail(session: Stripe.Checkout.Session) {
@@ -525,6 +639,235 @@ async function createPrintifyOrderFromStripeSession(session: Stripe.Checkout.Ses
   console.log(`[Printify] Created fulfillment order for Stripe session ${session.id}`);
 }
 
+function getPhysicalPaymentReference(session: Stripe.Checkout.Session) {
+  return cleanText(typeof session.payment_intent === "string" ? session.payment_intent : session.id);
+}
+
+function parseSelectedLabel(value: string) {
+  try {
+    if (value.trim().startsWith("{")) {
+      const parsed = JSON.parse(value);
+      return cleanText(parsed?.label || value);
+    }
+  } catch {
+    return value;
+  }
+  return value;
+}
+
+function getOrderCustomerName(session: Stripe.Checkout.Session) {
+  return cleanText((session as any).shipping_details?.name || (session as any).customer_details?.name || "");
+}
+
+function getOrderShippingAddress(session: Stripe.Checkout.Session) {
+  const shipping = (session as any).shipping_details;
+  const customer = (session as any).customer_details;
+  const address = shipping?.address || customer?.address;
+  if (!address) return null;
+  return {
+    name: shipping?.name || customer?.name || "",
+    email: session.customer_email || customer?.email || "",
+    phone: customer?.phone || "",
+    line1: address.line1 || "",
+    line2: address.line2 || "",
+    city: address.city || "",
+    state: address.state || "",
+    postal_code: address.postal_code || "",
+    country: address.country || "",
+  };
+}
+
+function validateShippingAddress(address: ReturnType<typeof getOrderShippingAddress>) {
+  if (!address) return "Missing shipping address";
+  if (!address.name) return "Missing customer name";
+  if (!address.line1) return "Missing address line 1";
+  if (!address.city) return "Missing city";
+  if (!address.postal_code) return "Missing postal code";
+  if (!address.country) return "Missing country";
+  return "";
+}
+
+async function createInternalPhysicalOrder(eventId: string, session: Stripe.Checkout.Session) {
+  await ensureFulfillmentTables();
+  const db = await getDb();
+  const sessionId = session.id;
+  const paymentIntentId = getPhysicalPaymentReference(session);
+
+  const duplicateEvent = await db.select().from(orderEvents).where(eq(orderEvents.stripeEventId, eventId)).limit(1);
+  if (duplicateEvent.length > 0) {
+    const existing = await db.select().from(orders).where(eq(orders.stripeCheckoutSessionId, sessionId)).limit(1);
+    return { order: existing[0], duplicate: true, reason: "Stripe event already processed" };
+  }
+
+  const existingOrder = await db.select().from(orders).where(eq(orders.stripeCheckoutSessionId, sessionId)).limit(1);
+  if (existingOrder[0]?.printifyOrderId) return { order: existingOrder[0], duplicate: true, reason: "Printify order already created" };
+  if (existingOrder[0]?.processing) return { order: existingOrder[0], duplicate: true, reason: "Order already processing" };
+
+  const requestedItems = readPhysicalFulfillmentItems(session.metadata);
+  const email = cleanText(session.customer_email || session.customer_details?.email);
+  const shippingAddress = getOrderShippingAddress(session);
+  const addressError = validateShippingAddress(shippingAddress);
+  const paymentStatus = session.payment_status || "unknown";
+  const baseStatus: OrderStatus = paymentStatus === "paid" ? "Paid" : "Payment Pending";
+
+  let order = existingOrder[0];
+  if (!order) {
+    await db.insert(orders).values({
+      customerName: getOrderCustomerName(session),
+      customerEmail: email || "unknown@example.com",
+      customerPhone: cleanText((session as any).customer_details?.phone),
+      shippingAddress: shippingAddress || {},
+      stripeEventId: eventId,
+      stripeCheckoutSessionId: sessionId,
+      stripePaymentIntentId: paymentIntentId,
+      stripePaymentStatus: paymentStatus,
+      orderTotal: session.amount_total != null ? (session.amount_total / 100).toFixed(2) : null,
+      currency: session.currency || "usd",
+      orderType: "apparel",
+      fulfillmentStatus: baseStatus,
+      printifyExternalId: sessionId,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+    const [created] = await db.select().from(orders).where(eq(orders.stripeCheckoutSessionId, sessionId)).limit(1);
+    order = created;
+  }
+
+  if (!order) throw new Error("Failed to create internal order");
+  await db.insert(orderEvents).values({ orderId: order.id, eventType: "stripe.checkout.session.completed", stripeEventId: eventId, payload: session as any, createdAt: new Date() }).catch(() => undefined);
+
+  const existingItems = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  if (existingItems.length === 0) {
+    for (const item of requestedItems) {
+      const [product] = await db.select().from(products).where(eq(products.id, item.productId)).limit(1);
+      const selected = parseSelectedVariant(item.size);
+      await db.insert(orderItems).values({
+        orderId: order.id,
+        productId: item.productId,
+        productName: product?.name || `Product ${item.productId}`,
+        productType: "apparel",
+        quantity: item.quantity,
+        selectedSize: selected.label || item.size,
+        selectedColor: undefined,
+        printifyProductId: product?.printifyProductId || null,
+        printifyVariantId: item.variantId || selected.variantId || null,
+        unitPrice: product?.price || null,
+        fulfillmentSource: product?.printifyProductId ? "printify" : "none",
+        createdAt: new Date(),
+      });
+    }
+  }
+
+  const reviewReasons: string[] = [];
+  if (paymentStatus !== "paid") reviewReasons.push(`Payment status is ${paymentStatus}`);
+  if (addressError) reviewReasons.push(addressError);
+  if (requestedItems.length === 0) reviewReasons.push("No physical metadata items found");
+
+  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  for (const item of items) {
+    if (item.productType !== "apparel") continue;
+    if (!item.printifyProductId) reviewReasons.push(`Missing Printify product ID for ${item.productName}`);
+    if (!item.printifyVariantId) reviewReasons.push(`Missing Printify variant ID for ${item.productName}`);
+    if (item.printifyVariantId) {
+      const mapped = await db.select().from(productVariants).where(eq(productVariants.printifyVariantId, item.printifyVariantId)).limit(1);
+      if (mapped[0] && (!mapped[0].enabled || !mapped[0].available)) reviewReasons.push(`Printify variant unavailable for ${item.productName}`);
+    }
+  }
+
+  if (reviewReasons.length > 0) {
+    await db.update(orders).set({
+      fulfillmentStatus: "Requires Admin Review",
+      errorMessage: reviewReasons.join("; "),
+      processing: false,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    const [updated] = await db.select().from(orders).where(eq(orders.id, order.id)).limit(1);
+    return { order: updated, duplicate: false, requiresReview: true, reason: reviewReasons.join("; ") };
+  }
+
+  await db.update(orders).set({ fulfillmentStatus: "Awaiting Fulfillment", updatedAt: new Date() }).where(eq(orders.id, order.id));
+  const [updated] = await db.select().from(orders).where(eq(orders.id, order.id)).limit(1);
+  return { order: updated, duplicate: false, requiresReview: false, reason: "" };
+}
+
+async function createPrintifyOrderForInternalOrder(orderId: number) {
+  await ensureFulfillmentTables();
+  const db = await getDb();
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+  if (!order) throw new Error(`Order ${orderId} not found`);
+  if (order.printifyOrderId) return { skipped: true, reason: "Printify order already exists", order };
+  if (order.processing) return { skipped: true, reason: "Order is already processing", order };
+  if (process.env.PRINTIFY_CREATE_ORDERS_ENABLED !== "true") {
+    await db.update(orders).set({
+      fulfillmentStatus: "Requires Admin Review",
+      errorMessage: "Printify order creation disabled. Set PRINTIFY_CREATE_ORDERS_ENABLED=true only for an approved test.",
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    return { skipped: true, reason: "Printify order creation disabled", order };
+  }
+
+  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  const lineItems = items
+    .filter(item => item.fulfillmentSource === "printify")
+    .map(item => ({
+      product_id: item.printifyProductId,
+      variant_id: Number(item.printifyVariantId),
+      quantity: item.quantity,
+    }));
+  if (lineItems.length === 0) throw new Error("No Printify line items available");
+
+  const shippingAddress = order.shippingAddress as any;
+  const payload = {
+    external_id: order.stripeCheckoutSessionId || `build-level-order-${order.id}`,
+    label: `Build Level Order ${order.id}`,
+    line_items: lineItems,
+    shipping_method: Number(process.env.PRINTIFY_SHIPPING_METHOD || 1),
+    send_shipping_notification: false,
+    address_to: {
+      first_name: String(shippingAddress?.name || "Build").split(" ")[0],
+      last_name: String(shippingAddress?.name || "Level Customer").split(" ").slice(1).join(" ") || "Customer",
+      email: order.customerEmail,
+      phone: order.customerPhone || "",
+      country: shippingAddress?.country,
+      region: shippingAddress?.state || "",
+      address1: shippingAddress?.line1,
+      address2: shippingAddress?.line2 || "",
+      city: shippingAddress?.city,
+      zip: shippingAddress?.postal_code,
+    },
+  };
+
+  const attemptNumber = order.retryCount + 1;
+  await db.update(orders).set({ processing: true, fulfillmentStatus: "Processing", updatedAt: new Date() }).where(eq(orders.id, order.id));
+  await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "pending", requestPayload: payload, createdAt: new Date() });
+  try {
+    const response = await printifyRequest(`/shops/${(await getPrintifyCredentials()).shopId}/orders.json`, "POST", payload);
+    await db.update(orders).set({
+      printifyOrderId: cleanText((response as any).id),
+      printifyExternalId: String(payload.external_id),
+      printifyStatus: cleanText((response as any).status || "created"),
+      printifyApiResponse: response as any,
+      fulfillmentStatus: "Awaiting Production Approval",
+      processing: false,
+      errorMessage: null,
+      retryCount: attemptNumber,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "success", responsePayload: response as any, createdAt: new Date() });
+    return { success: true, response };
+  } catch (error: any) {
+    await db.update(orders).set({
+      fulfillmentStatus: "Failed",
+      processing: false,
+      errorMessage: error.message,
+      retryCount: attemptNumber,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "failed", requestPayload: payload, errorMessage: error.message, createdAt: new Date() });
+    throw error;
+  }
+}
+
 async function createCheckoutSessionDirect({
   lineItems,
   successUrl,
@@ -774,9 +1117,19 @@ router.post("/webhook", async (req: Request, res: Response) => {
       }
     } else if (session.metadata?.type === "physical") {
       try {
-        await createPrintifyOrderFromStripeSession(session);
+        const result = await createInternalPhysicalOrder(event.id, session);
+        console.log("[Stripe Webhook] Physical order ledger result", {
+          sessionId: session.id,
+          orderId: result.order?.id,
+          duplicate: result.duplicate,
+          requiresReview: result.requiresReview,
+          reason: result.reason,
+        });
+        if (result.order && !result.duplicate && !result.requiresReview) {
+          await createPrintifyOrderForInternalOrder(result.order.id);
+        }
       } catch (e) {
-        console.error("[Webhook] Failed to create Printify order:", e);
+        console.error("[Webhook] Failed to process physical order:", e);
       }
     }
   }

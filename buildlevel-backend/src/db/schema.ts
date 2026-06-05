@@ -233,3 +233,92 @@ export const moderationLogs = mysqlTable("moderation_logs", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 export type ModerationLog = typeof moderationLogs.$inferSelect;
+
+// ─── Orders / Fulfillment Safety Ledger ───────────────────────────────────────
+export const productVariants = mysqlTable("product_variants", {
+  id: serial("id").primaryKey(),
+  productId: int("productId").notNull(),
+  source: mysqlEnum("source", ["manual", "printify", "shopify"]).notNull().default("manual"),
+  printifyProductId: varchar("printifyProductId", { length: 128 }),
+  printifyVariantId: varchar("printifyVariantId", { length: 128 }),
+  shopifyProductId: varchar("shopifyProductId", { length: 128 }),
+  shopifyVariantId: varchar("shopifyVariantId", { length: 128 }),
+  label: varchar("label", { length: 255 }).notNull(),
+  size: varchar("size", { length: 128 }),
+  color: varchar("color", { length: 128 }),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  available: boolean("available").notNull().default(true),
+  enabled: boolean("enabled").notNull().default(true),
+  printProviderId: varchar("printProviderId", { length: 128 }),
+  blueprintId: varchar("blueprintId", { length: 128 }),
+  imageUrl: text("imageUrl"),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type ProductVariant = typeof productVariants.$inferSelect;
+
+export const orders = mysqlTable("orders", {
+  id: serial("id").primaryKey(),
+  customerName: varchar("customerName", { length: 255 }),
+  customerEmail: varchar("customerEmail", { length: 320 }).notNull(),
+  customerPhone: varchar("customerPhone", { length: 64 }),
+  shippingAddress: json("shippingAddress").$type<Record<string, unknown>>(),
+  stripeEventId: varchar("stripeEventId", { length: 128 }),
+  stripeCheckoutSessionId: varchar("stripeCheckoutSessionId", { length: 128 }),
+  stripePaymentIntentId: varchar("stripePaymentIntentId", { length: 128 }),
+  stripePaymentStatus: varchar("stripePaymentStatus", { length: 64 }),
+  orderTotal: decimal("orderTotal", { precision: 10, scale: 2 }),
+  currency: varchar("currency", { length: 8 }).default("usd"),
+  orderType: mysqlEnum("orderType", ["apparel", "digital", "mixed"]).notNull().default("apparel"),
+  fulfillmentStatus: mysqlEnum("fulfillmentStatus", ["Payment Pending", "Paid", "Awaiting Fulfillment", "Processing", "Printify Order Created", "Awaiting Production Approval", "Sent to Production", "Requires Admin Review", "Failed", "Cancelled", "Shipped", "Delivered"]).notNull().default("Payment Pending"),
+  printifyOrderId: varchar("printifyOrderId", { length: 128 }),
+  printifyExternalId: varchar("printifyExternalId", { length: 128 }),
+  printifyStatus: varchar("printifyStatus", { length: 128 }),
+  printifyApiResponse: json("printifyApiResponse").$type<Record<string, unknown>>(),
+  errorMessage: text("errorMessage"),
+  retryCount: int("retryCount").notNull().default(0),
+  processing: boolean("processing").notNull().default(false),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+export type Order = typeof orders.$inferSelect;
+
+export const orderItems = mysqlTable("order_items", {
+  id: serial("id").primaryKey(),
+  orderId: int("orderId").notNull(),
+  productId: int("productId"),
+  productName: varchar("productName", { length: 255 }).notNull(),
+  productType: mysqlEnum("productType", ["apparel", "digital"]).notNull().default("apparel"),
+  quantity: int("quantity").notNull().default(1),
+  selectedSize: varchar("selectedSize", { length: 255 }),
+  selectedColor: varchar("selectedColor", { length: 128 }),
+  printifyProductId: varchar("printifyProductId", { length: 128 }),
+  printifyVariantId: varchar("printifyVariantId", { length: 128 }),
+  unitPrice: decimal("unitPrice", { precision: 10, scale: 2 }),
+  fulfillmentSource: mysqlEnum("fulfillmentSource", ["printify", "digital", "manual", "none"]).notNull().default("none"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OrderItem = typeof orderItems.$inferSelect;
+
+export const fulfillmentAttempts = mysqlTable("fulfillment_attempts", {
+  id: serial("id").primaryKey(),
+  orderId: int("orderId").notNull(),
+  attemptNumber: int("attemptNumber").notNull().default(1),
+  action: varchar("action", { length: 128 }).notNull(),
+  status: mysqlEnum("status", ["pending", "success", "failed", "skipped"]).notNull().default("pending"),
+  requestPayload: json("requestPayload").$type<Record<string, unknown>>(),
+  responsePayload: json("responsePayload").$type<Record<string, unknown>>(),
+  errorMessage: text("errorMessage"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type FulfillmentAttempt = typeof fulfillmentAttempts.$inferSelect;
+
+export const orderEvents = mysqlTable("order_events", {
+  id: serial("id").primaryKey(),
+  orderId: int("orderId"),
+  eventType: varchar("eventType", { length: 128 }).notNull(),
+  stripeEventId: varchar("stripeEventId", { length: 128 }),
+  printifyEventId: varchar("printifyEventId", { length: 128 }),
+  payload: json("payload").$type<Record<string, unknown>>(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+export type OrderEvent = typeof orderEvents.$inferSelect;

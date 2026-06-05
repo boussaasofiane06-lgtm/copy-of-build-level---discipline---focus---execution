@@ -1,12 +1,12 @@
 import { Router, Request, Response } from "express";
-import { eq, asc, desc } from "drizzle-orm";
+import { eq, asc, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import Stripe from "stripe";
 import multer from "multer";
 import { getDb } from "../db/index.js";
 import {
   products, blogPosts, digitalProducts, affiliateProducts,
-  membershipTiers, siteSettings, aiVideos
+  membershipTiers, siteSettings, aiVideos, orders, orderItems, fulfillmentAttempts, orderEvents, productVariants
 } from "../db/schema.js";
 import { requireAdmin, verifyAdminPassword, signAdminToken, ADMIN_COOKIE } from "../middleware/adminAuth.js";
 import { ALLOWED_IMAGE_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, isStorageConfigured, uploadObject } from "../storage/objectStorage.js";
@@ -73,6 +73,106 @@ async function saveSetting(key: string, value: string) {
 async function isIntegrationDisabled(provider: string) {
   const settings = await getSettingsMap([`${provider}_disabled`]);
   return settings[`${provider}_disabled`] === "true";
+}
+
+let fulfillmentTablesEnsured = false;
+async function ensureFulfillmentTables() {
+  if (fulfillmentTablesEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS product_variants (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      productId INT NOT NULL,
+      source ENUM('manual','printify','shopify') NOT NULL DEFAULT 'manual',
+      printifyProductId VARCHAR(128) NULL,
+      printifyVariantId VARCHAR(128) NULL,
+      shopifyProductId VARCHAR(128) NULL,
+      shopifyVariantId VARCHAR(128) NULL,
+      label VARCHAR(255) NOT NULL,
+      size VARCHAR(128) NULL,
+      color VARCHAR(128) NULL,
+      price DECIMAL(10,2) NOT NULL,
+      available BOOLEAN NOT NULL DEFAULT true,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      printProviderId VARCHAR(128) NULL,
+      blueprintId VARCHAR(128) NULL,
+      imageUrl TEXT NULL,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY unique_printify_variant (printifyProductId, printifyVariantId),
+      INDEX idx_product_variants_product (productId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS orders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      customerName VARCHAR(255) NULL,
+      customerEmail VARCHAR(320) NOT NULL,
+      customerPhone VARCHAR(64) NULL,
+      shippingAddress JSON NULL,
+      stripeEventId VARCHAR(128) NULL UNIQUE,
+      stripeCheckoutSessionId VARCHAR(128) NULL UNIQUE,
+      stripePaymentIntentId VARCHAR(128) NULL UNIQUE,
+      stripePaymentStatus VARCHAR(64) NULL,
+      orderTotal DECIMAL(10,2) NULL,
+      currency VARCHAR(8) DEFAULT 'usd',
+      orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
+      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
+      printifyOrderId VARCHAR(128) NULL,
+      printifyExternalId VARCHAR(128) NULL,
+      printifyStatus VARCHAR(128) NULL,
+      printifyApiResponse JSON NULL,
+      errorMessage TEXT NULL,
+      retryCount INT NOT NULL DEFAULT 0,
+      processing BOOLEAN NOT NULL DEFAULT false,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      productId INT NULL,
+      productName VARCHAR(255) NOT NULL,
+      productType ENUM('apparel','digital') NOT NULL DEFAULT 'apparel',
+      quantity INT NOT NULL DEFAULT 1,
+      selectedSize VARCHAR(255) NULL,
+      selectedColor VARCHAR(128) NULL,
+      printifyProductId VARCHAR(128) NULL,
+      printifyVariantId VARCHAR(128) NULL,
+      unitPrice DECIMAL(10,2) NULL,
+      fulfillmentSource ENUM('printify','digital','manual','none') NOT NULL DEFAULT 'none',
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_order_items_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS fulfillment_attempts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      attemptNumber INT NOT NULL DEFAULT 1,
+      action VARCHAR(128) NOT NULL,
+      status ENUM('pending','success','failed','skipped') NOT NULL DEFAULT 'pending',
+      requestPayload JSON NULL,
+      responsePayload JSON NULL,
+      errorMessage TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_fulfillment_attempts_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_events (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NULL,
+      eventType VARCHAR(128) NOT NULL,
+      stripeEventId VARCHAR(128) NULL UNIQUE,
+      printifyEventId VARCHAR(128) NULL,
+      payload JSON NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_order_events_order (orderId)
+    )
+  `));
+  fulfillmentTablesEnsured = true;
 }
 
 function maskSecret(value?: string | null) {
@@ -227,6 +327,95 @@ router.delete("/products/:id", requireAdmin, async (req: Request, res: Response)
     const db = await getDb();
     await db.delete(products).where(eq(products.id, id));
     res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Fulfillment / Printify Orders ────────────────────────────────────────────
+router.get("/fulfillment/orders", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const db = await getDb();
+    const status = String(req.query.status || "");
+    const rows = await db.select().from(orders).orderBy(desc(orders.createdAt));
+    res.json(status ? rows.filter(row => row.fulfillmentStatus === status) : rows);
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.get("/fulfillment/orders/:id", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const id = Number(req.params.id);
+    const db = await getDb();
+    const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+    if (!order) { res.status(404).json({ error: "Order not found" }); return; }
+    const [items, attempts, events] = await Promise.all([
+      db.select().from(orderItems).where(eq(orderItems.orderId, id)),
+      db.select().from(fulfillmentAttempts).where(eq(fulfillmentAttempts.orderId, id)).orderBy(desc(fulfillmentAttempts.createdAt)),
+      db.select().from(orderEvents).where(eq(orderEvents.orderId, id)).orderBy(desc(orderEvents.createdAt)),
+    ]);
+    res.json({ order, items, attempts, events });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/fulfillment/orders/:id/hold", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const id = Number(req.params.id);
+    const db = await getDb();
+    await db.update(orders).set({ fulfillmentStatus: "Requires Admin Review", errorMessage: "Held by admin", processing: false, updatedAt: new Date() }).where(eq(orders.id, id));
+    await db.insert(orderEvents).values({ orderId: id, eventType: "admin.hold", payload: req.body || {}, createdAt: new Date() });
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/fulfillment/orders/:id/release", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const id = Number(req.params.id);
+    const db = await getDb();
+    await db.update(orders).set({ fulfillmentStatus: "Awaiting Fulfillment", errorMessage: null, processing: false, updatedAt: new Date() }).where(eq(orders.id, id));
+    await db.insert(orderEvents).values({ orderId: id, eventType: "admin.release", payload: req.body || {}, createdAt: new Date() });
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/fulfillment/orders/:id/resolve", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const id = Number(req.params.id);
+    const db = await getDb();
+    await db.update(orders).set({ errorMessage: null, processing: false, updatedAt: new Date() }).where(eq(orders.id, id));
+    await db.insert(orderEvents).values({ orderId: id, eventType: "admin.resolve", payload: req.body || {}, createdAt: new Date() });
+    res.json({ success: true });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/fulfillment/orders/:id/refresh", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const id = Number(req.params.id);
+    const db = await getDb();
+    const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+    if (!order?.printifyOrderId) { res.status(400).json({ error: "No Printify order ID to refresh" }); return; }
+    const { shopId } = await getPrintifyCredentials();
+    const data = await printifyRequest(`/shops/${shopId}/orders/${order.printifyOrderId}.json`);
+    await db.update(orders).set({ printifyStatus: String((data as any).status || ""), printifyApiResponse: data as any, updatedAt: new Date() }).where(eq(orders.id, id));
+    await db.insert(orderEvents).values({ orderId: id, eventType: "printify.refresh", payload: data as any, createdAt: new Date() });
+    res.json({ success: true, data });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/fulfillment/orders/:id/retry", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    if (process.env.PRINTIFY_CREATE_ORDERS_ENABLED !== "true") {
+      res.status(403).json({ error: "Printify order creation is disabled. Set PRINTIFY_CREATE_ORDERS_ENABLED=true only for an approved test." });
+      return;
+    }
+    const id = Number(req.params.id);
+    const db = await getDb();
+    await db.insert(orderEvents).values({ orderId: id, eventType: "admin.retry_requested", payload: req.body || {}, createdAt: new Date() });
+    res.status(501).json({ error: "Retry creation endpoint is guarded; implementation requires final approval before live Printify order creation." });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -943,6 +1132,39 @@ function getPrintifySizes(product: any) {
   return Array.from(new Set<string>(sizes)).slice(0, 24);
 }
 
+async function syncPrintifyVariants(productId: number, product: any) {
+  await ensureFulfillmentTables();
+  const db = await getDb();
+  const printifyProductId = getPrintifyProductId(product);
+  const variants = getPrintifyVariants(product).filter((variant: any) => variant?.is_enabled !== false);
+  for (const variant of variants) {
+    const label = String(variant.title || "").trim() || `Variant ${variant.id}`;
+    const parts = label.split("/").map(part => part.trim());
+    const color = parts.length > 1 ? parts[0] : undefined;
+    const size = parts.length > 1 ? parts[parts.length - 1] : label;
+    const price = (Number(variant.price || 0) / 100).toFixed(2);
+    const existing = await db.select().from(productVariants).where(eq(productVariants.printifyVariantId, String(variant.id))).limit(1);
+    const values = {
+      productId,
+      source: "printify" as const,
+      printifyProductId,
+      printifyVariantId: String(variant.id),
+      label,
+      size,
+      color,
+      price,
+      available: variant?.is_available !== false,
+      enabled: variant?.is_enabled !== false,
+      printProviderId: product?.print_provider_id ? String(product.print_provider_id) : null,
+      blueprintId: product?.blueprint_id ? String(product.blueprint_id) : null,
+      imageUrl: product?.images?.[0]?.src || null,
+      updatedAt: new Date(),
+    };
+    if (existing.length > 0) await db.update(productVariants).set(values).where(eq(productVariants.id, existing[0].id));
+    else await db.insert(productVariants).values(values);
+  }
+}
+
 function getPrintifyPrice(product: any) {
   const variants = getPrintifyVariants(product);
   const activePrices = variants
@@ -1105,10 +1327,12 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   };
   if (existing.length > 0) {
     await db.update(products).set(values).where(eq(products.printifyProductId, printifyProductId));
+    await syncPrintifyVariants(existing[0].id, product);
     return { productId: existing[0].id, printifyProductId, action: visible ? "updated" : "hidden" };
   }
   await db.insert(products).values(values);
   const [created] = await db.select({ id: products.id }).from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
+  if (created?.id) await syncPrintifyVariants(created.id, product);
   return { productId: created?.id ?? 0, printifyProductId, action: visible ? "created" : "hidden" };
 }
 
