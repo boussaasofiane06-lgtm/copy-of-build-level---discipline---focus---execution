@@ -206,7 +206,7 @@ async function ensureFulfillmentTables() {
       currency VARCHAR(8) DEFAULT 'usd',
       orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
       fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
-      printifyOrderId VARCHAR(128) NULL,
+      printifyOrderId VARCHAR(128) NULL UNIQUE,
       printifyExternalId VARCHAR(128) NULL,
       printifyStatus VARCHAR(128) NULL,
       printifyApiResponse JSON NULL,
@@ -261,7 +261,23 @@ async function ensureFulfillmentTables() {
       INDEX idx_order_events_order (orderId)
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE orders ADD UNIQUE KEY unique_printify_order_id (printifyOrderId)`)).catch(() => undefined);
   fulfillmentTablesEnsured = true;
+}
+
+async function withMysqlLock<T>(lockName: string, fn: () => Promise<T>): Promise<T> {
+  const db = await getDb();
+  const safeName = lockName.replace(/[^a-zA-Z0-9:_-]/g, "_").slice(0, 64);
+  const lockResult = await db.execute(sql.raw(`SELECT GET_LOCK('${safeName}', 10) AS acquired`)) as any;
+  const acquired = Array.isArray(lockResult)
+    ? Number(lockResult[0]?.[0]?.acquired ?? lockResult[0]?.acquired ?? 0)
+    : 0;
+  if (acquired !== 1) throw new Error(`Could not acquire processing lock for ${safeName}`);
+  try {
+    return await fn();
+  } finally {
+    await db.execute(sql.raw(`SELECT RELEASE_LOCK('${safeName}')`)).catch(() => undefined);
+  }
 }
 
 function getSessionCustomerEmail(session: Stripe.Checkout.Session) {
@@ -805,6 +821,15 @@ async function createPrintifyOrderForInternalOrder(orderId: number) {
     }).where(eq(orders.id, order.id));
     return { skipped: true, reason: "Printify order creation disabled", order };
   }
+  if (process.env.PRINTIFY_SHIPPING_METHOD_CONFIRMED !== "true") {
+    await db.update(orders).set({
+      fulfillmentStatus: "Requires Admin Review",
+      errorMessage: "Printify shipping method is not confirmed. Set PRINTIFY_SHIPPING_METHOD_CONFIRMED=true only after validating the method for the product/provider/destination.",
+      processing: false,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    return { skipped: true, reason: "Printify shipping method not confirmed", order };
+  }
 
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
   const lineItems = items
@@ -865,6 +890,34 @@ async function createPrintifyOrderForInternalOrder(orderId: number) {
     }).where(eq(orders.id, order.id));
     await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "failed", requestPayload: payload, errorMessage: error.message, createdAt: new Date() });
     throw error;
+  }
+}
+
+async function validatePhysicalCheckoutItems(items: PhysicalCheckoutItem[]) {
+  await ensureFulfillmentTables();
+  const db = await getDb();
+  for (const item of items) {
+    const productId = Number(item.productId);
+    if (!Number.isInteger(productId) || productId <= 0) throw new Error(`Invalid product mapping for ${item.name}`);
+    const [product] = await db.select().from(products).where(eq(products.id, productId)).limit(1);
+    if (!product) throw new Error(`Product not found for ${item.name}`);
+    if (!product.published || product.hidden || product.delisted || !product.inStock) {
+      throw new Error(`${product.name} is not available for checkout`);
+    }
+    if (!product.printifyProductId) {
+      throw new Error(`${product.name} is missing Printify product mapping`);
+    }
+    const variantId = cleanText(item.variantId || parseSelectedVariant(item.size || "").variantId);
+    if (!variantId) {
+      throw new Error(`${product.name} is missing selected Printify variant mapping`);
+    }
+    const [variant] = await db.select().from(productVariants).where(eq(productVariants.printifyVariantId, variantId)).limit(1);
+    if (!variant) {
+      throw new Error(`${product.name} selected variant is not registered in product variants`);
+    }
+    if (!variant.enabled || !variant.available) {
+      throw new Error(`${product.name} selected variant is unavailable`);
+    }
   }
 }
 
@@ -962,6 +1015,7 @@ router.post("/checkout", async (req: Request, res: Response) => {
       res.status(400).json({ error: "Checkout contains an invalid product" });
       return;
     }
+    await validatePhysicalCheckoutItems(checkoutItems);
 
     const session = await createCheckoutSessionDirect({
       lineItems: checkoutItems.map((item) => ({
@@ -1117,17 +1171,19 @@ router.post("/webhook", async (req: Request, res: Response) => {
       }
     } else if (session.metadata?.type === "physical") {
       try {
-        const result = await createInternalPhysicalOrder(event.id, session);
-        console.log("[Stripe Webhook] Physical order ledger result", {
-          sessionId: session.id,
-          orderId: result.order?.id,
-          duplicate: result.duplicate,
-          requiresReview: result.requiresReview,
-          reason: result.reason,
+        await withMysqlLock(`stripe:${session.id}`, async () => {
+          const result = await createInternalPhysicalOrder(event.id, session);
+          console.log("[Stripe Webhook] Physical order ledger result", {
+            sessionId: session.id,
+            orderId: result.order?.id,
+            duplicate: result.duplicate,
+            requiresReview: result.requiresReview,
+            reason: result.reason,
+          });
+          if (result.order && !result.duplicate && !result.requiresReview) {
+            await createPrintifyOrderForInternalOrder(result.order.id);
+          }
         });
-        if (result.order && !result.duplicate && !result.requiresReview) {
-          await createPrintifyOrderForInternalOrder(result.order.id);
-        }
       } catch (e) {
         console.error("[Webhook] Failed to process physical order:", e);
       }

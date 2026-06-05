@@ -117,7 +117,7 @@ async function ensureFulfillmentTables() {
       currency VARCHAR(8) DEFAULT 'usd',
       orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
       fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
-      printifyOrderId VARCHAR(128) NULL,
+      printifyOrderId VARCHAR(128) NULL UNIQUE,
       printifyExternalId VARCHAR(128) NULL,
       printifyStatus VARCHAR(128) NULL,
       printifyApiResponse JSON NULL,
@@ -172,6 +172,7 @@ async function ensureFulfillmentTables() {
       INDEX idx_order_events_order (orderId)
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE orders ADD UNIQUE KEY unique_printify_order_id (printifyOrderId)`)).catch(() => undefined);
   fulfillmentTablesEnsured = true;
 }
 
