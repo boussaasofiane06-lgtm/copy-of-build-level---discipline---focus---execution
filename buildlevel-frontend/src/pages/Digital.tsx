@@ -4,7 +4,6 @@ import { MountainLegacySection } from "../components/PromoVisualSections";
 import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, DigitalProduct } from "../lib/api";
 import { useCart } from "../context/CartContext";
-import SubscribeForm from "../components/SubscribeForm";
 
 const storageImageUrl = (value?: string | null) => {
   if (!value) return "";
@@ -118,9 +117,6 @@ export default function Digital() {
         {!loading && products.length > 1 && (
           <RecommendationStrip title="Popular Digital Guides" products={products.map(product => ({ ...product, price: product.price }))} hrefBase="/digital" />
         )}
-        <div style={{ marginTop: 36 }}>
-          <SubscribeForm source="digital" />
-        </div>
       </div>
     </div>
   );
@@ -228,9 +224,6 @@ export function DigitalDetail() {
           hrefBase="/digital"
           currentProductId={product.id}
         />
-        <div style={{ marginTop: 36 }}>
-          <SubscribeForm source="digital_detail" />
-        </div>
       </div>
     </div>
   );

@@ -74,7 +74,19 @@ async function ensureShopOrgTables() {
     if (canRows?.[0]) await db.execute(sql`INSERT INTO product_category_assignments (productId, categoryId, assignmentType) VALUES (${product.id}, ${canRows[0].id}, 'subcategory') ON DUPLICATE KEY UPDATE updatedAt = NOW()`);
     await db.execute(sql`UPDATE products SET category = 'can-coolers', updatedAt = NOW() WHERE id = ${product.id}`);
   }
+  await db.execute(sql.raw(`DELETE a1 FROM shop_audiences a1 JOIN shop_audiences a2 ON a1.slug = a2.slug AND a1.id > a2.id`)).catch(() => undefined);
+  await db.execute(sql.raw(`DELETE c1 FROM shop_categories c1 JOIN shop_categories c2 ON c1.audienceId = c2.audienceId AND COALESCE(c1.parentId, 0) = COALESCE(c2.parentId, 0) AND c1.slug = c2.slug AND c1.id > c2.id`)).catch(() => undefined);
   ensured = true;
+}
+
+function uniqueRows<T extends Record<string, any>>(rows: T[], keyFn: (row: T) => string) {
+  const seen = new Set<string>();
+  return rows.filter(row => {
+    const key = keyFn(row);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function getTaxonomy(includeHidden = false) {
@@ -84,7 +96,11 @@ async function getTaxonomy(includeHidden = false) {
   const [audiences] = await db.execute(sql`SELECT * FROM shop_audiences WHERE ${hiddenFilter} ORDER BY displayOrder, id`) as any;
   const [categories] = await db.execute(sql`SELECT c.*, a.slug AS audienceSlug FROM shop_categories c JOIN shop_audiences a ON a.id = c.audienceId WHERE ${includeHidden ? sql`1=1` : sql`c.enabled = true AND c.hidden = false AND c.draft = false AND c.published = true`} ORDER BY c.displayOrder, c.name`) as any;
   const [assignments] = await db.execute(sql`SELECT paa.productId, a.slug AS audienceSlug, a.name AS audienceName, pc.assignmentType, c.slug AS categorySlug, c.name AS categoryName, c.parentId FROM product_audience_assignments paa JOIN shop_audiences a ON a.id = paa.audienceId LEFT JOIN product_category_assignments pc ON pc.productId = paa.productId LEFT JOIN shop_categories c ON c.id = pc.categoryId`) as any;
-  return { audiences: audiences || [], categories: categories || [], productAssignments: assignments || [] };
+  return {
+    audiences: uniqueRows(audiences || [], row => String(row.slug)),
+    categories: uniqueRows(categories || [], row => `${row.audienceId}:${row.parentId || 0}:${row.slug}`),
+    productAssignments: uniqueRows(assignments || [], row => `${row.productId}:${row.audienceSlug}:${row.assignmentType || ""}:${row.categorySlug || ""}`),
+  };
 }
 
 router.get("/shop/taxonomy", async (_req, res) => {

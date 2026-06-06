@@ -43,7 +43,10 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
   const load = async () => {
     try {
       const data = await adminApi.getShopTaxonomy();
-      setTaxonomy(data);
+      const audiences = Array.from(new Map(data.audiences.map(item => [item.slug, item])).values());
+      const categories = Array.from(new Map(data.categories.map(item => [`${item.audienceId}:${item.parentId || 0}:${item.slug}`, item])).values());
+      const productAssignments = Array.from(new Map(data.productAssignments.map(item => [`${item.productId}:${item.audienceSlug}:${item.assignmentType || ""}:${item.categorySlug || ""}`, item])).values());
+      setTaxonomy({ audiences, categories, productAssignments });
       setCategoryForm(current => ({ ...current, audienceId: current.audienceId || data.audiences.find(a => a.slug === "home-living")?.id || data.audiences[0]?.id || 0 }));
       setClassification(current => ({ ...current, productId: current.productId || products[0]?.id || 0, audienceId: current.audienceId || data.audiences[0]?.id || 0 }));
     } catch (error: any) {

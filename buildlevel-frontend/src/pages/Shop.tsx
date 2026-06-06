@@ -4,7 +4,6 @@ import { GymMotivationSection } from "../components/PromoVisualSections";
 import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, Product, ProductShopAssignment, ShopTaxonomy } from "../lib/api";
 import { useCart } from "../context/CartContext";
-import SubscribeForm from "../components/SubscribeForm";
 import ReportProblemButton from "../components/ReportProblemButton";
 import {
   APPAREL_AUDIENCES,
@@ -274,7 +273,7 @@ export default function Shop() {
     textDecoration: style.fontStyle === "underline" ? "underline" : style.fontStyle === "strike" ? "line-through" : undefined,
   });
   const publicAudiences = taxonomy?.audiences?.length
-    ? taxonomy.audiences.filter(item => Boolean(item.enabled) && !Boolean(item.hidden)).map(item => ({ value: item.slug, label: item.name, isForYou: Boolean(item.isForYou) }))
+    ? Array.from(new Map(taxonomy.audiences.filter(item => Boolean(item.enabled) && !Boolean(item.hidden)).map(item => [item.slug, { value: item.slug, label: item.name, isForYou: Boolean(item.isForYou) }])).values())
     : APPAREL_AUDIENCES.map(item => ({ ...item, isForYou: false }));
   const audienceHasProducts = (value: string) =>
     value === "for-you"
@@ -675,9 +674,6 @@ export default function Shop() {
             );})}
           </div>
         )}
-        <div style={{ marginTop: 36 }}>
-          <SubscribeForm source="apparel" />
-        </div>
       </div>
 
       {cartDrawer}
