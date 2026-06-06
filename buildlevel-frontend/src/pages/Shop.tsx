@@ -234,10 +234,11 @@ export default function Shop() {
   const getAssignmentRows = (productId: number) => productAssignments.filter(item => Number(item.productId) === productId);
   const getPrimaryAssignment = (product: Product): ProductShopAssignment | undefined =>
     getAssignmentRows(product.id).find(item => item.audienceSlug);
-  const getProductAudienceSlug = (product: Product) => getPrimaryAssignment(product)?.audienceSlug || getAudienceForCategory(product.category);
+  const isCanCoolerProduct = (product: Product) => /can cooler|koozie/i.test(`${product.name} ${product.description || ""}`);
+  const getProductAudienceSlug = (product: Product) => getPrimaryAssignment(product)?.audienceSlug || (isCanCoolerProduct(product) ? "home-living" : getAudienceForCategory(product.category));
   const getProductCategorySlug = (product: Product) => {
     const rows = getAssignmentRows(product.id);
-    return rows.find(row => row.assignmentType === "subcategory")?.categorySlug || rows.find(row => row.assignmentType === "primary")?.categorySlug || product.category;
+    return rows.find(row => row.assignmentType === "subcategory")?.categorySlug || rows.find(row => row.assignmentType === "primary")?.categorySlug || (isCanCoolerProduct(product) ? "can-coolers" : product.category);
   };
   const getDynamicAudienceLabel = (slug?: string | null) =>
     taxonomy?.audiences.find(item => item.slug === slug)?.name || (slug ? getAudienceLabel(slug as ApparelAudience) : "Legacy");
