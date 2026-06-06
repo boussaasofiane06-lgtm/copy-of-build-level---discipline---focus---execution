@@ -267,7 +267,8 @@ async function ensureFulfillmentTables(dbOverride?: any) {
 
 async function withMysqlLock<T>(lockName: string, fn: (lockedDb: any) => Promise<T>): Promise<T> {
   const { connection, db } = await createDedicatedDbConnection();
-  const safeName = lockName.replace(/[^a-zA-Z0-9:_-]/g, "_").slice(0, 64);
+  const lockHash = crypto.createHash("sha256").update(lockName).digest("hex").slice(0, 40);
+  const safeName = `buildlevel:stripe:${lockHash}`;
   try {
     const [lockRows] = await connection.execute(`SELECT GET_LOCK(?, 10) AS acquired`, [safeName]) as any;
     const acquired = Number(lockRows?.[0]?.acquired || 0);
@@ -1173,7 +1174,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
       }
     } else if (session.metadata?.type === "physical") {
       try {
-        await withMysqlLock(`stripe:${session.id}`, async (lockedDb) => {
+        await withMysqlLock(session.id, async (lockedDb) => {
           const result = await createInternalPhysicalOrder(event.id, session, lockedDb);
           console.log("[Stripe Webhook] Physical order ledger result", {
             sessionId: session.id,
