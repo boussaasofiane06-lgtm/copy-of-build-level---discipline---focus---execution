@@ -138,8 +138,8 @@ export const appRouter = router({
               },
             },
           ],
-          success_url: `${origin}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
-          cancel_url: `${origin}/checkout`,
+          success_url: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+          cancel_url: `${origin}/checkout/cancel`,
           metadata: {
             source: "build_level_website",
           },

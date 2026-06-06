@@ -9,6 +9,7 @@ import Home from "./pages/Home";
 import Shop from "./pages/Shop";
 import Digital from "./pages/Digital";
 import DigitalSuccess from "./pages/DigitalSuccess";
+import { CheckoutCancel, CheckoutSuccess } from "./pages/CheckoutResult";
 import Blog from "./pages/Blog";
 import BlogPost from "./pages/BlogPost";
 import About from "./pages/About";
@@ -39,6 +40,9 @@ function PublicRoutes() {
           <Route path="/shop" element={<Shop />} />
           <Route path="/digital" element={<Digital />} />
           <Route path="/digital/success" element={<DigitalSuccess />} />
+          <Route path="/checkout/success" element={<CheckoutSuccess />} />
+          <Route path="/checkout/cancel" element={<CheckoutCancel />} />
+          <Route path="/order-confirmation" element={<CheckoutSuccess />} />
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/about" element={<About />} />

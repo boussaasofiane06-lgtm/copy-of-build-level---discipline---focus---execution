@@ -1030,8 +1030,8 @@ router.post("/checkout", async (req: Request, res: Response) => {
       customerEmail,
       metadata: buildPhysicalCheckoutMetadata(checkoutItems),
       shippingCountries: ["US", "GB", "CA", "AU", "DE", "FR", "JP", "NG", "ZA", "AE"],
-      successUrl: `${origin}/order-confirmation?session_id={CHECKOUT_SESSION_ID}`,
-      cancelUrl: `${origin}/shop`,
+      successUrl: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
+      cancelUrl: `${origin}/checkout/cancel`,
     });
 
     res.json({ url: session.url });
