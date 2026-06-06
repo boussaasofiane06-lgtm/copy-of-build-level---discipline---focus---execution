@@ -2,7 +2,7 @@ import { Router, Request, Response } from "express";
 import Stripe from "stripe";
 import crypto from "crypto";
 import { eq, sql } from "drizzle-orm";
-import { getDb } from "../db/index.js";
+import { createDedicatedDbConnection, getDb } from "../db/index.js";
 import { digitalProducts, digitalPurchases, products, siteSettings, orders, orderItems, fulfillmentAttempts, orderEvents, productVariants } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 
@@ -165,9 +165,9 @@ function logStripeCheckoutFailure(context: Record<string, unknown>, error: unkno
 }
 
 let fulfillmentTablesEnsured = false;
-async function ensureFulfillmentTables() {
+async function ensureFulfillmentTables(dbOverride?: any) {
   if (fulfillmentTablesEnsured) return;
-  const db = await getDb();
+  const db = dbOverride || await getDb();
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS product_variants (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -265,18 +265,20 @@ async function ensureFulfillmentTables() {
   fulfillmentTablesEnsured = true;
 }
 
-async function withMysqlLock<T>(lockName: string, fn: () => Promise<T>): Promise<T> {
-  const db = await getDb();
+async function withMysqlLock<T>(lockName: string, fn: (lockedDb: any) => Promise<T>): Promise<T> {
+  const { connection, db } = await createDedicatedDbConnection();
   const safeName = lockName.replace(/[^a-zA-Z0-9:_-]/g, "_").slice(0, 64);
-  const lockResult = await db.execute(sql.raw(`SELECT GET_LOCK('${safeName}', 10) AS acquired`)) as any;
-  const acquired = Array.isArray(lockResult)
-    ? Number(lockResult[0]?.[0]?.acquired ?? lockResult[0]?.acquired ?? 0)
-    : 0;
-  if (acquired !== 1) throw new Error(`Could not acquire processing lock for ${safeName}`);
   try {
-    return await fn();
+    const [lockRows] = await connection.execute(`SELECT GET_LOCK(?, 10) AS acquired`, [safeName]) as any;
+    const acquired = Number(lockRows?.[0]?.acquired || 0);
+    if (acquired !== 1) throw new Error(`Could not acquire processing lock for ${safeName}`);
+    try {
+      return await fn(db);
+    } finally {
+      await connection.execute(`SELECT RELEASE_LOCK(?)`, [safeName]).catch(() => undefined);
+    }
   } finally {
-    await db.execute(sql.raw(`SELECT RELEASE_LOCK('${safeName}')`)).catch(() => undefined);
+    await connection.end().catch(() => undefined);
   }
 }
 
@@ -703,9 +705,9 @@ function validateShippingAddress(address: ReturnType<typeof getOrderShippingAddr
   return "";
 }
 
-async function createInternalPhysicalOrder(eventId: string, session: Stripe.Checkout.Session) {
-  await ensureFulfillmentTables();
-  const db = await getDb();
+async function createInternalPhysicalOrder(eventId: string, session: Stripe.Checkout.Session, lockedDb?: any) {
+  const db = lockedDb || await getDb();
+  await ensureFulfillmentTables(db);
   const sessionId = session.id;
   const paymentIntentId = getPhysicalPaymentReference(session);
 
@@ -806,9 +808,9 @@ async function createInternalPhysicalOrder(eventId: string, session: Stripe.Chec
   return { order: updated, duplicate: false, requiresReview: false, reason: "" };
 }
 
-async function createPrintifyOrderForInternalOrder(orderId: number) {
-  await ensureFulfillmentTables();
-  const db = await getDb();
+async function createPrintifyOrderForInternalOrder(orderId: number, lockedDb?: any) {
+  const db = lockedDb || await getDb();
+  await ensureFulfillmentTables(db);
   const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
   if (!order) throw new Error(`Order ${orderId} not found`);
   if (order.printifyOrderId) return { skipped: true, reason: "Printify order already exists", order };
@@ -1171,8 +1173,8 @@ router.post("/webhook", async (req: Request, res: Response) => {
       }
     } else if (session.metadata?.type === "physical") {
       try {
-        await withMysqlLock(`stripe:${session.id}`, async () => {
-          const result = await createInternalPhysicalOrder(event.id, session);
+        await withMysqlLock(`stripe:${session.id}`, async (lockedDb) => {
+          const result = await createInternalPhysicalOrder(event.id, session, lockedDb);
           console.log("[Stripe Webhook] Physical order ledger result", {
             sessionId: session.id,
             orderId: result.order?.id,
@@ -1181,7 +1183,7 @@ router.post("/webhook", async (req: Request, res: Response) => {
             reason: result.reason,
           });
           if (result.order && !result.duplicate && !result.requiresReview) {
-            await createPrintifyOrderForInternalOrder(result.order.id);
+            await createPrintifyOrderForInternalOrder(result.order.id, lockedDb);
           }
         });
       } catch (e) {

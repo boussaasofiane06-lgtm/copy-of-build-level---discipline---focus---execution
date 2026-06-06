@@ -41,3 +41,12 @@ export async function getDb() {
   }
   return _db;
 }
+
+export async function createDedicatedDbConnection() {
+  const url = process.env.DATABASE_URL;
+  if (!url) throw new Error("DATABASE_URL is not set");
+  const config = buildPoolConfig(url) as mysql.ConnectionOptions;
+  const connection = await mysql.createConnection(config);
+  const db = drizzle(connection, { schema, mode: "default" }) as any;
+  return { connection, db };
+}
