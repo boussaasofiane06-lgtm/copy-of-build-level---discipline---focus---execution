@@ -349,6 +349,46 @@ export interface MonthlyDigestQueueItem {
   createdAt?: string;
 }
 
+export interface SupportTicket {
+  id: number;
+  ticketNumber: string;
+  customerName: string;
+  customerEmail: string;
+  orderNumber?: string | null;
+  productName?: string | null;
+  category: string;
+  subject: string;
+  description: string;
+  priority: "low" | "normal" | "high" | "urgent";
+  status: string;
+  publicStatus?: string;
+  assignedAdmin?: string | null;
+  resolutionMessage?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SupportMessage {
+  id: number;
+  ticketId: number;
+  senderType: "customer" | "admin" | "system";
+  senderName?: string | null;
+  message: string;
+  public: boolean | number;
+  createdAt: string;
+}
+
+export interface SupportAttachment {
+  id: number;
+  ticketId: number;
+  messageId?: number | null;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  dataUrl?: string;
+  createdAt: string;
+}
+
 export interface ShopAudience {
   id: number;
   name: string;
@@ -428,6 +468,12 @@ export const publicApi = {
   getMaintenanceConfig: () => api.get<MaintenanceConfig>("/maintenance").then(r => r.data),
   sendContact: (data: { name: string; email: string; message: string }) =>
     api.post<{ success: true }>("/contact", data).then(r => r.data),
+  createSupportTicket: (data: Record<string, unknown>) =>
+    api.post<{ success: true; ticketNumber: string; ticketUrl: string; message: string }>("/support/tickets", data).then(r => r.data),
+  getSupportTicket: (ticketNumber: string, token: string) =>
+    api.get<{ ticket: SupportTicket; messages: SupportMessage[]; attachments: SupportAttachment[] }>(`/support/tickets/${encodeURIComponent(ticketNumber)}`, { params: { token } }).then(r => r.data),
+  replySupportTicket: (ticketNumber: string, data: { token: string; message: string; attachments?: unknown[] }) =>
+    api.post<{ success: true }>(`/support/tickets/${encodeURIComponent(ticketNumber)}/reply`, data).then(r => r.data),
   syncCart: (data: { sessionId: string; customerEmail?: string; customerFirstName?: string; items: CartSyncItem[] }) =>
     api.post<{ success: true; cart: SavedCart }>("/cart/sync", data).then(r => r.data),
   recoverCart: (token: string) =>
@@ -573,6 +619,13 @@ export const adminApi = {
   previewMonthlyDigest: (audience?: string[]) => api.get<{ subject: string; html: string; eligibleSubscribers: number; queue: MonthlyDigestQueueItem[] }>("/admin/email/monthly-digest/preview", { params: { audience: audience?.join(",") } }).then(r => r.data),
   sendMonthlyDigestTest: (email: string) => api.post<{ success: true; skipped?: boolean; message?: string }>("/admin/email/monthly-digest/test", { email }).then(r => r.data),
   sendMonthlyDigestNow: (audience: string[]) => api.post<{ success: true; campaignId: number; eligibleSubscribers: number; sent: number; failed: number }>("/admin/email/monthly-digest/send", { confirm: true, audience }).then(r => r.data),
+  getSupportTickets: (params?: { status?: string; search?: string }) => api.get<SupportTicket[]>("/admin/support/tickets", { params }).then(r => r.data),
+  getSupportTicket: (id: number) => api.get<{ ticket: SupportTicket; messages: SupportMessage[]; attachments: SupportAttachment[]; notes: unknown[] }>(`/admin/support/tickets/${id}`).then(r => r.data),
+  replySupportTicket: (id: number, data: { message: string; status?: string; public?: boolean }) => api.post<{ success: true }>(`/admin/support/tickets/${id}/reply`, data).then(r => r.data),
+  addSupportNote: (id: number, note: string) => api.post<{ success: true }>(`/admin/support/tickets/${id}/note`, { note }).then(r => r.data),
+  updateSupportTicket: (id: number, data: { status?: string; priority?: string; assignedAdmin?: string; resolutionMessage?: string }) => api.patch<{ success: true }>(`/admin/support/tickets/${id}`, data).then(r => r.data),
+  blockSupportUser: (data: { blockType: "email" | "ip"; value: string; reason?: string }) => api.post<{ success: true }>("/admin/support/block", data).then(r => r.data),
+  getSupportTemplates: () => api.get<Array<{ id: number; name: string; body: string }>>("/admin/support/templates").then(r => r.data),
   getShopTaxonomy: () => api.get<ShopTaxonomy>("/admin/shop/taxonomy").then(r => r.data),
   createShopAudience: (data: Partial<ShopAudience> & { name: string }) => api.post<{ success: true }>("/admin/shop/audiences", data).then(r => r.data),
   updateShopAudience: (id: number, data: Partial<ShopAudience>) => api.put<{ success: true }>(`/admin/shop/audiences/${id}`, data).then(r => r.data),

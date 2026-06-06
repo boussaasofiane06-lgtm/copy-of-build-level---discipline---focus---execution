@@ -1,6 +1,7 @@
 import { useState } from "react";
 import SocialLinks from "../components/SocialLinks";
 import { publicApi } from "../lib/api";
+import ReportProblemButton from "../components/ReportProblemButton";
 
 export default function Contact() {
   const [form, setForm] = useState({ name: "", email: "", message: "" });
@@ -36,6 +37,9 @@ export default function Contact() {
       <div className="container" style={{ maxWidth: 600, padding: "64px 24px" }}>
         <div style={{ marginBottom: 28 }}>
           <SocialLinks />
+        </div>
+        <div style={{ marginBottom: 28 }}>
+          <ReportProblemButton />
         </div>
         {sent ? (
           <div style={{ textAlign: "center", padding: 40 }}>

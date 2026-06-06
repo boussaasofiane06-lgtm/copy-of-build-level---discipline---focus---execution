@@ -8,6 +8,7 @@ import { CartAddNotice, CartDrawer, SavedCartReminder } from "./components/CartD
 import { CartProvider } from "./context/CartContext";
 import { SubscriptionProvider } from "./context/SubscriptionContext";
 import SubscriptionFloatingTab from "./components/SubscriptionFloatingTab";
+import { SupportProvider } from "./context/SupportContext";
 import { PageTransition } from "./components/Motion";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
@@ -22,6 +23,7 @@ import Admin from "./pages/Admin";
 import Maintenance from "./pages/Maintenance";
 import CartRecovery from "./pages/CartRecovery";
 import EmailPreferences from "./pages/EmailPreferences";
+import SupportTicketPage from "./pages/SupportTicket";
 import PolicyPage, { FAQPage, PolicyCenter } from "./pages/PolicyPage";
 import { MaintenanceConfig, publicApi } from "./lib/api";
 
@@ -52,6 +54,7 @@ function PublicRoutes() {
           <Route path="/order-confirmation" element={<CheckoutSuccess />} />
           <Route path="/cart/recover/:token" element={<CartRecovery />} />
           <Route path="/email/preferences/:token" element={<EmailPreferences />} />
+          <Route path="/support/ticket/:ticketNumber" element={<SupportTicketPage />} />
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/about" element={<About />} />
@@ -107,7 +110,8 @@ function PublicStorefrontShell() {
   return (
     <CartProvider>
       <SubscriptionProvider>
-        <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <SupportProvider>
+          <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
           <Navbar />
           <main style={{ flex: 1 }}>
             <PublicRoutes />
@@ -118,6 +122,7 @@ function PublicStorefrontShell() {
           <SavedCartReminder />
           <CartDrawer />
         </div>
+        </SupportProvider>
       </SubscriptionProvider>
     </CartProvider>
   );

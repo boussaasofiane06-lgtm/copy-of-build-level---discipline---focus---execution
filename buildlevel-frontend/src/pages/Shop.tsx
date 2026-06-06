@@ -5,6 +5,7 @@ import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges,
 import { publicApi, Product, ProductShopAssignment, ShopTaxonomy } from "../lib/api";
 import { useCart } from "../context/CartContext";
 import SubscribeForm from "../components/SubscribeForm";
+import ReportProblemButton from "../components/ReportProblemButton";
 import {
   APPAREL_AUDIENCES,
   getAudienceLabel,
@@ -547,6 +548,7 @@ export default function Shop() {
               <button onClick={() => addToCart(viewProduct)} disabled={!isPurchasable(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
                 {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) || "Not Available")}
               </button>
+              <ReportProblemButton source="Product question" style={{ width: "100%", marginBottom: 10 }} />
               <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
               <ProductReviews summary={productReviews} />
               <RecommendationStrip title="Customers Also Bought" products={getRecommendations(viewProduct)} hrefBase="/shop" />

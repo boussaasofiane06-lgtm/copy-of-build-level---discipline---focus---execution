@@ -925,6 +925,61 @@ async function getShopTaxonomy(includeHidden = false) {
   return { audiences: audiences || [], categories: categories || [], productAssignments: assignments || [] };
 }
 
+let supportTablesEnsured = false;
+const supportRateLimit = new Map<string, number[]>();
+const supportAllowedMimeTypes = ["image/jpeg", "image/png", "image/webp", "application/pdf"];
+const supportOrderCategories = new Set(["Order not received", "Order tracking", "Damaged apparel", "Wrong apparel item", "Wrong size or color received"]);
+
+async function ensureSupportTables() {
+  if (supportTablesEnsured) return;
+  const db = await requireDb();
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_tickets (id INT AUTO_INCREMENT PRIMARY KEY, ticketNumber VARCHAR(32) NOT NULL UNIQUE, accessTokenHash VARCHAR(128) NOT NULL, customerName VARCHAR(160) NOT NULL, customerEmail VARCHAR(320) NOT NULL, customerPhone VARCHAR(64) NULL, orderNumber VARCHAR(128) NULL, productName VARCHAR(255) NULL, category VARCHAR(128) NOT NULL, subject VARCHAR(255) NOT NULL, description TEXT NOT NULL, priority ENUM('low','normal','high','urgent') NOT NULL DEFAULT 'normal', status ENUM('new','open','in_progress','waiting_customer','resolved','closed','reopened','spam','blocked') NOT NULL DEFAULT 'new', preferredReplyMethod VARCHAR(64) NULL, consentToContact BOOLEAN NOT NULL DEFAULT true, technicalInfo JSON NULL, assignedAdmin VARCHAR(160) NULL, relatedProductId INT NULL, relatedOrderId INT NULL, relatedStripePayment VARCHAR(128) NULL, relatedPrintifyOrder VARCHAR(128) NULL, relatedDigitalPurchaseId INT NULL, resolutionMessage TEXT NULL, ipAddress VARCHAR(128) NULL, lastCustomerResponseAt TIMESTAMP NULL, lastAdminResponseAt TIMESTAMP NULL, resolvedAt TIMESTAMP NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX idx_support_status (status), INDEX idx_support_email (customerEmail), INDEX idx_support_category (category))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_messages (id INT AUTO_INCREMENT PRIMARY KEY, ticketId INT NOT NULL, senderType ENUM('customer','admin','system') NOT NULL, senderName VARCHAR(160) NULL, message TEXT NOT NULL, public BOOLEAN NOT NULL DEFAULT true, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_support_messages_ticket (ticketId))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_attachments (id INT AUTO_INCREMENT PRIMARY KEY, ticketId INT NOT NULL, messageId INT NULL, fileName VARCHAR(255) NOT NULL, mimeType VARCHAR(128) NOT NULL, sizeBytes INT NOT NULL, dataUrl MEDIUMTEXT NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_support_attachments_ticket (ticketId))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_internal_notes (id INT AUTO_INCREMENT PRIMARY KEY, ticketId INT NOT NULL, note TEXT NOT NULL, author VARCHAR(160) DEFAULT 'admin', createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_support_notes_ticket (ticketId))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_status_history (id INT AUTO_INCREMENT PRIMARY KEY, ticketId INT NOT NULL, oldStatus VARCHAR(64) NULL, newStatus VARCHAR(64) NOT NULL, actor VARCHAR(160) DEFAULT 'system', createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_support_history_ticket (ticketId))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_actions (id INT AUTO_INCREMENT PRIMARY KEY, ticketId INT NOT NULL, action VARCHAR(128) NOT NULL, details TEXT NULL, actor VARCHAR(160) DEFAULT 'admin', createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_support_actions_ticket (ticketId))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_blocked_users (id INT AUTO_INCREMENT PRIMARY KEY, blockType ENUM('email','ip') NOT NULL, value VARCHAR(320) NOT NULL, reason TEXT NULL, active BOOLEAN NOT NULL DEFAULT true, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_support_block (blockType, value))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS support_templates (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) NOT NULL, category VARCHAR(128) NULL, subject VARCHAR(255) NULL, body TEXT NOT NULL, enabled BOOLEAN NOT NULL DEFAULT true, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`));
+  for (const [name, body] of [["Request received", "Thanks for contacting Build Level. We received your request and will review it."], ["Need order number", "Please send your order number so we can investigate this request."], ["Need screenshot", "Please attach a screenshot so we can better understand what happened."], ["Issue resolved", "We have resolved this issue. Reply if you need anything else."], ["Ticket closed", "This support ticket is now closed. You can reopen it from your ticket page if needed."]]) await db.execute(sql`INSERT INTO support_templates (name, body, enabled) SELECT ${name}, ${body}, true WHERE NOT EXISTS (SELECT 1 FROM support_templates WHERE name = ${name})`);
+  supportTablesEnsured = true;
+}
+
+function supportClean(value: unknown, max = 5000) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+}
+
+function supportPriority(category: string, description: string) {
+  const text = `${category} ${description}`.toLowerCase();
+  if (/charged but no order|duplicate charge|security|account access|checkout failure/.test(text)) return "urgent";
+  if (/download missing|damaged|wrong|delivered|not received/.test(text)) return "high";
+  return "normal";
+}
+
+function supportPublicStatus(status: string) {
+  if (["in_progress", "open", "reopened"].includes(status)) return "In Progress";
+  if (status === "waiting_customer") return "Waiting for Customer";
+  if (status === "resolved") return "Resolved";
+  if (status === "closed") return "Closed";
+  return "Received";
+}
+
+async function getSupportTicketByToken(ticketNumber: string, token: string) {
+  const db = await requireDb();
+  const [rows] = await db.execute(sql`SELECT * FROM support_tickets WHERE ticketNumber = ${ticketNumber} AND accessTokenHash = ${hashToken(token)} LIMIT 1`) as any;
+  return rows?.[0] || null;
+}
+
+async function getSupportPayload(ticket: any, customerSafe = false) {
+  const db = await requireDb();
+  const [messages] = await db.execute(sql`SELECT * FROM support_messages WHERE ticketId = ${ticket.id} ${customerSafe ? sql`AND public = true` : sql``} ORDER BY createdAt ASC`) as any;
+  const [attachments] = await db.execute(sql`SELECT id, ticketId, messageId, fileName, mimeType, sizeBytes, createdAt ${customerSafe ? sql.raw("") : sql.raw(", dataUrl")} FROM support_attachments WHERE ticketId = ${ticket.id}`) as any;
+  const [notes] = customerSafe ? [[]] : await db.execute(sql`SELECT * FROM support_internal_notes WHERE ticketId = ${ticket.id} ORDER BY createdAt DESC`) as any;
+  return { ticket: { ...ticket, publicStatus: supportPublicStatus(ticket.status), accessTokenHash: undefined, ipAddress: customerSafe ? undefined : ticket.ipAddress }, messages, attachments, notes };
+}
+
+const supportAttachmentSchema = z.object({ fileName: z.string().min(1).max(255), mimeType: z.string().refine(value => supportAllowedMimeTypes.includes(value), "Unsupported file type"), sizeBytes: z.number().max(5 * 1024 * 1024), dataUrl: z.string().max(7_000_000).optional().default("") });
+
 function sanitizeStyleSettings(value: Record<string, unknown>) {
   const allowedKeys = new Set(["textCase", "fontStyle", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "textAlign", "textColor", "headingColor", "backgroundColor", "borderColor", "buttonColor", "buttonTextColor", "badgeColor", "highlightColor", "hoverColor", "accentColor", "buttonVariant", "buttonSize", "buttonWidth", "buttonRadius", "badgeText", "badgeTextColor", "badgeBackgroundColor", "badgeBorderColor", "badgePosition", "mobileVisible", "desktopVisible"]);
   const clean: Record<string, string | boolean> = {};
@@ -975,6 +1030,77 @@ export function registerRestCompatRoutes(app: Express) {
 
   app.put("/api/admin/shop/products/:id/classification", requireAdminRest, async (req, res) => {
     try { await ensureShopOrgTables(); const data = z.object({ audienceId: z.number(), categoryId: z.number().optional(), subcategoryId: z.number().optional() }).parse(req.body); const productId = Number(req.params.id); const db = await requireDb(); await db.execute(sql`INSERT INTO product_audience_assignments (productId, audienceId, locked) VALUES (${productId}, ${data.audienceId}, true) ON DUPLICATE KEY UPDATE audienceId = VALUES(audienceId), locked = true, updatedAt = NOW()`); await db.execute(sql`DELETE FROM product_category_assignments WHERE productId = ${productId} AND assignmentType IN ('primary','subcategory')`); if (data.categoryId) await db.execute(sql`INSERT INTO product_category_assignments (productId, categoryId, assignmentType) VALUES (${productId}, ${data.categoryId}, 'primary')`); if (data.subcategoryId) await db.execute(sql`INSERT INTO product_category_assignments (productId, categoryId, assignmentType) VALUES (${productId}, ${data.subcategoryId}, 'subcategory')`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/support/tickets", async (req, res) => {
+    try {
+      await ensureSupportTables();
+      const clientIp = getClientIp(req);
+      const now = Date.now();
+      const recent = (supportRateLimit.get(clientIp) || []).filter(t => now - t < 60_000);
+      if (recent.length >= 4) { res.status(429).json({ error: "Please wait before submitting another support request." }); return; }
+      recent.push(now); supportRateLimit.set(clientIp, recent);
+      const schema = z.object({ customerName: z.string().min(1).max(160), customerEmail: z.string().email().max(320), customerPhone: z.string().max(64).optional().default(""), orderNumber: z.string().max(128).optional().default(""), productName: z.string().max(255).optional().default(""), category: z.string().min(1).max(128), subject: z.string().min(3).max(255), description: z.string().min(10).max(8000), preferredReplyMethod: z.string().max(64).optional().default("email"), consentToContact: z.boolean().refine(Boolean, "Consent to contact is required"), technicalInfo: z.record(z.string(), z.unknown()).optional().default({}), attachments: z.array(supportAttachmentSchema).max(3).optional().default([]) });
+      const data = schema.parse(req.body);
+      if (supportOrderCategories.has(data.category) && !data.orderNumber) { res.status(400).json({ error: "Please include your order number for this issue." }); return; }
+      const db = await requireDb();
+      const [blocked] = await db.execute(sql`SELECT id FROM support_blocked_users WHERE active = true AND ((blockType = 'email' AND value = ${data.customerEmail.toLowerCase()}) OR (blockType = 'ip' AND value = ${clientIp})) LIMIT 1`) as any;
+      if (blocked?.[0]) { res.status(403).json({ error: "Support access is unavailable. Contact support by email." }); return; }
+      const token = randomToken();
+      const ticketNumber = `BL-${new Date().getFullYear()}-${String(Math.floor(Math.random() * 900000) + 100000)}`;
+      const priority = supportPriority(data.category, data.description);
+      await db.execute(sql`INSERT INTO support_tickets (ticketNumber, accessTokenHash, customerName, customerEmail, customerPhone, orderNumber, productName, category, subject, description, priority, status, preferredReplyMethod, consentToContact, technicalInfo, ipAddress, lastCustomerResponseAt) VALUES (${ticketNumber}, ${hashToken(token)}, ${supportClean(data.customerName, 160)}, ${data.customerEmail.toLowerCase()}, ${supportClean(data.customerPhone, 64)}, ${supportClean(data.orderNumber, 128)}, ${supportClean(data.productName, 255)}, ${supportClean(data.category, 128)}, ${supportClean(data.subject, 255)}, ${supportClean(data.description)}, ${priority}, 'new', ${supportClean(data.preferredReplyMethod, 64)}, true, ${JSON.stringify(data.technicalInfo)}, ${clientIp}, NOW())`);
+      const [ticketRows] = await db.execute(sql`SELECT * FROM support_tickets WHERE ticketNumber = ${ticketNumber} LIMIT 1`) as any;
+      const ticket = ticketRows[0];
+      await db.execute(sql`INSERT INTO support_messages (ticketId, senderType, senderName, message, public) VALUES (${ticket.id}, 'customer', ${supportClean(data.customerName, 160)}, ${supportClean(data.description)}, true)`);
+      for (const file of data.attachments) await db.execute(sql`INSERT INTO support_attachments (ticketId, fileName, mimeType, sizeBytes, dataUrl) VALUES (${ticket.id}, ${supportClean(file.fileName, 255)}, ${file.mimeType}, ${file.sizeBytes}, ${file.dataUrl})`);
+      const ticketUrl = `${getFrontendOrigin(req)}/support/ticket/${ticketNumber}?token=${token}`;
+      if (isEmailConfigured()) { const transporter = getTransporter(); const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL; await transporter.sendMail({ from, to: data.customerEmail, subject: `Build Level support ticket ${ticketNumber}`, text: `Your request has been received.\n\nSupport ticket: ${ticketNumber}\nSubject: ${data.subject}\nCategory: ${data.category}\n\nView ticket: ${ticketUrl}\n\nSupport: ${BUSINESS_EMAIL}` }).catch(() => undefined); }
+      res.json({ success: true, ticketNumber, ticketUrl, message: "Your request has been received." });
+    } catch (e: any) {
+      const message = e instanceof z.ZodError ? (e as any).issues?.[0]?.message || "Check the support form and try again." : "We could not create your support request right now. Please try again.";
+      res.status(400).json({ error: message });
+    }
+  });
+
+  app.get("/api/support/tickets/:ticketNumber", async (req, res) => {
+    try { await ensureSupportTables(); const ticket = await getSupportTicketByToken(req.params.ticketNumber, String(req.query.token || "")); if (!ticket) { res.status(404).json({ error: "Ticket not found or access link expired." }); return; } res.json(await getSupportPayload(ticket, true)); } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/support/tickets/:ticketNumber/reply", async (req, res) => {
+    try { await ensureSupportTables(); const data = z.object({ token: z.string(), message: z.string().min(2).max(6000), attachments: z.array(supportAttachmentSchema).max(3).optional().default([]) }).parse(req.body); const ticket = await getSupportTicketByToken(req.params.ticketNumber, data.token); if (!ticket) { res.status(404).json({ error: "Ticket not found or access link expired." }); return; } const db = await requireDb(); await db.execute(sql`INSERT INTO support_messages (ticketId, senderType, senderName, message, public) VALUES (${ticket.id}, 'customer', ${ticket.customerName}, ${supportClean(data.message)}, true)`); await db.execute(sql`UPDATE support_tickets SET status = IF(status IN ('resolved','closed'), 'reopened', status), lastCustomerResponseAt = NOW(), updatedAt = NOW() WHERE id = ${ticket.id}`); for (const file of data.attachments) await db.execute(sql`INSERT INTO support_attachments (ticketId, fileName, mimeType, sizeBytes, dataUrl) VALUES (${ticket.id}, ${supportClean(file.fileName, 255)}, ${file.mimeType}, ${file.sizeBytes}, ${file.dataUrl})`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: "We could not add your reply. Please try again." }); }
+  });
+
+  app.get("/api/admin/support/tickets", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const db = await requireDb(); const status = supportClean(req.query.status, 64); const search = `%${supportClean(req.query.search, 160)}%`; const [rows] = await db.execute(sql`SELECT * FROM support_tickets WHERE (${status} = '' OR status = ${status}) AND (${search} = '%%' OR ticketNumber LIKE ${search} OR customerEmail LIKE ${search} OR orderNumber LIKE ${search} OR productName LIKE ${search}) ORDER BY updatedAt DESC LIMIT 300`) as any; res.json(rows || []); } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.get("/api/admin/support/tickets/:id", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const db = await requireDb(); const [rows] = await db.execute(sql`SELECT * FROM support_tickets WHERE id = ${Number(req.params.id)} LIMIT 1`) as any; if (!rows?.[0]) { res.status(404).json({ error: "Ticket not found" }); return; } res.json(await getSupportPayload(rows[0], false)); } catch (e: any) { res.status(500).json({ error: e.message }); }
+  });
+
+  app.post("/api/admin/support/tickets/:id/reply", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const data = z.object({ message: z.string().min(2).max(6000), status: z.string().optional().default("waiting_customer"), public: z.boolean().optional().default(true) }).parse(req.body); const db = await requireDb(); const [rows] = await db.execute(sql`SELECT * FROM support_tickets WHERE id = ${Number(req.params.id)} LIMIT 1`) as any; const ticket = rows?.[0]; if (!ticket) { res.status(404).json({ error: "Ticket not found" }); return; } await db.execute(sql`INSERT INTO support_messages (ticketId, senderType, senderName, message, public) VALUES (${ticket.id}, 'admin', 'Build Level Support', ${supportClean(data.message)}, ${data.public})`); await db.execute(sql`UPDATE support_tickets SET status = ${data.status}, lastAdminResponseAt = NOW(), updatedAt = NOW(), resolvedAt = IF(${data.status} = 'resolved', NOW(), resolvedAt) WHERE id = ${ticket.id}`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/admin/support/tickets/:id/note", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const note = supportClean(z.object({ note: z.string().min(2).max(6000) }).parse(req.body).note); const db = await requireDb(); await db.execute(sql`INSERT INTO support_internal_notes (ticketId, note, author) VALUES (${Number(req.params.id)}, ${note}, 'admin')`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.patch("/api/admin/support/tickets/:id", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const data = z.object({ status: z.string().optional(), priority: z.string().optional(), assignedAdmin: z.string().optional(), resolutionMessage: z.string().optional() }).parse(req.body); const db = await requireDb(); await db.execute(sql`UPDATE support_tickets SET status = COALESCE(${data.status ?? null}, status), priority = COALESCE(${data.priority ?? null}, priority), assignedAdmin = COALESCE(${data.assignedAdmin ?? null}, assignedAdmin), resolutionMessage = COALESCE(${data.resolutionMessage ?? null}, resolutionMessage), resolvedAt = IF(${data.status || ""} = 'resolved', NOW(), resolvedAt), updatedAt = NOW() WHERE id = ${Number(req.params.id)}`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.post("/api/admin/support/block", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const data = z.object({ blockType: z.enum(["email", "ip"]), value: z.string().min(1).max(320), reason: z.string().optional().default("") }).parse(req.body); const db = await requireDb(); await db.execute(sql`INSERT INTO support_blocked_users (blockType, value, reason, active) VALUES (${data.blockType}, ${data.value.toLowerCase()}, ${data.reason}, true) ON DUPLICATE KEY UPDATE active = true, reason = VALUES(reason)`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+  });
+
+  app.get("/api/admin/support/templates", requireAdminRest, async (_req, res) => {
+    await ensureSupportTables(); const db = await requireDb(); const [rows] = await db.execute(sql`SELECT * FROM support_templates ORDER BY name`) as any; res.json(rows || []);
+  });
+
+  app.post("/api/admin/support/templates", requireAdminRest, async (req, res) => {
+    try { await ensureSupportTables(); const data = z.object({ name: z.string().min(1).max(160), category: z.string().optional().default(""), subject: z.string().optional().default(""), body: z.string().min(2).max(6000) }).parse(req.body); const db = await requireDb(); await db.execute(sql`INSERT INTO support_templates (name, category, subject, body, enabled) VALUES (${data.name}, ${data.category}, ${data.subject}, ${data.body}, true)`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
   app.get("/api/admin/integrations/overview", requireAdminRest, async (_req, res) => {

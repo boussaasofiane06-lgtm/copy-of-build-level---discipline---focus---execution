@@ -2,6 +2,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { useEffect } from "react";
 import { useCart } from "../context/CartContext";
 import SubscribeForm from "../components/SubscribeForm";
+import ReportProblemButton from "../components/ReportProblemButton";
 
 function ActionButtons() {
   return (
@@ -93,6 +94,9 @@ export function CheckoutSuccess() {
         </div>
 
         <ActionButtons />
+        <div style={{ marginTop: 18 }}>
+          <ReportProblemButton source="Order tracking" />
+        </div>
         <div style={{ marginTop: 34 }}>
           <SubscribeForm source="checkout_success" />
         </div>

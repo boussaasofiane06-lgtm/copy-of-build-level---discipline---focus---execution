@@ -1,6 +1,7 @@
 import { Link } from "react-router-dom";
 import SocialLinks from "./SocialLinks";
 import SubscribeForm from "./SubscribeForm";
+import ReportProblemButton from "./ReportProblemButton";
 
 export default function Footer() {
   return (
@@ -49,6 +50,7 @@ export default function Footer() {
                 >{label}</Link>
               ))}
               <a href="mailto:info@thebuildlevel.com" style={{ color: "var(--text3)", fontSize: "0.85rem", transition: "color 0.2s" }}>info@thebuildlevel.com</a>
+              <ReportProblemButton className="btn btn-outline btn-sm" style={{ justifyContent: "flex-start" }} />
             </div>
           </div>
           <div>

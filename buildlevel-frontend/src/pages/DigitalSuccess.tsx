@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { publicApi } from "../lib/api";
 import { useCart } from "../context/CartContext";
+import ReportProblemButton from "../components/ReportProblemButton";
 
 type AccessState =
   | { status: "loading" }
@@ -100,6 +101,9 @@ export default function DigitalSuccess() {
               <p style={{ color: "var(--text3)", fontSize: "0.78rem", lineHeight: 1.6 }}>
                 {access.remainingDownloads} of {access.downloadLimit} downloads remaining. Access expires {new Date(access.expiresAt).toLocaleDateString()}.
               </p>
+              <div style={{ marginTop: 14 }}>
+                <ReportProblemButton source="Download link not working" />
+              </div>
             </div>
           )}
         </div>

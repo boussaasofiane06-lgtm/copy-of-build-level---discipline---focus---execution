@@ -8,6 +8,7 @@ import stripeRoutes from "./routes/stripe.js";
 import engagementRoutes from "./routes/engagement.js";
 import retentionRoutes from "./routes/retention.js";
 import shopOrgRoutes from "./routes/shopOrg.js";
+import supportRoutes from "./routes/support.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -47,6 +48,7 @@ app.use("/api", publicRoutes);
 app.use("/api", engagementRoutes);
 app.use("/api", retentionRoutes);
 app.use("/api", shopOrgRoutes);
+app.use("/api", supportRoutes);
 app.use("/api/stripe", stripeRoutes);
 
 // ─── Health check ─────────────────────────────────────────────────────────────

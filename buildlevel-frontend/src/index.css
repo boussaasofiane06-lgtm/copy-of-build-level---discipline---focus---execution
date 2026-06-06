@@ -544,6 +544,63 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   color: #ff6600;
 }
 
+.support-modal {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-overlay) + 45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+}
+
+.support-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0,0,0,0.78);
+}
+
+.support-modal__panel {
+  position: relative;
+  width: min(760px, 100%);
+  max-height: min(88vh, 820px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(255,102,0,0.28);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(18,18,18,0.98), rgba(7,7,7,0.98));
+  box-shadow: 0 28px 90px rgba(0,0,0,0.58);
+  padding: clamp(20px, 4vw, 34px);
+}
+
+.support-modal__close {
+  position: sticky;
+  top: 0;
+  float: right;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg3);
+  color: var(--text);
+  z-index: 1;
+}
+
+.support-form,
+.support-success {
+  display: grid;
+  gap: 14px;
+  clear: both;
+}
+
+.support-form__grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
 /* Blog detail page hero image only — keep journal grid cards unchanged */
 .blog-detail-hero {
   width: 100%;
@@ -1254,6 +1311,23 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
   }
   .subscription-modal__actions,
   .subscription-modal__actions .btn {
+    width: 100%;
+  }
+  .support-modal {
+    align-items: stretch;
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  }
+  .support-modal__panel {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    padding: 18px;
+    border-radius: 14px;
+  }
+  .support-form__grid {
+    grid-template-columns: 1fr;
+  }
+  .support-form .btn,
+  .support-success .btn {
     width: 100%;
   }
   .monthly-build-tab {

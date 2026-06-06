@@ -3,6 +3,7 @@ import { Link, useLocation } from "react-router-dom";
 import SocialLinks from "./SocialLinks";
 import { useCart } from "../context/CartContext";
 import { useSubscription } from "../context/SubscriptionContext";
+import { useSupport } from "../context/SupportContext";
 
 const links = [
   { to: "/", label: "Home" },
@@ -19,6 +20,7 @@ export default function Navbar() {
   const { pathname } = useLocation();
   const cart = useCart();
   const subscription = useSubscription();
+  const support = useSupport();
 
   useEffect(() => {
     setOpen(false);
@@ -126,6 +128,9 @@ export default function Navbar() {
             </button>
             <button type="button" onClick={() => { cart.openCart(); setOpen(false); }} className="btn btn-outline" style={{ width: "100%", marginBottom: 14 }}>
               Cart ({cart.itemCount})
+            </button>
+            <button type="button" onClick={() => { support.openSupport({ category: "Website technical problem" }); setOpen(false); }} className="btn btn-outline" style={{ width: "100%", marginBottom: 14 }}>
+              Report a Problem
             </button>
             <SocialLinks compact />
           </div>
