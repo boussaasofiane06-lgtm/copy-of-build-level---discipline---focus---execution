@@ -435,6 +435,7 @@ export interface ShopTaxonomy {
   audiences: ShopAudience[];
   categories: ShopCategory[];
   productAssignments: ProductShopAssignment[];
+  events?: Array<ShopAudience & { categoryType?: string }>;
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -630,11 +631,15 @@ export const adminApi = {
   getShopTaxonomy: () => api.get<ShopTaxonomy>("/admin/shop/taxonomy").then(r => r.data),
   createShopAudience: (data: Partial<ShopAudience> & { name: string }) => api.post<{ success: true }>("/admin/shop/audiences", data).then(r => r.data),
   updateShopAudience: (id: number, data: Partial<ShopAudience>) => api.put<{ success: true }>(`/admin/shop/audiences/${id}`, data).then(r => r.data),
+  deleteShopAudience: (id: number) => api.delete<{ success: true }>(`/admin/shop/audiences/${id}`).then(r => r.data),
   createShopCategory: (data: Partial<ShopCategory> & { name: string; audienceId: number }) => api.post<{ success: true }>("/admin/shop/categories", data).then(r => r.data),
   updateShopCategory: (id: number, data: Partial<ShopCategory>) => api.put<{ success: true }>(`/admin/shop/categories/${id}`, data).then(r => r.data),
+  deleteShopCategory: (id: number) => api.delete<{ success: true }>(`/admin/shop/categories/${id}`).then(r => r.data),
   createShopTrend: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/trends", data).then(r => r.data),
   createShopCollection: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/collections", data).then(r => r.data),
   createShopEvent: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/events", data).then(r => r.data),
+  updateShopEvent: (id: number, data: { name?: string; slug?: string; description?: string; enabled?: boolean; hidden?: boolean; displayOrder?: number }) => api.put<{ success: true }>(`/admin/shop/events/${id}`, data).then(r => r.data),
+  deleteShopEvent: (id: number) => api.delete<{ success: true }>(`/admin/shop/events/${id}`).then(r => r.data),
   createRecommendedGroup: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/recommended-groups", data).then(r => r.data),
   updateProductClassification: (id: number, data: { audienceId: number; categoryId?: number; subcategoryId?: number }) => api.put<{ success: true }>(`/admin/shop/products/${id}/classification`, data).then(r => r.data),
 

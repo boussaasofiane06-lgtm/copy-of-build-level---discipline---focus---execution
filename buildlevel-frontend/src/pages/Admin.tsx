@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { adminApi, Product, BlogPost, DigitalProduct, MaintenanceConfig } from "../lib/api";
+import { adminApi, Product, BlogPost, DigitalProduct, MaintenanceConfig, ShopAudience, ShopCategory, ShopTaxonomy } from "../lib/api";
 import AdminIntegrationsPanel from "../components/AdminIntegrationsPanel";
 import AdminModerationPanel from "../components/AdminModerationPanel";
 import AdminFulfillmentPanel from "../components/AdminFulfillmentPanel";
@@ -172,6 +172,7 @@ export default function Admin() {
   const [products, setProducts] = useState<Product[]>([]);
   const [digital, setDigital] = useState<DigitalProduct[]>([]);
   const [blog, setBlog] = useState<BlogPost[]>([]);
+  const [shopTaxonomy, setShopTaxonomy] = useState<ShopTaxonomy>({ audiences: [], categories: [], productAssignments: [] });
   const [maintenanceForm, setMaintenanceForm] = useState<MaintenanceConfig>(defaultMaintenanceConfig);
   const [loading, setLoading] = useState(false);
   const [toast, setToast] = useState("");
@@ -179,7 +180,7 @@ export default function Admin() {
   // Product form
   const [showProductForm, setShowProductForm] = useState(false);
   const [editProduct, setEditProduct] = useState<Partial<Product> | null>(null);
-  const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as ApparelAudience, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false });
+  const [productForm, setProductForm] = useState({ name: "", description: "", price: "", compareAtPrice: "", audience: DEFAULT_AUDIENCE as string, category: DEFAULT_CATEGORY, sizes: "", imageUrl: "", badge: "", status: "available", inStock: true, published: true, featured: false });
   const [customProductCategory, setCustomProductCategory] = useState("");
   const [productImagePreviews, setProductImagePreviews] = useState<string[]>([]);
   const [productVariantRows, setProductVariantRows] = useState<ProductVariantRow[]>([]);
@@ -200,6 +201,18 @@ export default function Admin() {
   const [blogForm, setBlogForm] = useState({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, featured: false });
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  const enabledAudienceOptions = () => {
+    const dynamic = shopTaxonomy.audiences.filter(a => Boolean(a.enabled) && !Boolean(a.isForYou || false) || a.slug === "for-you");
+    return dynamic.length ? dynamic : APPAREL_AUDIENCES.map(a => ({ id: 0, slug: a.value, name: a.label, enabled: true, hidden: false, featured: false, published: true, displayOrder: 0 }));
+  };
+  const getAudienceIdBySlug = (slug: string) => shopTaxonomy.audiences.find(a => a.slug === slug)?.id || 0;
+  const dynamicCategoriesForAudience = (audienceSlug: string) => {
+    const audienceId = getAudienceIdBySlug(audienceSlug);
+    const dynamic = shopTaxonomy.categories.filter(c => Number(c.audienceId) === Number(audienceId) && Boolean(c.enabled) && !Boolean(c.hidden));
+    return dynamic.length ? dynamic.map(c => ({ slug: c.slug, label: c.name, id: c.id })) : getCategoriesForAudience(audienceSlug as ApparelAudience).map(c => ({ slug: c.slug, label: c.label, id: 0 }));
+  };
+  const assignmentForProduct = (productId?: number) => (shopTaxonomy.productAssignments || []).filter(row => Number(row.productId) === Number(productId));
 
   const logout = async () => {
     if (!window.confirm("Are you sure you want to log out of the Build Level Admin Panel?")) return;
@@ -224,14 +237,20 @@ export default function Admin() {
   const loadData = async () => {
     setLoading(true);
     try {
-      const [p, d, b, maintenance] = await Promise.all([
+      const [p, d, b, maintenance, taxonomy] = await Promise.all([
         adminApi.getProducts(),
         adminApi.getDigitalProducts(),
         adminApi.getBlogPosts(),
         adminApi.getMaintenanceSettings().catch(() => defaultMaintenanceConfig),
+        adminApi.getShopTaxonomy().catch(() => ({ audiences: [], categories: [], productAssignments: [] })),
       ]);
       setProducts(p); setDigital(d); setBlog(b);
       setMaintenanceForm({ ...defaultMaintenanceConfig, ...maintenance });
+      setShopTaxonomy({
+        audiences: Array.from(new Map<string, ShopAudience>(taxonomy.audiences.map(item => [item.slug, item] as [string, ShopAudience])).values()),
+        categories: Array.from(new Map<string, ShopCategory>(taxonomy.categories.map(item => [`${item.audienceId}:${item.parentId || 0}:${item.slug}`, item] as [string, ShopCategory])).values()),
+        productAssignments: taxonomy.productAssignments || [],
+      });
     } catch { }
     adminApi.getDigitalUploadConfig().then(setDigitalUploadConfig).catch(() => setDigitalUploadConfig(null));
     setLoading(false);
@@ -283,8 +302,11 @@ export default function Admin() {
       if (productImages.length > 0) {
         data.imageUrl = serializeProductImages(productImages);
       }
-      if (editProduct?.id) await adminApi.updateProduct(editProduct.id, data as any);
-      else await adminApi.createProduct(data as any);
+      const saved = editProduct?.id ? await adminApi.updateProduct(editProduct.id, data as any).then(() => ({ id: editProduct.id })) : await adminApi.createProduct(data as any);
+      const savedProductId = Number(saved?.id || editProduct?.id || 0);
+      const audienceId = getAudienceIdBySlug(productForm.audience);
+      const categoryId = shopTaxonomy.categories.find(c => c.slug === productForm.category && Number(c.audienceId) === Number(audienceId))?.id || 0;
+      if (savedProductId && audienceId) await adminApi.updateProductClassification(savedProductId, { audienceId, categoryId: categoryId || undefined }).catch(() => undefined);
       showToast(data.published ? (editProduct?.id ? "Product updated and visible if qualified" : "Product created and visible if qualified") : "Product saved as draft");
       setShowProductForm(false); setEditProduct(null);
       setCustomProductCategory("");
@@ -367,12 +389,14 @@ export default function Admin() {
   };
 
   const openEditProduct = (p: Product) => {
-    const audience = getAudienceForCategory(p.category);
+    const assigned = assignmentForProduct(p.id);
+    const audience = assigned[0]?.audienceSlug || getAudienceForCategory(p.category);
+    const category = assigned.find(row => row.assignmentType === "primary")?.categorySlug || p.category || dynamicCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY;
     const badge = (p.badge || "").toLowerCase();
     const status = badge.includes("coming") || badge.includes("soon") ? "coming-soon" : badge.includes("limited") ? "limited-edition" : badge.includes("new") ? "new-release" : "available";
     setEditProduct(p);
-    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category: p.category || getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY, sizes: getDisplaySizes(p.sizes), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
-    setCustomProductCategory(getCategoryBySlug(p.category) ? "" : getCategoryLabel(p.category));
+    setProductForm({ name: p.name, description: p.description || "", price: p.price, compareAtPrice: p.compareAtPrice || "", audience, category, sizes: getDisplaySizes(p.sizes), imageUrl: p.imageUrl || "", badge: p.badge || "", status, inStock: p.inStock, published: p.published, featured: p.featured });
+    setCustomProductCategory(getCategoryBySlug(category) || shopTaxonomy.categories.some(c => c.slug === category) ? "" : getCategoryLabel(category));
     setProductVariantRows(getProductVariantRows(p.sizes, p.price));
     setProductImagePreviews(getProductImages(p.imageUrl));
     setShowProductForm(true);
@@ -589,34 +613,34 @@ export default function Admin() {
                           style={inputStyle}
                           value={productForm.audience}
                           onChange={e => {
-                            const audience = e.target.value as ApparelAudience;
+                            const audience = e.target.value;
                             setProductForm(f => ({
                               ...f,
                               audience,
-                              category: getCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY,
+                              category: dynamicCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY,
                             }));
                             setCustomProductCategory("");
                           }}
                         >
-                          {APPAREL_AUDIENCES.map(audience => <option key={audience.value} value={audience.value}>{audience.label}</option>)}
+                          {enabledAudienceOptions().map(audience => <option key={audience.slug} value={audience.slug}>{audience.name}</option>)}
                         </select>
                       </div>
                       <div>
                         <label style={labelStyle}>Category</label>
                         <select
                           style={inputStyle}
-                          value={getCategoriesForAudience(productForm.audience).some(category => category.slug === productForm.category) ? productForm.category : "__custom"}
+                          value={dynamicCategoriesForAudience(productForm.audience).some(category => category.slug === productForm.category) ? productForm.category : "__custom"}
                           onChange={e => {
                             if (e.target.value === "__custom") {
                               const label = customProductCategory || "";
-                              setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience, label) }));
+                              setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience as ApparelAudience, label) }));
                               return;
                             }
                             setCustomProductCategory("");
                             setProductForm(f => ({ ...f, category: e.target.value }));
                           }}
                         >
-                          {getCategoriesForAudience(productForm.audience).map(category => (
+                          {dynamicCategoriesForAudience(productForm.audience).map(category => (
                             <option key={category.slug} value={category.slug}>{category.label}</option>
                           ))}
                           <option value="__custom">Custom Category</option>
@@ -627,7 +651,7 @@ export default function Admin() {
                           onChange={e => {
                             const value = e.target.value;
                             setCustomProductCategory(value);
-                            setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience, value) }));
+                            setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience as ApparelAudience, value) }));
                           }}
                           placeholder="Add any future category"
                         />
@@ -1002,7 +1026,7 @@ export default function Admin() {
             )}
 
             {tab === "shop-org" && (
-              <AdminShopOrganizationPanel products={products} showToast={showToast} />
+              <AdminShopOrganizationPanel products={products} showToast={showToast} onChanged={loadData} />
             )}
 
             {tab === "fulfillment" && (
