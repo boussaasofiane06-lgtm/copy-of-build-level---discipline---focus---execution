@@ -1,4 +1,4 @@
-export type ApparelAudience = "mens" | "womens" | "kids";
+export type ApparelAudience = "mens" | "womens" | "kids" | "accessories" | "home-living";
 
 export type ApparelCategory = {
   slug: string;
@@ -10,6 +10,8 @@ export const APPAREL_AUDIENCES: Array<{ value: ApparelAudience; label: string }>
   { value: "mens", label: "Men's" },
   { value: "womens", label: "Women's" },
   { value: "kids", label: "Kids" },
+  { value: "accessories", label: "Accessories" },
+  { value: "home-living", label: "Home & Living" },
 ];
 
 export const APPAREL_CATEGORIES: ApparelCategory[] = [
@@ -85,6 +87,26 @@ export const APPAREL_CATEGORIES: ApparelCategory[] = [
   { audience: "kids", slug: "kids-bags", label: "Kids Bags" },
   { audience: "kids", slug: "kids-limited-drops", label: "Kids Limited Drops" },
   { audience: "kids", slug: "kids-seasonal", label: "Kids Seasonal" },
+  { audience: "accessories", slug: "jewelry", label: "Jewelry" },
+  { audience: "accessories", slug: "books", label: "Books" },
+  { audience: "accessories", slug: "phone-cases", label: "Phone Cases" },
+  { audience: "accessories", slug: "bags", label: "Bags" },
+  { audience: "accessories", slug: "socks", label: "Socks" },
+  { audience: "accessories", slug: "hats", label: "Hats" },
+  { audience: "accessories", slug: "keychains", label: "Keychains" },
+  { audience: "accessories", slug: "stickers", label: "Stickers" },
+  { audience: "accessories", slug: "other-accessories", label: "Other Accessories" },
+  { audience: "home-living", slug: "drinkware", label: "Drinkware" },
+  { audience: "home-living", slug: "can-coolers", label: "Can Coolers" },
+  { audience: "home-living", slug: "mugs", label: "Mugs" },
+  { audience: "home-living", slug: "glassware", label: "Glassware" },
+  { audience: "home-living", slug: "bottles-and-tumblers", label: "Bottles & Tumblers" },
+  { audience: "home-living", slug: "candles", label: "Candles" },
+  { audience: "home-living", slug: "canvas", label: "Canvas" },
+  { audience: "home-living", slug: "posters", label: "Posters" },
+  { audience: "home-living", slug: "journals-and-notebooks", label: "Journals & Notebooks" },
+  { audience: "home-living", slug: "home-decor", label: "Home Décor" },
+  { audience: "home-living", slug: "other-home-and-living", label: "Other Home & Living" },
 ];
 
 export const DEFAULT_AUDIENCE: ApparelAudience = "mens";
@@ -94,6 +116,8 @@ export const STOREFRONT_CATEGORY_PRIORITY: Record<ApparelAudience, string[]> = {
   mens: ["mens-t-shirts", "mens-performance-tees", "mens-hoodies", "mens-joggers", "mens-tank-tops", "mens-shorts", "mens-hats", "mens-accessories", "mens-greeting-cards", "mens-limited-drops"],
   womens: ["womens-t-shirts", "womens-crop-tops", "womens-hoodies", "womens-leggings", "womens-shorts", "womens-sports-bras", "womens-hats", "womens-accessories", "womens-greeting-cards", "womens-limited-drops"],
   kids: ["kids-t-shirts", "kids-hoodies", "kids-joggers", "kids-shorts", "kids-hats", "kids-sets", "kids-accessories", "kids-greeting-cards", "kids-limited-drops"],
+  accessories: ["jewelry", "books", "phone-cases", "bags", "socks", "hats", "keychains", "stickers", "other-accessories"],
+  "home-living": ["drinkware", "can-coolers", "mugs", "glassware", "bottles-and-tumblers", "candles", "canvas", "posters", "journals-and-notebooks", "home-decor", "other-home-and-living"],
 };
 
 export function slugifyCategory(value: string) {
@@ -133,6 +157,8 @@ export function getKnownAudienceForCategory(slug?: string | null): ApparelAudien
   if (slug.startsWith("mens-")) return "mens";
   if (slug.startsWith("womens-")) return "womens";
   if (slug.startsWith("kids-")) return "kids";
+  if (["jewelry", "books", "phone-cases", "bags", "socks", "hats", "keychains", "stickers", "other-accessories"].includes(slug)) return "accessories";
+  if (["drinkware", "can-coolers", "mugs", "glassware", "bottles-and-tumblers", "candles", "canvas", "posters", "journals-and-notebooks", "home-decor", "other-home-and-living"].includes(slug)) return "home-living";
   return null;
 }
 

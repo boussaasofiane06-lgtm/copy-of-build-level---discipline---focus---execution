@@ -6,6 +6,7 @@ import AdminFulfillmentPanel from "../components/AdminFulfillmentPanel";
 import AdminSubscribersPanel from "../components/AdminSubscribersPanel";
 import AdminAbandonedCartsPanel from "../components/AdminAbandonedCartsPanel";
 import AdminEmailCampaignsPanel from "../components/AdminEmailCampaignsPanel";
+import AdminShopOrganizationPanel from "../components/AdminShopOrganizationPanel";
 import {
   APPAREL_AUDIENCES,
   DEFAULT_AUDIENCE,
@@ -20,7 +21,7 @@ import {
 } from "../lib/apparelCategories";
 import { BLOG_CATEGORIES, DEFAULT_BLOG_CATEGORY, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
 
-type Tab = "products" | "digital" | "blog" | "integrations" | "fulfillment" | "abandoned" | "subscribers" | "campaigns" | "moderation" | "maintenance";
+type Tab = "products" | "digital" | "blog" | "shop-org" | "integrations" | "fulfillment" | "abandoned" | "subscribers" | "campaigns" | "moderation" | "maintenance";
 
 const defaultMaintenanceConfig: MaintenanceConfig = {
   enabled: false,
@@ -522,14 +523,14 @@ export default function Admin() {
       {/* Tabs */}
       <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg2)" }}>
         <div className="container" style={{ display: "flex", gap: 0, flexWrap: "wrap", rowGap: 4 }}>
-          {(["products", "digital", "blog", "integrations", "fulfillment", "abandoned", "subscribers", "campaigns", "moderation", "maintenance"] as Tab[]).map(t => (
+          {(["products", "digital", "blog", "shop-org", "integrations", "fulfillment", "abandoned", "subscribers", "campaigns", "moderation", "maintenance"] as Tab[]).map(t => (
             <button key={t} onClick={() => setTab(t)} style={{
               padding: "14px 24px", background: "none", border: "none", cursor: "pointer",
               fontFamily: "var(--font-display)", fontSize: "0.8rem", letterSpacing: "0.1em", textTransform: "uppercase",
               color: tab === t ? "var(--text)" : "var(--text2)",
               borderBottom: tab === t ? "2px solid var(--red)" : "2px solid transparent",
             }}>
-              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : t === "integrations" ? "Integrations" : t === "fulfillment" ? "Fulfillment" : t === "abandoned" ? "Abandoned Carts" : t === "subscribers" ? "Subscribers" : t === "campaigns" ? "Email Campaigns" : t === "moderation" ? "Moderation" : "Maintenance"}
+              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : t === "shop-org" ? "Shop Navigation" : t === "integrations" ? "Integrations" : t === "fulfillment" ? "Fulfillment" : t === "abandoned" ? "Abandoned Carts" : t === "subscribers" ? "Subscribers" : t === "campaigns" ? "Email Campaigns" : t === "moderation" ? "Moderation" : "Maintenance"}
             </button>
           ))}
         </div>
@@ -967,6 +968,10 @@ export default function Admin() {
 
             {tab === "integrations" && (
               <AdminIntegrationsPanel showToast={showToast} />
+            )}
+
+            {tab === "shop-org" && (
+              <AdminShopOrganizationPanel products={products} showToast={showToast} />
             )}
 
             {tab === "fulfillment" && (

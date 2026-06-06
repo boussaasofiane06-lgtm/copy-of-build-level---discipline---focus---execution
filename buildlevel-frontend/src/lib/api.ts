@@ -349,10 +349,56 @@ export interface MonthlyDigestQueueItem {
   createdAt?: string;
 }
 
+export interface ShopAudience {
+  id: number;
+  name: string;
+  slug: string;
+  description?: string | null;
+  imageUrl?: string | null;
+  icon?: string | null;
+  displayOrder: number;
+  enabled: boolean | number;
+  hidden: boolean | number;
+  featured: boolean | number;
+  published: boolean | number;
+  isForYou?: boolean | number;
+}
+
+export interface ShopCategory {
+  id: number;
+  audienceId: number;
+  parentId?: number | null;
+  name: string;
+  slug: string;
+  audienceSlug?: string;
+  displayOrder: number;
+  enabled: boolean | number;
+  hidden: boolean | number;
+  featured: boolean | number;
+  published: boolean | number;
+}
+
+export interface ProductShopAssignment {
+  productId: number;
+  audienceSlug: string;
+  audienceName: string;
+  assignmentType?: "primary" | "subcategory" | "secondary";
+  categorySlug?: string | null;
+  categoryName?: string | null;
+  parentId?: number | null;
+}
+
+export interface ShopTaxonomy {
+  audiences: ShopAudience[];
+  categories: ShopCategory[];
+  productAssignments: ProductShopAssignment[];
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
   getProduct: (id: number) => api.get<Product>(`/products/${id}`).then(r => r.data),
+  getShopTaxonomy: () => api.get<ShopTaxonomy>("/shop/taxonomy").then(r => r.data),
   getBlogPosts: () => api.get<unknown>("/blog").then(r => expectArray<BlogPost>(r.data, "/blog")),
   getBlogPost: (slug: string) => api.get<BlogPost>(`/blog/${slug}`).then(r => r.data),
   getDigitalProducts: () => api.get<unknown>("/digital").then(r => expectArray<DigitalProduct>(r.data, "/digital")),
@@ -525,6 +571,16 @@ export const adminApi = {
   previewMonthlyDigest: (audience?: string[]) => api.get<{ subject: string; html: string; eligibleSubscribers: number; queue: MonthlyDigestQueueItem[] }>("/admin/email/monthly-digest/preview", { params: { audience: audience?.join(",") } }).then(r => r.data),
   sendMonthlyDigestTest: (email: string) => api.post<{ success: true; skipped?: boolean; message?: string }>("/admin/email/monthly-digest/test", { email }).then(r => r.data),
   sendMonthlyDigestNow: (audience: string[]) => api.post<{ success: true; campaignId: number; eligibleSubscribers: number; sent: number; failed: number }>("/admin/email/monthly-digest/send", { confirm: true, audience }).then(r => r.data),
+  getShopTaxonomy: () => api.get<ShopTaxonomy>("/admin/shop/taxonomy").then(r => r.data),
+  createShopAudience: (data: Partial<ShopAudience> & { name: string }) => api.post<{ success: true }>("/admin/shop/audiences", data).then(r => r.data),
+  updateShopAudience: (id: number, data: Partial<ShopAudience>) => api.put<{ success: true }>(`/admin/shop/audiences/${id}`, data).then(r => r.data),
+  createShopCategory: (data: Partial<ShopCategory> & { name: string; audienceId: number }) => api.post<{ success: true }>("/admin/shop/categories", data).then(r => r.data),
+  updateShopCategory: (id: number, data: Partial<ShopCategory>) => api.put<{ success: true }>(`/admin/shop/categories/${id}`, data).then(r => r.data),
+  createShopTrend: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/trends", data).then(r => r.data),
+  createShopCollection: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/collections", data).then(r => r.data),
+  createShopEvent: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/events", data).then(r => r.data),
+  createRecommendedGroup: (data: { name: string; slug?: string; description?: string }) => api.post<{ success: true }>("/admin/shop/recommended-groups", data).then(r => r.data),
+  updateProductClassification: (id: number, data: { audienceId: number; categoryId?: number; subcategoryId?: number }) => api.put<{ success: true }>(`/admin/shop/products/${id}/classification`, data).then(r => r.data),
 
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),

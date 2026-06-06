@@ -787,6 +787,11 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   border: 1px solid var(--border);
 }
 
+.shop-filter-scroll {
+  min-width: 0;
+  max-width: 100%;
+}
+
 .promo-particles {
   position: absolute;
   inset: 0;
@@ -1156,6 +1161,17 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
   }
   .home-category-card {
     padding: 24px;
+  }
+  .shop-filter-scroll {
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+  }
+  .shop-filter-scroll .btn {
+    flex: 0 0 auto;
+    white-space: nowrap;
   }
   .recommendation-grid {
     grid-template-columns: 1fr;

@@ -2,16 +2,13 @@ import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GymMotivationSection } from "../components/PromoVisualSections";
 import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
-import { publicApi, Product } from "../lib/api";
+import { publicApi, Product, ProductShopAssignment, ShopTaxonomy } from "../lib/api";
 import { useCart } from "../context/CartContext";
 import SubscribeForm from "../components/SubscribeForm";
 import {
   APPAREL_AUDIENCES,
   getAudienceLabel,
-  getCategoriesForAudience,
-  getCategoryAudienceLabel,
   getCategoryLabel,
-  getKnownAudienceForCategory,
   getAudienceForCategory,
   STOREFRONT_CATEGORY_PRIORITY,
   type ApparelAudience,
@@ -145,7 +142,8 @@ export default function Shop() {
   const [viewImage, setViewImage] = useState("");
   const [productReviews, setProductReviews] = useState<ReviewSummaryData>({ reviews: [], averageRating: 0, count: 0 });
   const [reviewSummaries, setReviewSummaries] = useState<Record<number, ReviewSummaryData>>({});
-  const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
+  const [taxonomy, setTaxonomy] = useState<ShopTaxonomy | null>(null);
+  const [audience, setAudience] = useState("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
   const productModalScrollRef = useRef<HTMLDivElement>(null);
@@ -155,6 +153,7 @@ export default function Shop() {
 
   useEffect(() => {
     publicApi.getProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
+    publicApi.getShopTaxonomy().then(setTaxonomy).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -231,22 +230,42 @@ export default function Shop() {
     return ["Available", "Coming Soon", "Featured", "New Release", "Limited Edition"].includes(getProductStatus(product));
   };
   const storefrontProducts = products.filter(qualifiesForStorefront);
-  const audienceHasProducts = (value: ApparelAudience) =>
-    storefrontProducts.some(product => getAudienceForCategory(product.category) === value);
+  const productAssignments = taxonomy?.productAssignments || [];
+  const getAssignmentRows = (productId: number) => productAssignments.filter(item => Number(item.productId) === productId);
+  const getPrimaryAssignment = (product: Product): ProductShopAssignment | undefined =>
+    getAssignmentRows(product.id).find(item => item.audienceSlug);
+  const getProductAudienceSlug = (product: Product) => getPrimaryAssignment(product)?.audienceSlug || getAudienceForCategory(product.category);
+  const getProductCategorySlug = (product: Product) => {
+    const rows = getAssignmentRows(product.id);
+    return rows.find(row => row.assignmentType === "subcategory")?.categorySlug || rows.find(row => row.assignmentType === "primary")?.categorySlug || product.category;
+  };
+  const getDynamicAudienceLabel = (slug?: string | null) =>
+    taxonomy?.audiences.find(item => item.slug === slug)?.name || (slug ? getAudienceLabel(slug as ApparelAudience) : "Legacy");
+  const getDynamicCategoryLabel = (slug?: string | null) =>
+    taxonomy?.categories.find(item => item.slug === slug)?.name || getCategoryLabel(slug);
+  const publicAudiences = taxonomy?.audiences?.length
+    ? taxonomy.audiences.filter(item => Boolean(item.enabled) && !Boolean(item.hidden)).map(item => ({ value: item.slug, label: item.name, isForYou: Boolean(item.isForYou) }))
+    : APPAREL_AUDIENCES.map(item => ({ ...item, isForYou: false }));
+  const audienceHasProducts = (value: string) =>
+    value === "for-you"
+      ? storefrontProducts.some(product => product.featured || getProductStatus(product) === "New Release")
+      : storefrontProducts.some(product => getProductAudienceSlug(product) === value);
   const audienceFiltered = audience === "all"
     ? storefrontProducts
-    : storefrontProducts.filter(p => getAudienceForCategory(p.category) === audience);
+    : audience === "for-you"
+      ? storefrontProducts.filter(product => product.featured || getProductStatus(product) === "New Release")
+      : storefrontProducts.filter(p => getProductAudienceSlug(p) === audience);
   const sortCategories = (categories: string[]) => {
-    const priority = (audience === "all" ? ["mens", "womens", "kids"].flatMap(a => STOREFRONT_CATEGORY_PRIORITY[a as ApparelAudience]) : STOREFRONT_CATEGORY_PRIORITY[audience]) || [];
+    const priority = (audience === "all" ? ["mens", "womens", "kids"].flatMap(a => STOREFRONT_CATEGORY_PRIORITY[a as ApparelAudience] || []) : STOREFRONT_CATEGORY_PRIORITY[audience as ApparelAudience]) || [];
     return categories.sort((a, b) => {
       const ai = priority.indexOf(a);
       const bi = priority.indexOf(b);
       if (ai !== -1 || bi !== -1) return (ai === -1 ? 999 : ai) - (bi === -1 ? 999 : bi);
-      return getCategoryLabel(a).localeCompare(getCategoryLabel(b));
+      return getDynamicCategoryLabel(a).localeCompare(getDynamicCategoryLabel(b));
     });
   };
-  const availableCategories = sortCategories(Array.from(new Set(audienceFiltered.map(p => p.category).filter(Boolean))));
-  const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => p.category === category);
+  const availableCategories = sortCategories(Array.from(new Set(audienceFiltered.map(p => getProductCategorySlug(p)).filter(Boolean))));
+  const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => getProductCategorySlug(p) === category);
   const getRecommendations = (product: Product) =>
     storefrontProducts
       .filter(item => item.id !== product.id)
@@ -401,7 +420,7 @@ export default function Shop() {
         <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
           <div>
             <p style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.7rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
-              {getCategoryAudienceLabel(viewProduct.category)} / {getCategoryLabel(viewProduct.category)}
+              {getDynamicAudienceLabel(getProductAudienceSlug(viewProduct))} / {getDynamicCategoryLabel(getProductCategorySlug(viewProduct))}
             </p>
             <h3 id="product-detail-title" style={{ fontSize: "1rem" }}>{viewProduct.name}</h3>
           </div>
@@ -462,7 +481,7 @@ export default function Shop() {
 
             <div>
               <p style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.72rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
-                {getCategoryAudienceLabel(viewProduct.category)} / {getCategoryLabel(viewProduct.category)}
+                {getDynamicAudienceLabel(getProductAudienceSlug(viewProduct))} / {getDynamicCategoryLabel(getProductCategorySlug(viewProduct))}
               </p>
               {getProductStatus(viewProduct) && <span className="badge badge-red">{getProductStatus(viewProduct)}</span>}
               <h2 style={{ margin: "14px 0 10px", fontSize: "1.35rem" }}>{viewProduct.name}</h2>
@@ -525,12 +544,12 @@ export default function Shop() {
         {/* Filters + Cart button */}
         <div style={{ display: "flex", flexDirection: "column", marginBottom: 32, gap: 14 }}>
           {storefrontProducts.length > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <div className="shop-filter-scroll" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button onClick={() => { setAudience("all"); setCategory("all"); }} className="btn btn-sm"
                 style={{ background: audience === "all" ? "var(--red)" : "var(--bg3)", color: audience === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
                 All Apparel
               </button>
-              {APPAREL_AUDIENCES.filter(a => audienceHasProducts(a.value)).map(a => (
+              {publicAudiences.filter(a => audienceHasProducts(a.value) || a.value === "for-you").map(a => (
                 <button key={a.value} onClick={() => { setAudience(a.value); setCategory("all"); }} className="btn btn-sm"
                   style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
                   {a.label}
@@ -543,15 +562,15 @@ export default function Shop() {
               </button>
             )}
           </div>}
-          {availableCategories.length > 0 && <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {availableCategories.length > 0 && <div className="shop-filter-scroll" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
             <button onClick={() => setCategory("all")} className="btn btn-sm"
               style={{ background: category === "all" ? "var(--red)" : "transparent", color: category === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-              {audience === "all" ? "All Categories" : `All ${getAudienceLabel(audience)}`}
+              {audience === "all" ? "All Categories" : `All ${getDynamicAudienceLabel(audience)}`}
             </button>
             {availableCategories.map(c => (
               <button key={c} onClick={() => setCategory(c)} className="btn btn-sm"
                 style={{ background: category === c ? "var(--red)" : "transparent", color: category === c ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-                {getCategoryLabel(c)}
+                {getDynamicCategoryLabel(c)}
               </button>
             ))}
           </div>}
@@ -589,7 +608,7 @@ export default function Shop() {
                     </div>
                   )}
                   <div style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.65rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 4 }}>
-                    {getCategoryAudienceLabel(p.category)} / {getCategoryLabel(p.category)}
+                    {getDynamicAudienceLabel(getProductAudienceSlug(p))} / {getDynamicCategoryLabel(getProductCategorySlug(p))}
                   </div>
                   <h3 style={{ fontSize: "0.95rem", marginBottom: 6 }}>{p.name}</h3>
                   <div style={{ marginBottom: 10 }}><ProductReviewSummary summary={reviewSummaries[p.id]} compact /></div>
