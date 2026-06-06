@@ -407,8 +407,9 @@ async function markInactiveCartsAbandoned() {
     SELECT id, customerEmail, 'eligible'
     FROM carts
     WHERE status = 'abandoned' AND customerEmail IS NOT NULL
-    ON DUPLICATE KEY UPDATE status = IF(status IN ('recovered','resolved','expired','unsubscribed','blocked'), status, 'eligible'), updatedAt = NOW()
+    ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), updatedAt = NOW()
   `);
+  await db.execute(sql`UPDATE abandoned_carts SET status = 'eligible', updatedAt = NOW() WHERE status NOT IN ('recovered','resolved','expired','unsubscribed','blocked')`);
 }
 
 router.post("/cart/sync", async (req, res) => {
@@ -451,8 +452,9 @@ router.post("/cart/sync", async (req, res) => {
       await db.execute(sql`
         INSERT INTO abandoned_carts (cartId, customerEmail, status)
         VALUES (${cart.id}, ${email}, 'eligible')
-        ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), status = IF(status IN ('recovered','resolved','expired'), status, 'eligible'), updatedAt = NOW()
+        ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), updatedAt = NOW()
       `);
+      await db.execute(sql`UPDATE abandoned_carts SET status = 'eligible', updatedAt = NOW() WHERE cartId = ${cart.id} AND status NOT IN ('recovered','resolved','expired','unsubscribed','blocked')`);
     } else if (itemCount === 0) {
       await db.execute(sql`UPDATE abandoned_carts SET status = 'resolved', updatedAt = NOW() WHERE cartId = ${cart.id} AND status IN ('eligible','paused')`);
       await db.execute(sql`UPDATE cart_reminders SET status = 'cancelled' WHERE cartId = ${cart.id} AND status = 'scheduled'`);
@@ -525,9 +527,10 @@ router.post("/subscribe", async (req, res) => {
     const token = randomToken();
     const tokenHash = hashToken(token);
     const consentEntry = { at: new Date().toISOString(), source: data.source, ip, interests: data.interests };
+    const consentHistory = JSON.stringify([consentEntry]);
     await db.execute(sql`
       INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt)
-      VALUES (${email}, ${firstName || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${[consentEntry] as any}, ${tokenHash}, NOW())
+      VALUES (${email}, ${firstName || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${consentHistory}, ${tokenHash}, NOW())
       ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), consentHistory = VALUES(consentHistory), manageTokenHash = VALUES(manageTokenHash), unsubscribedAt = NULL, updatedAt = NOW()
     `);
     const [subscriberRows] = await db.execute(sql`SELECT id FROM subscribers WHERE email = ${email} LIMIT 1`) as any;
@@ -542,7 +545,9 @@ router.post("/subscribe", async (req, res) => {
     await saveCartEvent("subscriber_subscribed", { source: data.source, interests: data.interests }, email, undefined);
     res.json({ success: true, message: "You're in. Welcome to Build Level.", manageUrl: `/email/preferences/${token}` });
   } catch (error: any) {
-    res.status(400).json({ error: error.message });
+    const validationMessage = (error as any)?.issues?.[0]?.message || (error as any)?.errors?.[0]?.message;
+    const message = error instanceof z.ZodError ? validationMessage || "Invalid subscription details" : "Subscription failed. Please try again or contact support.";
+    res.status(400).json({ error: message });
   }
 });
 

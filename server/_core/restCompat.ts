@@ -811,7 +811,8 @@ async function markInactiveRetentionCartsAbandoned() {
   if (!settings.recoveryEnabled) return;
   const db = await requireDb();
   await db.execute(sql`UPDATE carts SET status = 'abandoned', updatedAt = NOW() WHERE status = 'active' AND itemCount > 0 AND customerEmail IS NOT NULL AND remindersDisabled = false AND lastActivityAt < DATE_SUB(NOW(), INTERVAL ${settings.abandonedAfterMinutes} MINUTE)`);
-  await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) SELECT id, customerEmail, 'eligible' FROM carts WHERE status = 'abandoned' AND customerEmail IS NOT NULL ON DUPLICATE KEY UPDATE status = IF(status IN ('recovered','resolved','expired','unsubscribed','blocked'), status, 'eligible'), updatedAt = NOW()`);
+  await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) SELECT id, customerEmail, 'eligible' FROM carts WHERE status = 'abandoned' AND customerEmail IS NOT NULL ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), updatedAt = NOW()`);
+  await db.execute(sql`UPDATE abandoned_carts SET status = 'eligible', updatedAt = NOW() WHERE status NOT IN ('recovered','resolved','expired','unsubscribed','blocked')`);
 }
 
 export function registerRestCompatRoutes(app: Express) {
@@ -1066,7 +1067,8 @@ export function registerRestCompatRoutes(app: Express) {
       let recoveryToken = "";
       if (email && itemCount > 0 && settings.recoveryEnabled) {
         recoveryToken = await createRetentionRecoveryToken(cart.id);
-        await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) VALUES (${cart.id}, ${email}, 'eligible') ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), status = IF(status IN ('recovered','resolved','expired'), status, 'eligible'), updatedAt = NOW()`);
+        await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) VALUES (${cart.id}, ${email}, 'eligible') ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), updatedAt = NOW()`);
+        await db.execute(sql`UPDATE abandoned_carts SET status = 'eligible', updatedAt = NOW() WHERE cartId = ${cart.id} AND status NOT IN ('recovered','resolved','expired','unsubscribed','blocked')`);
       } else if (itemCount === 0) {
         await db.execute(sql`UPDATE abandoned_carts SET status = 'resolved', updatedAt = NOW() WHERE cartId = ${cart.id} AND status IN ('eligible','paused')`);
         await db.execute(sql`UPDATE cart_reminders SET status = 'cancelled' WHERE cartId = ${cart.id} AND status = 'scheduled'`);
@@ -1134,7 +1136,8 @@ export function registerRestCompatRoutes(app: Express) {
       const token = randomToken();
       const tokenHash = hashToken(token);
       const consentEntry = { at: new Date().toISOString(), source: data.source, ip, interests: data.interests };
-      await db.execute(sql`INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt) VALUES (${email}, ${cleanText(data.firstName, 160) || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${[consentEntry] as any}, ${tokenHash}, NOW()) ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), consentHistory = VALUES(consentHistory), manageTokenHash = VALUES(manageTokenHash), unsubscribedAt = NULL, updatedAt = NOW()`);
+      const consentHistory = JSON.stringify([consentEntry]);
+      await db.execute(sql`INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt) VALUES (${email}, ${cleanText(data.firstName, 160) || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${consentHistory}, ${tokenHash}, NOW()) ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), consentHistory = VALUES(consentHistory), manageTokenHash = VALUES(manageTokenHash), unsubscribedAt = NULL, updatedAt = NOW()`);
       const [subscriberRows] = await db.execute(sql`SELECT id FROM subscribers WHERE email = ${email} LIMIT 1`) as any;
       const subscriberId = Number(subscriberRows?.[0]?.id);
       for (const interest of data.interests) {
@@ -1142,7 +1145,9 @@ export function registerRestCompatRoutes(app: Express) {
       }
       res.json({ success: true, message: "You're in. Welcome to Build Level.", manageUrl: `/email/preferences/${token}` });
     } catch (e: any) {
-      res.status(400).json({ error: e.message });
+      const validationMessage = (e as any)?.issues?.[0]?.message || (e as any)?.errors?.[0]?.message;
+      const message = e instanceof z.ZodError ? validationMessage || "Invalid subscription details" : "Subscription failed. Please try again or contact support.";
+      res.status(400).json({ error: message });
     }
   });
 
