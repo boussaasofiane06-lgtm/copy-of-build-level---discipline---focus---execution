@@ -324,6 +324,31 @@ export interface RetentionSettings {
   reminderIntro: string;
 }
 
+export interface MonthlyDigestSettings {
+  enabled: boolean;
+  dayOfMonth: number;
+  dayName: string;
+  time: string;
+  timezone: string;
+  subject: string;
+  introduction: string;
+  status: string;
+}
+
+export interface MonthlyDigestQueueItem {
+  id: number;
+  contentType: string;
+  contentId?: number | null;
+  title: string;
+  imageUrl?: string | null;
+  url?: string | null;
+  summary?: string | null;
+  included: boolean | number;
+  sortOrder: number;
+  includedInCampaignId?: number | null;
+  createdAt?: string;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -361,8 +386,8 @@ export const publicApi = {
     api.get<{ success: true; cart: SavedCart }>(`/cart/recover/${encodeURIComponent(token)}`).then(r => r.data),
   markCartConverted: (data: { sessionId: string; completedOrderId?: string }) =>
     api.post<{ success: true }>("/cart/converted", data).then(r => r.data),
-  subscribe: (data: { email: string; firstName?: string; interests: string[]; source: string; consent: boolean }) =>
-    api.post<{ success: true; message: string; manageUrl?: string }>("/subscribe", data).then(r => r.data),
+  subscribe: (data: { email: string; firstName?: string; interests: string[]; source: string; consent: boolean; resubscribe?: boolean }) =>
+    api.post<{ success: true; status?: "subscribed" | "existing" | "resubscribed"; message: string; manageUrl?: string }>("/subscribe", data).then(r => r.data),
   getEmailPreferences: (token: string) =>
     api.get<{ success: true; subscriber: { email: string; firstName?: string; status: string; interests: Array<{ interest: string; enabled: boolean }> } }>(`/email/preferences/${encodeURIComponent(token)}`).then(r => r.data),
   updateEmailPreferences: (token: string, data: { firstName?: string; interests: string[]; active: boolean }) =>
@@ -492,6 +517,14 @@ export const adminApi = {
   getRetentionSettings: () => api.get<RetentionSettings>("/admin/abandoned-carts/settings").then(r => r.data),
   saveRetentionSettings: (data: RetentionSettings) => api.post<{ success: true; settings: RetentionSettings }>("/admin/abandoned-carts/settings", data).then(r => r.data),
   getRetentionSummary: () => api.get<{ carts: Record<string, number | string>; subscribers: Record<string, number | string>; mostAddedProducts: Array<{ productName: string; productType: string; quantity: number }> }>("/admin/retention/summary").then(r => r.data),
+  getMonthlyDigestSettings: () => api.get<MonthlyDigestSettings>("/admin/email/monthly-digest/settings").then(r => r.data),
+  saveMonthlyDigestSettings: (data: MonthlyDigestSettings) => api.post<{ success: true; settings: MonthlyDigestSettings }>("/admin/email/monthly-digest/settings", data).then(r => r.data),
+  refreshMonthlyDigestQueue: () => api.post<{ success: true; queue: MonthlyDigestQueueItem[] }>("/admin/email/monthly-digest/queue/refresh").then(r => r.data),
+  getMonthlyDigestQueue: () => api.get<MonthlyDigestQueueItem[]>("/admin/email/monthly-digest/queue").then(r => r.data),
+  updateMonthlyDigestQueueItem: (id: number, data: { included?: boolean; sortOrder?: number }) => api.patch<{ success: true }>(`/admin/email/monthly-digest/queue/${id}`, data).then(r => r.data),
+  previewMonthlyDigest: (audience?: string[]) => api.get<{ subject: string; html: string; eligibleSubscribers: number; queue: MonthlyDigestQueueItem[] }>("/admin/email/monthly-digest/preview", { params: { audience: audience?.join(",") } }).then(r => r.data),
+  sendMonthlyDigestTest: (email: string) => api.post<{ success: true; skipped?: boolean; message?: string }>("/admin/email/monthly-digest/test", { email }).then(r => r.data),
+  sendMonthlyDigestNow: (audience: string[]) => api.post<{ success: true; campaignId: number; eligibleSubscribers: number; sent: number; failed: number }>("/admin/email/monthly-digest/send", { confirm: true, audience }).then(r => r.data),
 
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),

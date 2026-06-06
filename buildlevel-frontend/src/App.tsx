@@ -6,6 +6,8 @@ import Footer from "./components/Footer";
 import TidioWidget from "./components/TidioWidget";
 import { CartAddNotice, CartDrawer, SavedCartReminder } from "./components/CartDrawer";
 import { CartProvider } from "./context/CartContext";
+import { SubscriptionProvider } from "./context/SubscriptionContext";
+import SubscriptionFloatingTab from "./components/SubscriptionFloatingTab";
 import { PageTransition } from "./components/Motion";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
@@ -104,16 +106,19 @@ function PublicStorefrontShell() {
 
   return (
     <CartProvider>
-      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-        <Navbar />
-        <main style={{ flex: 1 }}>
-          <PublicRoutes />
-        </main>
-        <Footer />
-        <CartAddNotice />
-        <SavedCartReminder />
-        <CartDrawer />
-      </div>
+      <SubscriptionProvider>
+        <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+          <Navbar />
+          <main style={{ flex: 1 }}>
+            <PublicRoutes />
+          </main>
+          <Footer />
+          <SubscriptionFloatingTab />
+          <CartAddNotice />
+          <SavedCartReminder />
+          <CartDrawer />
+        </div>
+      </SubscriptionProvider>
     </CartProvider>
   );
 }

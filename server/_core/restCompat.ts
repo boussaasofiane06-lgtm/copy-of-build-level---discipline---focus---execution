@@ -5,7 +5,7 @@ import Stripe from "stripe";
 import { z } from "zod";
 import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { digitalProducts, products, siteSettings } from "../../drizzle/schema";
+import { blogPosts, digitalProducts, products, siteSettings } from "../../drizzle/schema";
 import { verifyAdminToken } from "./adminAuth";
 
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
@@ -716,6 +716,7 @@ async function ensureRetentionTables() {
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS email_campaigns (id INT AUTO_INCREMENT PRIMARY KEY, campaignType VARCHAR(64) NOT NULL DEFAULT 'newsletter', subject VARCHAR(255) NOT NULL, bodyHtml MEDIUMTEXT NULL, audience JSON NULL, status VARCHAR(32) NOT NULL DEFAULT 'draft', scheduledAt TIMESTAMP NULL, sentAt TIMESTAMP NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`));
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS email_campaign_recipients (id INT AUTO_INCREMENT PRIMARY KEY, campaignId INT NOT NULL, subscriberId INT NULL, email VARCHAR(320) NOT NULL, status VARCHAR(32) NOT NULL DEFAULT 'queued', sentAt TIMESTAMP NULL, errorMessage TEXT NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_campaign_recipient (campaignId, email))`));
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS email_events (id INT AUTO_INCREMENT PRIMARY KEY, eventType VARCHAR(64) NOT NULL, email VARCHAR(320) NULL, cartId INT NULL, campaignId INT NULL, subscriberId INT NULL, metadata JSON NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_email_events_email (email))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS monthly_digest_queue (id INT AUTO_INCREMENT PRIMARY KEY, contentType ENUM('apparel','digital','audiobook','featured','blog','news','announcement') NOT NULL, contentId INT NULL, title VARCHAR(255) NOT NULL, imageUrl TEXT NULL, url TEXT NULL, summary TEXT NULL, included BOOLEAN NOT NULL DEFAULT true, sortOrder INT NOT NULL DEFAULT 0, includedInCampaignId INT NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_monthly_digest_content (contentType, contentId), INDEX idx_monthly_digest_included (included))`));
   retentionTablesEnsured = true;
 }
 
@@ -796,7 +797,7 @@ function sanitizeRetentionCart(cart: any, items: any[], recoveryToken?: string) 
 async function getRetentionSettings() {
   const settings = await getSettingsMap();
   return {
-    recoveryEnabled: settings.cart_recovery_enabled !== "false",
+    recoveryEnabled: settings.cart_recovery_enabled === "true",
     firstReminderHours: Number(settings.cart_recovery_first_hours || 1),
     secondReminderHours: Number(settings.cart_recovery_second_hours || 24),
     finalReminderHours: Number(settings.cart_recovery_final_hours || 72),
@@ -813,6 +814,59 @@ async function markInactiveRetentionCartsAbandoned() {
   await db.execute(sql`UPDATE carts SET status = 'abandoned', updatedAt = NOW() WHERE status = 'active' AND itemCount > 0 AND customerEmail IS NOT NULL AND remindersDisabled = false AND lastActivityAt < DATE_SUB(NOW(), INTERVAL ${settings.abandonedAfterMinutes} MINUTE)`);
   await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) SELECT id, customerEmail, 'eligible' FROM carts WHERE status = 'abandoned' AND customerEmail IS NOT NULL ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), updatedAt = NOW()`);
   await db.execute(sql`UPDATE abandoned_carts SET status = 'eligible', updatedAt = NOW() WHERE status NOT IN ('recovered','resolved','expired','unsubscribed','blocked')`);
+}
+
+async function getMonthlyDigestSettings() {
+  const settings = await getSettingsMap();
+  return {
+    enabled: settings.monthly_digest_enabled !== "false",
+    dayOfMonth: Number(settings.monthly_digest_day_of_month || 1),
+    dayName: settings.monthly_digest_day_name || "first_monday",
+    time: settings.monthly_digest_time || "10:00",
+    timezone: settings.monthly_digest_timezone || "America/New_York",
+    subject: settings.monthly_digest_subject || "Build Level Monthly — New Drops, Digital Guides & Updates",
+    introduction: settings.monthly_digest_intro || "One focused update. New releases, selected resources, and what's happening at Build Level.",
+    status: settings.monthly_digest_status || "draft",
+  };
+}
+
+async function refreshMonthlyDigestQueue() {
+  const db = await requireDb();
+  const [apparelRows, digitalRows, blogRows] = await Promise.all([
+    db.select().from(products).where(eq(products.published, true)).limit(20),
+    db.select().from(digitalProducts).where(eq(digitalProducts.published, true)).limit(20),
+    db.select().from(blogPosts).where(eq(blogPosts.published, true)).limit(20),
+  ]);
+  for (const product of apparelRows.filter((product: any) => !product.hidden && !product.delisted && product.inStock)) {
+    const type = product.featured ? "featured" : "apparel";
+    await db.execute(sql`INSERT INTO monthly_digest_queue (contentType, contentId, title, imageUrl, url, summary, included, sortOrder) VALUES (${type}, ${product.id}, ${product.name}, ${product.imageUrl || ""}, '/shop', ${product.description || ""}, true, 0) ON DUPLICATE KEY UPDATE title = VALUES(title), imageUrl = VALUES(imageUrl), url = VALUES(url), summary = VALUES(summary), updatedAt = NOW()`);
+  }
+  for (const product of digitalRows) {
+    const type = product.productType === "audiobook" ? "audiobook" : "digital";
+    await db.execute(sql`INSERT INTO monthly_digest_queue (contentType, contentId, title, imageUrl, url, summary, included, sortOrder) VALUES (${type}, ${product.id}, ${product.name}, ${product.imageUrl || ""}, ${`/digital/${product.id}`}, ${product.description || ""}, true, 0) ON DUPLICATE KEY UPDATE title = VALUES(title), imageUrl = VALUES(imageUrl), url = VALUES(url), summary = VALUES(summary), updatedAt = NOW()`);
+  }
+  for (const post of blogRows) {
+    await db.execute(sql`INSERT INTO monthly_digest_queue (contentType, contentId, title, imageUrl, url, summary, included, sortOrder) VALUES ('blog', ${post.id}, ${post.title}, ${post.imageUrl || ""}, ${`/blog/${post.slug}`}, ${post.excerpt || ""}, true, 0) ON DUPLICATE KEY UPDATE title = VALUES(title), imageUrl = VALUES(imageUrl), url = VALUES(url), summary = VALUES(summary), updatedAt = NOW()`);
+  }
+}
+
+async function getDigestQueueRows() {
+  const db = await requireDb();
+  const [rows] = await db.execute(sql`SELECT * FROM monthly_digest_queue ORDER BY included DESC, sortOrder ASC, createdAt DESC LIMIT 100`) as any;
+  return rows || [];
+}
+
+async function getEligibleSubscriberRows(audience?: string[]) {
+  const db = await requireDb();
+  const interests = Array.isArray(audience) && audience.length ? audience : ["all_updates"];
+  const [rows] = await db.execute(sql`SELECT DISTINCT s.* FROM subscribers s LEFT JOIN subscriber_preferences p ON p.subscriberId = s.id WHERE s.status = 'active' AND s.consentStatus = 'subscribed' AND (p.interest = 'all_updates' OR p.interest IN (${sql.join(interests.map(interest => sql`${interest}`), sql`, `)}))`) as any;
+  return rows || [];
+}
+
+function buildMonthlyDigestHtml(settings: Awaited<ReturnType<typeof getMonthlyDigestSettings>>, queueRows: any[], origin = "https://thebuildlevel.com") {
+  const selected = queueRows.filter(row => row.included).slice(0, 7);
+  const itemsHtml = selected.map(row => `<tr><td style="padding:18px 0;border-top:1px solid #2a2a2a">${row.imageUrl ? `<img src="${String(row.imageUrl).startsWith("http") ? row.imageUrl : origin + row.imageUrl}" alt="" style="width:100%;max-width:520px;border-radius:10px;background:#111" />` : ""}<h3 style="color:#fff;font-family:Arial,sans-serif;margin:14px 0 8px;text-transform:uppercase">${row.title}</h3><p style="color:#aaa;line-height:1.6">${row.summary || ""}</p><a href="${origin}${row.url || "/"}" style="display:inline-block;background:#c0392b;color:#fff;padding:11px 16px;text-decoration:none;text-transform:uppercase;border-radius:4px">View ${row.contentType === "blog" ? "Blog" : "Product"}</a></td></tr>`).join("");
+  return `<div style="background:#0a0a0a;color:#f0ede8;padding:28px;font-family:Arial,sans-serif"><table role="presentation" width="100%" style="max-width:640px;margin:0 auto"><tr><td><p style="color:#ff6600;letter-spacing:2px;text-transform:uppercase">THE MONTHLY BUILD</p><h1 style="color:#fff;text-transform:uppercase">Build Level Monthly</h1><p style="color:#bbb;line-height:1.7">${settings.introduction}</p></td></tr>${itemsHtml}<tr><td style="padding-top:22px;color:#888;font-size:12px">BUILD LEVEL • Discipline • Focus • Execution<br/>Manage preferences or unsubscribe from the link in your email. Support: ${BUSINESS_EMAIL}</td></tr></table></div>`;
 }
 
 export function registerRestCompatRoutes(app: Express) {
@@ -1129,19 +1183,32 @@ export function registerRestCompatRoutes(app: Express) {
         interests: z.array(z.enum(SUBSCRIPTION_INTERESTS)).min(1).default(["all_updates"]),
         source: z.string().max(128).optional().default("website"),
         consent: z.boolean().refine(Boolean, "Consent is required"),
+        resubscribe: z.boolean().optional().default(false),
       });
       const data = schema.parse(req.body);
       const db = await requireDb();
       const email = cleanEmail(data.email);
       const token = randomToken();
       const tokenHash = hashToken(token);
-      await db.execute(sql`INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt) VALUES (${email}, ${cleanText(data.firstName, 160) || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, NULL, ${tokenHash}, NOW()) ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), manageTokenHash = VALUES(manageTokenHash), unsubscribedAt = NULL, updatedAt = NOW()`);
+      const [existingRows] = await db.execute(sql`SELECT id, status FROM subscribers WHERE email = ${email} LIMIT 1`) as any;
+      const existing = existingRows?.[0];
+      if (existing?.status === "active") {
+        await db.execute(sql`UPDATE subscribers SET manageTokenHash = ${tokenHash}, updatedAt = NOW() WHERE id = ${existing.id}`);
+        res.json({ success: true, status: "existing", message: "This email is already subscribed. You can update your preferences.", manageUrl: `/email/preferences/${token}` });
+        return;
+      }
+      if (existing?.status === "unsubscribed" && !data.resubscribe) {
+        await db.execute(sql`UPDATE subscribers SET manageTokenHash = ${tokenHash}, updatedAt = NOW() WHERE id = ${existing.id}`);
+        res.status(409).json({ success: false, status: "unsubscribed", error: "This email was previously unsubscribed. Confirm resubscription to receive the monthly Build Level email.", manageUrl: `/email/preferences/${token}` });
+        return;
+      }
+      await db.execute(sql`INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt) VALUES (${email}, ${cleanText(data.firstName, 160) || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, NULL, ${tokenHash}, NOW()) ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), manageTokenHash = VALUES(manageTokenHash), subscribedAt = NOW(), unsubscribedAt = NULL, updatedAt = NOW()`);
       const [subscriberRows] = await db.execute(sql`SELECT id FROM subscribers WHERE email = ${email} LIMIT 1`) as any;
       const subscriberId = Number(subscriberRows?.[0]?.id);
       for (const interest of data.interests) {
         await db.execute(sql`INSERT INTO subscriber_preferences (subscriberId, interest, enabled) VALUES (${subscriberId}, ${interest}, true) ON DUPLICATE KEY UPDATE enabled = true, updatedAt = NOW()`);
       }
-      res.json({ success: true, message: "You're in. Welcome to Build Level.", manageUrl: `/email/preferences/${token}` });
+      res.json({ success: true, status: existing ? "resubscribed" : "subscribed", message: "You're in. Welcome to Build Level.", manageUrl: `/email/preferences/${token}` });
     } catch (e: any) {
       const validationMessage = (e as any)?.issues?.[0]?.message || (e as any)?.errors?.[0]?.message;
       const message = e instanceof z.ZodError ? validationMessage || "Invalid subscription details" : "Subscription failed. Please try again or contact support.";
@@ -1348,6 +1415,127 @@ export function registerRestCompatRoutes(app: Express) {
       res.json({ carts: cartCounts?.[0] || {}, subscribers: subscriberCounts?.[0] || {}, mostAddedProducts: productRows || [] });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/email/monthly-digest/settings", requireAdminRest, async (_req, res) => {
+    try {
+      await ensureRetentionTables();
+      res.json(await getMonthlyDigestSettings());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/email/monthly-digest/settings", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ enabled: z.boolean(), dayOfMonth: z.number().min(1).max(28), dayName: z.string().max(64), time: z.string().max(16), timezone: z.string().max(64), subject: z.string().max(255), introduction: z.string().max(1000), status: z.string().max(64).default("draft") }).parse(req.body);
+      const entries: Record<string, string> = { monthly_digest_enabled: String(data.enabled), monthly_digest_day_of_month: String(data.dayOfMonth), monthly_digest_day_name: data.dayName, monthly_digest_time: data.time, monthly_digest_timezone: data.timezone, monthly_digest_subject: data.subject, monthly_digest_intro: data.introduction, monthly_digest_status: data.status };
+      for (const [key, value] of Object.entries(entries)) await saveSetting(key, value);
+      res.json({ success: true, settings: await getMonthlyDigestSettings() });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/email/monthly-digest/queue/refresh", requireAdminRest, async (_req, res) => {
+    try {
+      await ensureRetentionTables();
+      await refreshMonthlyDigestQueue();
+      res.json({ success: true, queue: await getDigestQueueRows() });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/email/monthly-digest/queue", requireAdminRest, async (_req, res) => {
+    try {
+      await ensureRetentionTables();
+      res.json(await getDigestQueueRows());
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/admin/email/monthly-digest/queue/:id", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const id = Number(req.params.id);
+      const data = z.object({ included: z.boolean().optional(), sortOrder: z.number().optional() }).parse(req.body);
+      const db = await requireDb();
+      await db.execute(sql`UPDATE monthly_digest_queue SET included = COALESCE(${data.included ?? null}, included), sortOrder = COALESCE(${data.sortOrder ?? null}, sortOrder), updatedAt = NOW() WHERE id = ${id}`);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/email/monthly-digest/preview", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const settings = await getMonthlyDigestSettings();
+      const queue = await getDigestQueueRows();
+      const subscribers = await getEligibleSubscriberRows(String(req.query.audience || "all_updates").split(",").filter(Boolean));
+      res.json({ subject: settings.subject, html: buildMonthlyDigestHtml(settings, queue, getFrontendOrigin(req)), eligibleSubscribers: subscribers.length, queue });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/email/monthly-digest/test", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ email: z.string().email() }).parse(req.body);
+      const settings = await getMonthlyDigestSettings();
+      const queue = await getDigestQueueRows();
+      if (!isEmailConfigured()) {
+        res.json({ success: true, skipped: true, message: "Email is not configured; test was not sent." });
+        return;
+      }
+      const transporter = getTransporter();
+      const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
+      await transporter.sendMail({ from, to: data.email, subject: `[TEST] ${settings.subject}`, text: settings.introduction, html: buildMonthlyDigestHtml(settings, queue) });
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/email/monthly-digest/send", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ confirm: z.literal(true), audience: z.array(z.string()).optional().default(["all_updates"]) }).parse(req.body);
+      const settings = await getMonthlyDigestSettings();
+      const queue = await getDigestQueueRows();
+      const subscribers = await getEligibleSubscriberRows(data.audience);
+      const db = await requireDb();
+      const [existingCampaigns] = await db.execute(sql`SELECT id FROM email_campaigns WHERE campaignType = 'newsletter' AND subject = ${settings.subject} AND status = 'sent' AND createdAt >= DATE_FORMAT(NOW(), '%Y-%m-01') LIMIT 1`) as any;
+      if (existingCampaigns?.[0]) {
+        res.status(409).json({ error: "This Monthly Digest has already been sent this month." });
+        return;
+      }
+      await db.execute(sql`INSERT INTO email_campaigns (campaignType, subject, bodyHtml, audience, status, sentAt) VALUES ('newsletter', ${settings.subject}, ${buildMonthlyDigestHtml(settings, queue)}, ${JSON.stringify(data.audience)}, 'sent', NOW())`);
+      const [campaignRows] = await db.execute(sql`SELECT id FROM email_campaigns ORDER BY id DESC LIMIT 1`) as any;
+      const campaignId = Number(campaignRows?.[0]?.id || 0);
+      let sent = 0;
+      let failed = 0;
+      for (const subscriber of subscribers) {
+        try {
+          await db.execute(sql`INSERT INTO email_campaign_recipients (campaignId, subscriberId, email, status, sentAt) VALUES (${campaignId}, ${subscriber.id}, ${subscriber.email}, ${isEmailConfigured() ? "sent" : "skipped"}, NOW()) ON DUPLICATE KEY UPDATE status = status`);
+          if (isEmailConfigured()) {
+            const transporter = getTransporter();
+            const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
+            await transporter.sendMail({ from, to: subscriber.email, subject: settings.subject, text: settings.introduction, html: buildMonthlyDigestHtml(settings, queue) });
+          }
+          sent += 1;
+        } catch {
+          failed += 1;
+        }
+      }
+      res.json({ success: true, campaignId, eligibleSubscribers: subscribers.length, sent, failed });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
     }
   });
 

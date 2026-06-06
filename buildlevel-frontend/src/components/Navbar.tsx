@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import SocialLinks from "./SocialLinks";
 import { useCart } from "../context/CartContext";
+import { useSubscription } from "../context/SubscriptionContext";
 
 const links = [
   { to: "/", label: "Home" },
@@ -17,6 +18,7 @@ export default function Navbar() {
   const navRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
   const cart = useCart();
+  const subscription = useSubscription();
 
   useEffect(() => {
     setOpen(false);
@@ -119,6 +121,9 @@ export default function Navbar() {
             </Link>
           ))}
           <div style={{ padding: "12px 24px" }}>
+            <button type="button" onClick={() => { subscription.openSubscription("mobile_menu"); setOpen(false); }} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
+              Get the Monthly Build
+            </button>
             <button type="button" onClick={() => { cart.openCart(); setOpen(false); }} className="btn btn-outline" style={{ width: "100%", marginBottom: 14 }}>
               Cart ({cart.itemCount})
             </button>

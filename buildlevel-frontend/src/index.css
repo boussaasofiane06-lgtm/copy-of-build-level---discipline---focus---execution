@@ -372,6 +372,7 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   margin-top: 3px;
 }
 
+.subscribe-compact,
 .subscribe-form {
   display: grid;
   gap: 16px;
@@ -379,6 +380,15 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   background: linear-gradient(145deg, rgba(255,102,0,0.06), rgba(255,255,255,0.02));
   border-radius: 14px;
   padding: clamp(18px, 3vw, 28px);
+}
+
+.subscribe-compact {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.subscribe-compact--small {
+  padding: 18px;
 }
 
 .subscribe-form__fields {
@@ -403,6 +413,135 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   color: var(--text2);
   background: rgba(255,255,255,0.025);
   font-size: 0.78rem;
+}
+
+.subscription-modal {
+  position: fixed;
+  inset: 0;
+  z-index: calc(var(--z-overlay) + 40);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: max(18px, env(safe-area-inset-top)) 18px max(18px, env(safe-area-inset-bottom));
+}
+
+.subscription-modal__backdrop {
+  position: absolute;
+  inset: 0;
+  border: 0;
+  background: rgba(0,0,0,0.78);
+}
+
+.subscription-modal__panel {
+  position: relative;
+  width: min(640px, 100%);
+  max-height: min(86vh, 780px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid rgba(255,102,0,0.28);
+  border-radius: 18px;
+  background: linear-gradient(145deg, rgba(18,18,18,0.98), rgba(7,7,7,0.98));
+  box-shadow: 0 28px 90px rgba(0,0,0,0.58);
+  padding: clamp(20px, 4vw, 34px);
+}
+
+.subscription-modal__close {
+  position: sticky;
+  top: 0;
+  float: right;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg3);
+  color: var(--text);
+  z-index: 1;
+}
+
+.subscription-modal__form,
+.subscription-success {
+  display: grid;
+  gap: 14px;
+  clear: both;
+}
+
+.subscription-kicker {
+  color: var(--red);
+  font-family: var(--font-display);
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+}
+
+.subscription-interest-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 9px;
+}
+
+.subscription-interest,
+.subscription-consent {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  color: var(--text2);
+  line-height: 1.45;
+}
+
+.subscription-interest {
+  min-height: 44px;
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255,255,255,0.025);
+  font-size: 0.82rem;
+}
+
+.subscription-consent {
+  font-size: 0.82rem;
+}
+
+.subscription-error {
+  color: var(--red);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
+.subscription-modal__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.monthly-build-tab {
+  position: fixed;
+  left: 18px;
+  bottom: 22px;
+  z-index: var(--z-overlay);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid rgba(255,102,0,0.35);
+  border-radius: 999px;
+  background: rgba(10,10,10,0.92);
+  box-shadow: 0 16px 42px rgba(0,0,0,0.35);
+  overflow: hidden;
+}
+
+.monthly-build-tab button {
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  padding: 10px 12px;
+}
+
+.monthly-build-tab button:first-child {
+  color: #ff6600;
 }
 
 /* Blog detail page hero image only — keep journal grid cards unchanged */
@@ -1077,6 +1216,32 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
   }
   .subscribe-form__fields {
     grid-template-columns: 1fr;
+  }
+  .subscribe-compact {
+    grid-template-columns: 1fr;
+  }
+  .subscribe-compact .btn {
+    width: 100%;
+  }
+  .subscription-modal {
+    align-items: stretch;
+    padding: max(10px, env(safe-area-inset-top)) 10px max(10px, env(safe-area-inset-bottom));
+  }
+  .subscription-modal__panel {
+    width: 100%;
+    max-height: calc(100dvh - 20px);
+    padding: 18px;
+    border-radius: 14px;
+  }
+  .subscription-interest-grid {
+    grid-template-columns: 1fr;
+  }
+  .subscription-modal__actions,
+  .subscription-modal__actions .btn {
+    width: 100%;
+  }
+  .monthly-build-tab {
+    display: none;
   }
   .product-detail-panel {
     inset: 0;
