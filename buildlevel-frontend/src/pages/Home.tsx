@@ -165,13 +165,13 @@ export default function Home() {
       {/* CTA */}
       <section className="section">
         <div className="container">
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-            <Reveal style={{ background: "var(--red)", padding: 48, borderRadius: "var(--radius)" }}>
+          <div className="home-category-grid">
+            <Reveal className="home-category-card home-category-card--apparel">
               <h2 style={{ marginBottom: 16, color: "#fff" }}>Apparel</h2>
               <p style={{ color: "rgba(255,255,255,0.8)", marginBottom: 32 }}>Premium streetwear built for those who build.</p>
               <Link to="/shop" className="btn" style={{ background: "#fff", color: "var(--red)" }}>Shop Now</Link>
             </Reveal>
-            <Reveal delay={0.08} style={{ background: "var(--bg3)", border: "1px solid var(--border)", padding: 48, borderRadius: "var(--radius)" }}>
+            <Reveal delay={0.08} className="home-category-card home-category-card--digital">
               <h2 style={{ marginBottom: 16 }}>Digital Resources</h2>
               <p style={{ color: "var(--text2)", marginBottom: 32 }}>Guides, frameworks, and tools to level up your execution.</p>
               <Link to="/digital" className="btn btn-primary">Explore</Link>

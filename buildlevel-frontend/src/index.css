@@ -610,6 +610,42 @@ h3 { font-size: clamp(1.2rem, 2.5vw, 1.8rem); }
   display: flex;
   flex-wrap: wrap;
   gap: 14px;
+  align-items: stretch;
+  max-width: 420px;
+}
+
+.promo-hero__actions .btn {
+  flex: 1 1 190px;
+  min-width: 0;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.home-category-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 24px;
+  width: 100%;
+  max-width: 100%;
+}
+
+.home-category-card {
+  min-width: 0;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  padding: clamp(24px, 4vw, 48px);
+  border-radius: var(--radius);
+  overflow-wrap: anywhere;
+}
+
+.home-category-card--apparel {
+  background: var(--red);
+}
+
+.home-category-card--digital {
+  background: var(--bg3);
+  border: 1px solid var(--border);
 }
 
 .promo-particles {
@@ -942,6 +978,9 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
 @media (max-width: 1024px) {
   .grid-4 { grid-template-columns: repeat(2, 1fr); }
   .grid-3 { grid-template-columns: repeat(2, 1fr); }
+  .home-category-grid {
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
+  }
   .product-detail-grid,
   .digital-detail-grid {
     grid-template-columns: 1fr !important;
@@ -951,6 +990,34 @@ label { display: block; font-size: 0.8rem; font-weight: 500; color: var(--text2)
   .grid-4, .grid-3, .grid-2 { grid-template-columns: 1fr; }
   .container { padding: 0 16px; }
   .section { padding: 48px 0; }
+  .page-chrome,
+  .page-chrome section,
+  .home-category-grid,
+  .home-category-card,
+  .promo-readable-panel--hero {
+    max-width: 100%;
+  }
+  .promo-hero__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+    width: 100%;
+    max-width: 100%;
+    justify-items: stretch;
+  }
+  .promo-hero__actions .btn {
+    width: 100%;
+    min-width: 0;
+    min-height: 52px;
+    padding-left: 18px;
+    padding-right: 18px;
+  }
+  .home-category-grid {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
+  .home-category-card {
+    padding: 24px;
+  }
   .recommendation-grid {
     grid-template-columns: 1fr;
   }
