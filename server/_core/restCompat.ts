@@ -874,6 +874,7 @@ const seedAudiences = [["for-you", "For You", true, 0], ["mens", "Men", true, 10
 const forYouFeatured = ["New Arrivals", "Bestsellers", "New Mockups", "My Favorites"];
 const forYouTrends = ["Back to School", "Jewelry", "On Sale", "Eco-Friendly", "Assembled in the USA", "TikTok", "Streetwear", "Summer of Soccer 2026", "4th of July"];
 const forYouRecommended = ["Top Picks", "New Arrivals", "Embroidery", "Engraving", "AOP Clothing", "Personalization Picks", "Early Access", "Printify Choice"];
+const seedEvents = ["4th of July New"];
 const audienceFeatured: Record<string, string[]> = { mens: ["New Arrivals", "Bestsellers"], womens: ["New Arrivals", "Bestsellers"], kids: ["Bestsellers"], accessories: ["New Arrivals", "Bestsellers"], "home-living": ["New Arrivals", "Bestsellers"] };
 const audienceCategories: Record<string, string[]> = {
   mens: ["Sweatshirts", "Hoodies", "T-Shirts", "Long Sleeves", "Tank Tops", "Sportswear", "Bottoms", "Swimwear", "Shoes", "Outerwear"],
@@ -911,6 +912,7 @@ async function ensureShopOrgTables() {
   for (let index = 0; index < forYouRecommended.length; index += 1) await addCategory("for-you", forYouRecommended[index], "", "recommended", index + 50);
   for (const [audienceSlug, items] of Object.entries(audienceFeatured)) for (let index = 0; index < items.length; index += 1) await addCategory(audienceSlug, items[index], "", "featured_box", index);
   for (const [audienceSlug, items] of Object.entries(audienceCategories)) for (let index = 0; index < items.length; index += 1) await addCategory(audienceSlug, items[index], "", "category", index + 20);
+  for (let index = 0; index < seedEvents.length; index += 1) await db.execute(sql`INSERT INTO shop_events (name, slug, displayOrder, enabled, hidden, published) VALUES (${seedEvents[index]}, ${orgSlug(seedEvents[index])}, ${index}, true, false, true) ON DUPLICATE KEY UPDATE name = VALUES(name), hidden = false, enabled = true, updatedAt = NOW()`);
   const [coolers] = await db.execute(sql`SELECT id FROM products WHERE name LIKE '%Can Cooler%' OR name LIKE '%Koozie%' LIMIT 5`) as any;
   const [homeRows] = await db.execute(sql`SELECT id FROM shop_audiences WHERE slug = 'home-living' LIMIT 1`) as any;
   const [canRows] = await db.execute(sql`SELECT id FROM shop_categories WHERE slug = 'bottles-and-tumblers' AND audienceId = ${homeRows?.[0]?.id || 0} LIMIT 1`) as any;
