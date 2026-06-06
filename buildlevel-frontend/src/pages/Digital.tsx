@@ -3,6 +3,8 @@ import { Link, useParams } from "react-router-dom";
 import { MountainLegacySection } from "../components/PromoVisualSections";
 import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, DigitalProduct } from "../lib/api";
+import { useCart } from "../context/CartContext";
+import SubscribeForm from "../components/SubscribeForm";
 
 const storageImageUrl = (value?: string | null) => {
   if (!value) return "";
@@ -32,6 +34,7 @@ async function startDigitalCheckout(product: DigitalProduct, setPendingProductId
 }
 
 export default function Digital() {
+  const cart = useCart();
   const [products, setProducts] = useState<DigitalProduct[]>([]);
   const [loading, setLoading] = useState(true);
   const [pendingProductId, setPendingProductId] = useState<number | null>(null);
@@ -100,9 +103,12 @@ export default function Digital() {
                   <div style={{ marginBottom: 16 }}><TrustBadges type="digital" /></div>
                   <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: "auto" }}>
                     <span style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem" }}>${parseFloat(p.price).toFixed(2)}</span>
-                    <button onClick={() => handleBuy(p)} disabled={pendingProductId !== null} className="btn btn-primary btn-sm">
-                      {pendingProductId === p.id ? "Redirecting..." : "Get Access"}
-                    </button>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                      <button onClick={() => cart.addDigital(p)} className="btn btn-outline btn-sm">Add to Cart</button>
+                      <button onClick={() => handleBuy(p)} disabled={pendingProductId !== null} className="btn btn-primary btn-sm">
+                        {pendingProductId === p.id ? "Redirecting..." : "Get Access"}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -112,12 +118,16 @@ export default function Digital() {
         {!loading && products.length > 1 && (
           <RecommendationStrip title="Popular Digital Guides" products={products.map(product => ({ ...product, price: product.price }))} hrefBase="/digital" />
         )}
+        <div style={{ marginTop: 36 }}>
+          <SubscribeForm source="digital" />
+        </div>
       </div>
     </div>
   );
 }
 
 export function DigitalDetail() {
+  const cart = useCart();
   const { productId } = useParams();
   const selectedId = Number(productId);
   const [products, setProducts] = useState<DigitalProduct[]>([]);
@@ -199,9 +209,12 @@ export function DigitalDetail() {
             <ProductReviewSummary summary={reviewSummary} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, margin: "22px 0" }}>
               <span style={{ fontFamily: "var(--font-display)", fontSize: "1.7rem" }}>${parseFloat(product.price).toFixed(2)}</span>
-              <button onClick={handleBuy} disabled={pendingProductId !== null} className="btn btn-primary">
-                {pendingProductId === product.id ? "Redirecting..." : "Get Access"}
-              </button>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                <button onClick={() => cart.addDigital(product)} className="btn btn-outline">Add to Cart</button>
+                <button onClick={handleBuy} disabled={pendingProductId !== null} className="btn btn-primary">
+                  {pendingProductId === product.id ? "Redirecting..." : "Get Access"}
+                </button>
+              </div>
             </div>
             {product.description && <p style={{ color: "var(--text2)", lineHeight: 1.8, whiteSpace: "pre-line", marginBottom: 22 }}>{product.description}</p>}
             <div style={{ marginBottom: 22 }}><TrustBadges type="digital" /></div>
@@ -215,6 +228,9 @@ export function DigitalDetail() {
           hrefBase="/digital"
           currentProductId={product.id}
         />
+        <div style={{ marginTop: 36 }}>
+          <SubscribeForm source="digital_detail" />
+        </div>
       </div>
     </div>
   );

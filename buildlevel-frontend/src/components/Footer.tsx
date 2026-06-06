@@ -1,5 +1,6 @@
 import { Link } from "react-router-dom";
 import SocialLinks from "./SocialLinks";
+import SubscribeForm from "./SubscribeForm";
 
 export default function Footer() {
   return (
@@ -10,6 +11,9 @@ export default function Footer() {
             <div style={{ fontFamily: "var(--font-display)", color: "var(--red)", letterSpacing: "0.18em", fontSize: "0.72rem", textTransform: "uppercase", marginBottom: 8 }}>Built Different</div>
             <h2 style={{ marginBottom: 8 }}>Stay Focused. Execute Daily.</h2>
           </div>
+        </div>
+        <div style={{ marginBottom: 40 }}>
+          <SubscribeForm source="footer" compact />
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 40, marginBottom: 40 }}>
           <div>

@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import { BLOG_CATEGORIES, getBlogCategoryLabel, normalizeBlogCategory } from "../lib/blogCategories";
 import { publicApi, BlogPost, BlogEngagement as BlogEngagementData } from "../lib/api";
 import { getEngagementSessionId, Stars } from "../components/Engagement";
+import SubscribeForm from "../components/SubscribeForm";
 
 export default function Blog() {
   const [posts, setPosts] = useState<BlogPost[]>([]);
@@ -103,6 +104,9 @@ export default function Blog() {
             )})}
           </div>
         )}
+        <div style={{ marginTop: 36 }}>
+          <SubscribeForm source="blog" />
+        </div>
       </div>
     </div>
   );

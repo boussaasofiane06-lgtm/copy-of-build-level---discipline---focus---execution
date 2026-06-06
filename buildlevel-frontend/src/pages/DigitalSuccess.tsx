@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { publicApi } from "../lib/api";
+import { useCart } from "../context/CartContext";
 
 type AccessState =
   | { status: "loading" }
@@ -20,6 +21,7 @@ export default function DigitalSuccess() {
   const [params] = useSearchParams();
   const sessionId = params.get("session_id") || "";
   const [access, setAccess] = useState<AccessState>({ status: "loading" });
+  const cart = useCart();
 
   useEffect(() => {
     if (!sessionId) {
@@ -31,6 +33,7 @@ export default function DigitalSuccess() {
     publicApi.getDigitalPurchaseAccess(sessionId)
       .then(result => {
         if (cancelled) return;
+        cart.markConverted(sessionId).finally(() => cart.clearCart("digital"));
         setAccess({
           status: "ready",
           productName: result.productName,

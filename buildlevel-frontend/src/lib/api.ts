@@ -249,6 +249,81 @@ export interface FulfillmentOrderItem {
   fulfillmentSource: string;
 }
 
+export type CartProductType = "apparel" | "digital";
+
+export interface CartSyncItem {
+  productType: CartProductType;
+  productId: number;
+  quantity: number;
+  selectedSize?: string;
+  selectedColor?: string;
+  selectedVariant?: string;
+  printifyVariantId?: string;
+}
+
+export interface SavedCartItem extends CartSyncItem {
+  productName: string;
+  imageUrl?: string;
+  unitPrice: number;
+  itemTotal: number;
+  validationStatus?: string;
+  validationMessage?: string;
+}
+
+export interface SavedCart {
+  id?: number;
+  sessionId: string;
+  customerEmail?: string;
+  customerFirstName?: string;
+  status: string;
+  subtotal: number;
+  itemCount: number;
+  recoveryUrl?: string;
+  lastActivityAt?: string;
+  expiresAt?: string;
+  items: SavedCartItem[];
+}
+
+export interface Subscriber {
+  id: number;
+  email: string;
+  firstName?: string | null;
+  status: "active" | "unsubscribed" | "blocked";
+  subscriptionSource?: string | null;
+  consentStatus?: string | null;
+  preferences?: string | null;
+  subscribedAt?: string;
+  unsubscribedAt?: string | null;
+  lastCampaignAt?: string | null;
+}
+
+export interface AbandonedCart {
+  id: number;
+  sessionId: string;
+  customerEmail?: string | null;
+  customerFirstName?: string | null;
+  status: string;
+  subtotal: string | number;
+  itemCount: number;
+  reminderCount: number;
+  recoveryStatus?: string | null;
+  recoveryReminderCount?: number | null;
+  completedOrderId?: string | null;
+  lastActivityAt?: string;
+  expiresAt?: string;
+  updatedAt?: string;
+}
+
+export interface RetentionSettings {
+  recoveryEnabled: boolean;
+  firstReminderHours: number;
+  secondReminderHours: number;
+  finalReminderHours: number;
+  abandonedAfterMinutes: number;
+  reminderSubject: string;
+  reminderIntro: string;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 export const publicApi = {
   getProducts: () => api.get<unknown>("/products").then(r => expectArray<Product>(r.data, "/products")),
@@ -280,6 +355,20 @@ export const publicApi = {
   getMaintenanceConfig: () => api.get<MaintenanceConfig>("/maintenance").then(r => r.data),
   sendContact: (data: { name: string; email: string; message: string }) =>
     api.post<{ success: true }>("/contact", data).then(r => r.data),
+  syncCart: (data: { sessionId: string; customerEmail?: string; customerFirstName?: string; items: CartSyncItem[] }) =>
+    api.post<{ success: true; cart: SavedCart }>("/cart/sync", data).then(r => r.data),
+  recoverCart: (token: string) =>
+    api.get<{ success: true; cart: SavedCart }>(`/cart/recover/${encodeURIComponent(token)}`).then(r => r.data),
+  markCartConverted: (data: { sessionId: string; completedOrderId?: string }) =>
+    api.post<{ success: true }>("/cart/converted", data).then(r => r.data),
+  subscribe: (data: { email: string; firstName?: string; interests: string[]; source: string; consent: boolean }) =>
+    api.post<{ success: true; message: string; manageUrl?: string }>("/subscribe", data).then(r => r.data),
+  getEmailPreferences: (token: string) =>
+    api.get<{ success: true; subscriber: { email: string; firstName?: string; status: string; interests: Array<{ interest: string; enabled: boolean }> } }>(`/email/preferences/${encodeURIComponent(token)}`).then(r => r.data),
+  updateEmailPreferences: (token: string, data: { firstName?: string; interests: string[]; active: boolean }) =>
+    api.post<{ success: true }>(`/email/preferences/${encodeURIComponent(token)}`, data).then(r => r.data),
+  unsubscribe: (token: string) =>
+    api.post<{ success: true }>(`/email/unsubscribe/${encodeURIComponent(token)}`).then(r => r.data),
   getBlogEngagement: (postId: number, sessionId: string) =>
     api.get<BlogEngagement>(`/engagement/blog/${postId}`, { params: { sessionId } }).then(r => r.data),
   getBlogEngagementSummary: (ids: number[], sessionId: string) =>
@@ -388,6 +477,21 @@ export const adminApi = {
   resolveFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/resolve`).then(r => r.data),
   refreshFulfillmentOrder: (id: number) => api.post<{ success: true; data?: unknown }>(`/admin/fulfillment/orders/${id}/refresh`).then(r => r.data),
   retryFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/retry`).then(r => r.data),
+  getSubscribers: (params?: { search?: string; status?: string; interest?: string; source?: string }) =>
+    api.get<Subscriber[]>("/admin/subscribers", { params }).then(r => r.data),
+  updateSubscriber: (id: number, data: { status?: "active" | "unsubscribed" | "blocked"; firstName?: string; interests?: string[] }) =>
+    api.patch<{ success: true }>(`/admin/subscribers/${id}`, data).then(r => r.data),
+  getAbandonedCarts: (params?: { status?: string }) =>
+    api.get<AbandonedCart[]>("/admin/abandoned-carts", { params }).then(r => r.data),
+  getAbandonedCart: (id: number) =>
+    api.get<{ cart: SavedCart }>(`/admin/abandoned-carts/${id}`).then(r => r.data),
+  updateAbandonedCart: (id: number, action: "stop" | "resolve" | "enable" | "delete_expired") =>
+    api.patch<{ success: true }>(`/admin/abandoned-carts/${id}`, { action }).then(r => r.data),
+  sendAbandonedCartReminder: (id: number, stage = "manual") =>
+    api.post<{ success: true; skipped?: boolean; message?: string; recoveryUrl?: string }>(`/admin/abandoned-carts/${id}/reminder`, { stage }).then(r => r.data),
+  getRetentionSettings: () => api.get<RetentionSettings>("/admin/abandoned-carts/settings").then(r => r.data),
+  saveRetentionSettings: (data: RetentionSettings) => api.post<{ success: true; settings: RetentionSettings }>("/admin/abandoned-carts/settings", data).then(r => r.data),
+  getRetentionSummary: () => api.get<{ carts: Record<string, number | string>; subscribers: Record<string, number | string>; mostAddedProducts: Array<{ productName: string; productType: string; quantity: number }> }>("/admin/retention/summary").then(r => r.data),
 
   // Integrations
   getIntegrationOverview: () => api.get<IntegrationOverview>("/admin/integrations/overview").then(r => r.data),

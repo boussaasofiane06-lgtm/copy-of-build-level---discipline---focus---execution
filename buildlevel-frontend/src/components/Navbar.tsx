@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useLocation } from "react-router-dom";
 import SocialLinks from "./SocialLinks";
+import { useCart } from "../context/CartContext";
 
 const links = [
   { to: "/", label: "Home" },
@@ -15,6 +16,7 @@ export default function Navbar() {
   const [open, setOpen] = useState(false);
   const navRef = useRef<HTMLElement>(null);
   const { pathname } = useLocation();
+  const cart = useCart();
 
   useEffect(() => {
     setOpen(false);
@@ -68,18 +70,25 @@ export default function Navbar() {
           ))}
         </div>
 
-        {/* Mobile hamburger */}
-        <button
-          type="button"
-          onClick={() => setOpen(!open)}
-          style={{ display: "none", background: "none", border: "none", color: "var(--text)", fontSize: "1.5rem" }}
-          className="hamburger"
-          aria-label={open ? "Close menu" : "Open menu"}
-          aria-expanded={open}
-          aria-controls="mobile-menu"
-        >
-          {open ? "✕" : "☰"}
-        </button>
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button type="button" onClick={cart.openCart} className="cart-nav-button" aria-label={`Open shopping cart with ${cart.itemCount} item${cart.itemCount === 1 ? "" : "s"}`}>
+            <span aria-hidden="true">🛒</span>
+            {cart.itemCount > 0 && <span className="cart-nav-button__badge">{cart.itemCount}</span>}
+          </button>
+
+          {/* Mobile hamburger */}
+          <button
+            type="button"
+            onClick={() => setOpen(!open)}
+            style={{ display: "none", background: "none", border: "none", color: "var(--text)", fontSize: "1.5rem" }}
+            className="hamburger"
+            aria-label={open ? "Close menu" : "Open menu"}
+            aria-expanded={open}
+            aria-controls="mobile-menu"
+          >
+            {open ? "✕" : "☰"}
+          </button>
+        </div>
       </div>
 
       {/* Mobile menu */}
@@ -110,6 +119,9 @@ export default function Navbar() {
             </Link>
           ))}
           <div style={{ padding: "12px 24px" }}>
+            <button type="button" onClick={() => { cart.openCart(); setOpen(false); }} className="btn btn-outline" style={{ width: "100%", marginBottom: 14 }}>
+              Cart ({cart.itemCount})
+            </button>
             <SocialLinks compact />
           </div>
         </div>

@@ -1,4 +1,7 @@
 import { Link, useSearchParams } from "react-router-dom";
+import { useEffect } from "react";
+import { useCart } from "../context/CartContext";
+import SubscribeForm from "../components/SubscribeForm";
 
 function ActionButtons() {
   return (
@@ -22,6 +25,12 @@ function StatusRow({ label, value }: { label: string; value: string }) {
 export function CheckoutSuccess() {
   const [params] = useSearchParams();
   const hasSession = Boolean(params.get("session_id"));
+  const cart = useCart();
+
+  useEffect(() => {
+    const sessionId = params.get("session_id") || "";
+    cart.markConverted(sessionId).finally(() => cart.clearCart("apparel"));
+  }, []);
 
   return (
     <div>
@@ -84,6 +93,9 @@ export function CheckoutSuccess() {
         </div>
 
         <ActionButtons />
+        <div style={{ marginTop: 34 }}>
+          <SubscribeForm source="checkout_success" />
+        </div>
       </div>
     </div>
   );

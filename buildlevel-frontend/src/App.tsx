@@ -4,6 +4,8 @@ import { AnimatePresence } from "framer-motion";
 import Navbar from "./components/Navbar";
 import Footer from "./components/Footer";
 import TidioWidget from "./components/TidioWidget";
+import { CartAddNotice, CartDrawer, SavedCartReminder } from "./components/CartDrawer";
+import { CartProvider } from "./context/CartContext";
 import { PageTransition } from "./components/Motion";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
@@ -16,6 +18,8 @@ import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Admin from "./pages/Admin";
 import Maintenance from "./pages/Maintenance";
+import CartRecovery from "./pages/CartRecovery";
+import EmailPreferences from "./pages/EmailPreferences";
 import PolicyPage, { FAQPage, PolicyCenter } from "./pages/PolicyPage";
 import { MaintenanceConfig, publicApi } from "./lib/api";
 
@@ -44,6 +48,8 @@ function PublicRoutes() {
           <Route path="/checkout/success" element={<CheckoutSuccess />} />
           <Route path="/checkout/cancel" element={<CheckoutCancel />} />
           <Route path="/order-confirmation" element={<CheckoutSuccess />} />
+          <Route path="/cart/recover/:token" element={<CartRecovery />} />
+          <Route path="/email/preferences/:token" element={<EmailPreferences />} />
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/about" element={<About />} />
@@ -97,13 +103,18 @@ function PublicStorefrontShell() {
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
-      <Navbar />
-      <main style={{ flex: 1 }}>
-        <PublicRoutes />
-      </main>
-      <Footer />
-    </div>
+    <CartProvider>
+      <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+        <Navbar />
+        <main style={{ flex: 1 }}>
+          <PublicRoutes />
+        </main>
+        <Footer />
+        <CartAddNotice />
+        <SavedCartReminder />
+        <CartDrawer />
+      </div>
+    </CartProvider>
   );
 }
 

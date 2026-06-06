@@ -3,6 +3,8 @@ import { createPortal } from "react-dom";
 import { GymMotivationSection } from "../components/PromoVisualSections";
 import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, Product } from "../lib/api";
+import { useCart } from "../context/CartContext";
+import SubscribeForm from "../components/SubscribeForm";
 import {
   APPAREL_AUDIENCES,
   getAudienceLabel,
@@ -132,6 +134,7 @@ const getProductDisplayPrice = (product: Product, selectedSizes: Record<number, 
 };
 
 export default function Shop() {
+  const globalCart = useCart();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -252,14 +255,15 @@ export default function Shop() {
       .slice(0, 4);
 
   const addToCart = (product: Product) => {
-    const options = getProductOptions(product);
-    const size = selectedSizes[product.id] || (options[0]?.value ?? "");
-    setCart(prev => {
-      const existing = prev.find(i => i.product.id === product.id && i.size === size);
-      if (existing) return prev.map(i => i.product.id === product.id && i.size === size ? { ...i, quantity: i.quantity + 1 } : i);
-      return [...prev, { product, quantity: 1, size }];
+    const option = getSelectedProductOption(product, selectedSizes);
+    globalCart.addApparel({
+      product,
+      quantity: 1,
+      unitPrice: option?.price || Number.parseFloat(product.price),
+      selectedSize: option?.label || "",
+      selectedVariant: option?.value || option?.label || "",
+      printifyVariantId: option?.variantId,
     });
-    setCartOpen(true);
   };
 
   const cartTotal = cart.reduce((sum, i) => sum + (parseProductOption(i.size, parseFloat(i.product.price))?.price || parseFloat(i.product.price)) * i.quantity, 0);
@@ -621,6 +625,9 @@ export default function Shop() {
             );})}
           </div>
         )}
+        <div style={{ marginTop: 36 }}>
+          <SubscribeForm source="apparel" />
+        </div>
       </div>
 
       {cartDrawer}

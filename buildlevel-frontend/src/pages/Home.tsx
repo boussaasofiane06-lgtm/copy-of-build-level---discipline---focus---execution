@@ -5,6 +5,7 @@ import { Reveal } from "../components/Motion";
 import { ProductReviewSummary, Stars, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { BuildLevelHero, GymMotivationSection, MountainLegacySection } from "../components/PromoVisualSections";
 import { publicApi, Product, Review } from "../lib/api";
+import SubscribeForm from "../components/SubscribeForm";
 
 export default function Home() {
   const [featured, setFeatured] = useState<Product[]>([]);
@@ -99,6 +100,12 @@ export default function Home() {
       </section>
 
       <MountainLegacySection />
+
+      <section className="section">
+        <div className="container" style={{ maxWidth: 900 }}>
+          <SubscribeForm source="homepage" />
+        </div>
+      </section>
 
       {reviews.length > 0 && (
         <section className="section" style={{ background: "var(--bg2)" }}>

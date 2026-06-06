@@ -6,6 +6,7 @@ import adminRoutes from "./routes/admin.js";
 import publicRoutes from "./routes/public.js";
 import stripeRoutes from "./routes/stripe.js";
 import engagementRoutes from "./routes/engagement.js";
+import retentionRoutes from "./routes/retention.js";
 
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -43,6 +44,7 @@ app.use(cookieParser());
 app.use("/api/admin", adminRoutes);
 app.use("/api", publicRoutes);
 app.use("/api", engagementRoutes);
+app.use("/api", retentionRoutes);
 app.use("/api/stripe", stripeRoutes);
 
 // ─── Health check ─────────────────────────────────────────────────────────────
