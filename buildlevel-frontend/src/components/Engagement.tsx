@@ -109,20 +109,40 @@ export function ProductReviews({ summary }: { summary?: ReviewSummaryData }) {
 }
 
 export function RecommendationStrip<T extends { id: number; name: string; imageUrl?: string; price: string; category?: string }>(
-  { title, products, hrefBase }: { title: string; products: T[]; hrefBase: "/shop" | "/digital" }
+  { title, products, hrefBase, currentProductId }: { title: string; products: T[]; hrefBase: "/shop" | "/digital"; currentProductId?: number }
 ) {
-  if (!products.length) return null;
+  const recommendations = products.filter(product => product.id !== currentProductId).slice(0, 4);
+  if (!recommendations.length) return null;
+  const getHref = (product: T) => hrefBase === "/digital" ? `/digital/${product.id}` : hrefBase;
+  const actionLabel = hrefBase === "/digital" ? "View Product" : "View Product";
+
   return (
     <div style={{ marginTop: 22 }}>
       <h3 style={{ fontSize: "0.95rem", marginBottom: 12 }}>{title}</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(130px, 1fr))", gap: 10 }}>
-        {products.slice(0, 4).map(product => (
-          <Link key={product.id} to={hrefBase} className="card" style={{ padding: 10 }}>
-            <div style={{ aspectRatio: "1", background: "var(--bg3)", borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
-              {product.imageUrl && <img src={product.imageUrl.startsWith("storage:") ? `/api/digital/thumbnail/${encodeURIComponent(product.imageUrl.slice("storage:".length))}` : product.imageUrl} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "cover" }} />}
+      <div className="recommendation-grid">
+        {recommendations.map(product => (
+          <Link
+            key={product.id}
+            to={getHref(product)}
+            className="recommendation-card"
+            aria-label={`${actionLabel}: ${product.name}`}
+          >
+            <div className="recommendation-card__image">
+              {product.imageUrl ? (
+                <img
+                  src={product.imageUrl.startsWith("storage:") ? `/api/digital/thumbnail/${encodeURIComponent(product.imageUrl.slice("storage:".length))}` : product.imageUrl}
+                  alt={product.name}
+                />
+              ) : (
+                <span style={{ color: "var(--text3)", fontSize: "0.75rem" }}>No Image</span>
+              )}
             </div>
-            <p style={{ fontSize: "0.78rem", lineHeight: 1.25 }}>{product.name}</p>
-            <p style={{ color: "#ff6600", fontFamily: "var(--font-display)", fontSize: "0.78rem", marginTop: 4 }}>${Number.parseFloat(product.price).toFixed(2)}</p>
+            <div className="recommendation-card__body">
+              {product.category && <span className="badge badge-dark" style={{ alignSelf: "flex-start" }}>{product.category}</span>}
+              <p className="recommendation-card__title">{product.name}</p>
+              <p className="recommendation-card__price">${Number.parseFloat(product.price).toFixed(2)}</p>
+              <span className="recommendation-card__button">{actionLabel}</span>
+            </div>
           </Link>
         ))}
       </div>
@@ -178,8 +198,8 @@ export function BlogEngagement({ postId }: { postId: number }) {
     event.preventDefault();
     setLoading(true);
     try {
-      const result = await publicApi.submitBlogComment(postId, { ...form, sessionId, parentId: null });
-      setMessage(result.message);
+      await publicApi.submitBlogComment(postId, { ...form, sessionId, parentId: null });
+      setMessage("Thank you! Your comment has been submitted.");
       setForm({ name: "", email: "", comment: "" });
       await load(sessionId);
     } catch (error: any) {
@@ -215,7 +235,6 @@ export function BlogEngagement({ postId }: { postId: number }) {
         <textarea className="input" required rows={4} placeholder="Comment" value={form.comment} onChange={e => setForm(current => ({ ...current, comment: e.target.value }))} />
         <button className="btn btn-primary btn-sm" type="submit" disabled={loading}>{loading ? "Submitting..." : "Submit Comment"}</button>
         {message && <p style={{ color: message.includes("could not") ? "var(--red)" : "#ff6600", fontSize: "0.85rem" }}>{message}</p>}
-        <p style={{ color: "var(--text3)", fontSize: "0.78rem" }}>Comments go live after admin approval.</p>
       </form>
 
       <div style={{ display: "grid", gap: 12 }}>

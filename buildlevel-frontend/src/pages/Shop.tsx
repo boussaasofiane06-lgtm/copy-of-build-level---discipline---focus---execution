@@ -145,6 +145,10 @@ export default function Shop() {
   const [audience, setAudience] = useState<"all" | ApparelAudience>("all");
   const [category, setCategory] = useState("all");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
+  const productModalScrollRef = useRef<HTMLDivElement>(null);
+  const modalTouchStartXRef = useRef<number | null>(null);
+  const [modalImageLoading, setModalImageLoading] = useState(false);
+  const [modalImageError, setModalImageError] = useState(false);
 
   useEffect(() => {
     publicApi.getProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
@@ -182,6 +186,11 @@ export default function Shop() {
     if (!viewProduct) return;
     const firstImage = getProductCoverImage(viewProduct);
     setViewImage(firstImage);
+    setModalImageError(false);
+    setModalImageLoading(!!firstImage);
+    requestAnimationFrame(() => {
+      productModalScrollRef.current?.scrollTo({ top: 0, behavior: "auto" });
+    });
     publicApi.getReviews({ targetType: "product", targetId: viewProduct.id, limit: 6 })
       .then(setProductReviews)
       .catch(() => setProductReviews({ reviews: [], averageRating: 0, count: 0 }));
@@ -360,18 +369,31 @@ export default function Shop() {
   const modalCoverImage = viewProduct ? getProductCoverImage(viewProduct) : "";
   const activeModalImage = viewImage || modalCoverImage;
   const activeModalImageIndex = Math.max(0, modalImages.indexOf(activeModalImage));
+  const selectModalImage = (image: string) => {
+    setModalImageError(false);
+    setModalImageLoading(!!image);
+    setViewImage(image);
+  };
   const showModalImage = (direction: "prev" | "next") => {
     if (modalImages.length === 0) return;
     const nextIndex = direction === "next"
       ? (activeModalImageIndex + 1) % modalImages.length
       : (activeModalImageIndex - 1 + modalImages.length) % modalImages.length;
-    setViewImage(modalImages[nextIndex]);
+    selectModalImage(modalImages[nextIndex]);
+  };
+  const handleModalImageTouchEnd = (clientX: number) => {
+    const startX = modalTouchStartXRef.current;
+    modalTouchStartXRef.current = null;
+    if (startX == null || modalImages.length < 2) return;
+    const delta = clientX - startX;
+    if (Math.abs(delta) < 42) return;
+    showModalImage(delta < 0 ? "next" : "prev");
   };
 
   const productModal = viewProduct ? createPortal(
     <div className="cart-drawer" role="dialog" aria-modal="true" aria-labelledby="product-detail-title">
       <div className="cart-drawer__backdrop" aria-hidden="true" onClick={() => { setViewProduct(null); setViewImage(""); }} />
-      <aside className="cart-drawer__panel" style={{ width: "min(960px, 100vw)", maxWidth: "100vw" }}>
+      <aside className="cart-drawer__panel product-detail-panel" style={{ width: "min(960px, 100vw)", maxWidth: "100vw" }}>
         <div style={{ padding: "20px 24px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 16 }}>
           <div>
             <p style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.7rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 4 }}>
@@ -382,13 +404,33 @@ export default function Shop() {
           <button onClick={() => { setViewProduct(null); setViewImage(""); }} aria-label="Close product details" style={{ background: "none", border: "none", color: "var(--text2)", fontSize: "1.2rem" }}>✕</button>
         </div>
 
-        <div style={{ flex: 1, overflowY: "auto", padding: 24 }}>
-          <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(280px, 0.75fr)", gap: 24 }}>
+        <div ref={productModalScrollRef} className="product-detail-scroll" style={{ flex: 1, overflowY: "auto", padding: 24 }}>
+          <div className="product-detail-grid" style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.25fr) minmax(280px, 0.75fr)", gap: 24 }}>
             <div>
               {modalImages.length > 0 ? (
                 <div style={{ display: "grid", gap: 14 }}>
-                  <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10, position: "relative" }}>
-                    <img src={storageImageUrl(activeModalImage)} alt={viewProduct.name} style={{ width: "100%", height: "100%", objectFit: "cover", display: "block" }} />
+                  <div
+                    className="product-detail-main-image"
+                    onTouchStart={event => { modalTouchStartXRef.current = event.touches[0]?.clientX ?? null; }}
+                    onTouchEnd={event => handleModalImageTouchEnd(event.changedTouches[0]?.clientX ?? 0)}
+                    style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", borderRadius: 10, position: "relative", touchAction: "pan-y" }}
+                  >
+                    {modalImageLoading && !modalImageError && (
+                      <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,0.18)", zIndex: 1 }}>
+                        <div className="spinner" />
+                      </div>
+                    )}
+                    {modalImageError ? (
+                      <div style={{ width: "100%", height: "100%", display: "flex", alignItems: "center", justifyContent: "center", color: "var(--text3)", textAlign: "center", padding: 24 }}>Image unavailable</div>
+                    ) : (
+                      <img
+                        src={storageImageUrl(activeModalImage)}
+                        alt={viewProduct.name}
+                        onLoad={() => setModalImageLoading(false)}
+                        onError={() => { setModalImageLoading(false); setModalImageError(true); }}
+                        style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }}
+                      />
+                    )}
                     {modalImages.length > 1 && (
                       <>
                         <button type="button" onClick={() => showModalImage("prev")} aria-label="Previous product image" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 42, height: 42, borderRadius: 999, border: "1px solid rgba(255,255,255,0.35)", background: "rgba(0,0,0,0.58)", color: "#fff", cursor: "pointer", fontSize: "1.2rem" }}>‹</button>
@@ -400,10 +442,10 @@ export default function Shop() {
                     )}
                   </div>
                   {modalImages.length > 1 && (
-                    <div style={{ display: "flex", gap: 10, overflowX: "auto", padding: "2px 2px 8px" }}>
+                    <div className="product-detail-thumbnails" style={{ display: "flex", gap: 10, overflowX: "auto", padding: "2px 2px 8px" }}>
                       {modalImages.map((image, index) => (
-                        <button key={`${image}-${index}`} type="button" onClick={() => setViewImage(image)} aria-label={`View ${viewProduct.name} image ${index + 1}`} style={{ padding: 0, background: "transparent", border: activeModalImage === image ? "3px solid var(--red)" : "1px solid var(--border)", borderRadius: 10, cursor: "pointer", overflow: "hidden", flex: "0 0 112px", boxShadow: activeModalImage === image ? "0 0 0 2px rgba(192,57,43,0.25)" : "none" }}>
-                          <img src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: 112, height: 112, objectFit: "cover", display: "block" }} />
+                        <button key={`${image}-${index}`} type="button" onClick={() => selectModalImage(image)} aria-label={`View ${viewProduct.name} image ${index + 1}`} style={{ padding: 0, background: "var(--bg3)", border: activeModalImage === image ? "3px solid var(--red)" : "1px solid var(--border)", borderRadius: 10, cursor: "pointer", overflow: "hidden", flex: "0 0 112px", boxShadow: activeModalImage === image ? "0 0 0 2px rgba(192,57,43,0.25)" : "none" }}>
+                          <img src={storageImageUrl(image)} alt={`${viewProduct.name} mockup ${index + 1}`} style={{ width: 112, height: 112, objectFit: "contain", display: "block", background: "var(--bg3)" }} />
                         </button>
                       ))}
                     </div>
@@ -415,27 +457,22 @@ export default function Shop() {
             </div>
 
             <div>
+              <p style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.72rem", letterSpacing: "0.14em", textTransform: "uppercase", marginBottom: 8 }}>
+                {getCategoryAudienceLabel(viewProduct.category)} / {getCategoryLabel(viewProduct.category)}
+              </p>
               {getProductStatus(viewProduct) && <span className="badge badge-red">{getProductStatus(viewProduct)}</span>}
               <h2 style={{ margin: "14px 0 10px", fontSize: "1.35rem" }}>{viewProduct.name}</h2>
+              {productReviews.count > 0 && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text2)", marginBottom: 14 }}>
+                  <ProductReviewSummary summary={productReviews} />
+                </div>
+              )}
               {!shouldHidePrice(viewProduct) && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
                   <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>{getProductDisplayPrice(viewProduct, selectedSizes)}</span>
                   {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
                 </div>
               )}
-              {productReviews.count > 0 && (
-                <div style={{ display: "flex", alignItems: "center", gap: 8, color: "var(--text2)", marginBottom: 14 }}>
-                  <ProductReviewSummary summary={productReviews} />
-                </div>
-              )}
-              {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
-              <div style={{ marginBottom: 18 }}><TrustBadges type="apparel" /></div>
-              <ProductReviews summary={productReviews} />
-              <RecommendationStrip title="Customers Also Bought" products={getRecommendations(viewProduct)} hrefBase="/shop" />
-              <div style={{ border: "1px solid rgba(255,102,0,0.35)", borderRadius: 10, padding: 12, margin: "18px 0", background: "rgba(255,102,0,0.06)" }}>
-                <strong>Build Level Promise</strong>
-                <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginTop: 6 }}>Premium standards, secure checkout, and products selected for Discipline • Focus • Execution.</p>
-              </div>
               {!shouldHideOptions(viewProduct) && getProductOptions(viewProduct).length > 0 && (
                 <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
                   {getProductOptions(viewProduct).map(option => (
@@ -449,10 +486,18 @@ export default function Shop() {
                   ))}
                 </div>
               )}
+              {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
+              <div style={{ marginBottom: 18 }}><TrustBadges type="apparel" /></div>
+              <div style={{ border: "1px solid rgba(255,102,0,0.35)", borderRadius: 10, padding: 12, margin: "18px 0", background: "rgba(255,102,0,0.06)" }}>
+                <strong>Build Level Promise</strong>
+                <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginTop: 6 }}>Premium standards, secure checkout, and products selected for Discipline • Focus • Execution.</p>
+              </div>
               <button onClick={() => addToCart(viewProduct)} disabled={!isPurchasable(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
                 {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) || "Not Available")}
               </button>
               <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
+              <ProductReviews summary={productReviews} />
+              <RecommendationStrip title="Customers Also Bought" products={getRecommendations(viewProduct)} hrefBase="/shop" />
             </div>
           </div>
         </div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
+import { Link, useParams } from "react-router-dom";
 import { MountainLegacySection } from "../components/PromoVisualSections";
-import { ProductReviewSummary, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
+import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, DigitalProduct } from "../lib/api";
 
 const storageImageUrl = (value?: string | null) => {
@@ -10,6 +11,25 @@ const storageImageUrl = (value?: string | null) => {
   }
   return value;
 };
+
+const typeLabel = (t: string) => ({ pdf: "PDF Guide", audiobook: "Audiobook", video: "Video Course", other: "Digital" }[t] || "Digital");
+
+async function startDigitalCheckout(product: DigitalProduct, setPendingProductId: (id: number | null) => void) {
+  setPendingProductId(product.id);
+
+  if (product.stripePaymentLink) {
+    window.location.assign(product.stripePaymentLink);
+    return;
+  }
+
+  try {
+    const { url } = await publicApi.createDigitalCheckout(product.id);
+    window.location.assign(url);
+  } catch {
+    alert("Checkout failed. Please try again.");
+    setPendingProductId(null);
+  }
+}
 
 export default function Digital() {
   const [products, setProducts] = useState<DigitalProduct[]>([]);
@@ -32,23 +52,8 @@ export default function Digital() {
 
   const handleBuy = async (product: DigitalProduct) => {
     if (pendingProductId !== null) return;
-    setPendingProductId(product.id);
-
-    if (product.stripePaymentLink) {
-      window.location.assign(product.stripePaymentLink);
-      return;
-    }
-
-    try {
-      const { url } = await publicApi.createDigitalCheckout(product.id);
-      window.location.assign(url);
-    } catch {
-      alert("Checkout failed. Please try again.");
-      setPendingProductId(null);
-    }
+    await startDigitalCheckout(product, setPendingProductId);
   };
-
-  const typeLabel = (t: string) => ({ pdf: "PDF Guide", audiobook: "Audiobook", video: "Video Course", other: "Digital" }[t] || "Digital");
 
   return (
     <div>
@@ -107,6 +112,109 @@ export default function Digital() {
         {!loading && products.length > 1 && (
           <RecommendationStrip title="Popular Digital Guides" products={products.map(product => ({ ...product, price: product.price }))} hrefBase="/digital" />
         )}
+      </div>
+    </div>
+  );
+}
+
+export function DigitalDetail() {
+  const { productId } = useParams();
+  const selectedId = Number(productId);
+  const [products, setProducts] = useState<DigitalProduct[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [pendingProductId, setPendingProductId] = useState<number | null>(null);
+  const [reviewSummary, setReviewSummary] = useState<ReviewSummaryData>({ reviews: [], averageRating: 0, count: 0 });
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: "auto" });
+    publicApi.getDigitalProducts()
+      .then(p => { setProducts(p); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [selectedId]);
+
+  const product = products.find(item => item.id === selectedId);
+
+  useEffect(() => {
+    if (!product) return;
+    publicApi.getReviews({ targetType: "digital", targetId: product.id, limit: 8 })
+      .then(setReviewSummary)
+      .catch(() => setReviewSummary({ reviews: [], averageRating: 0, count: 0 }));
+  }, [product?.id]);
+
+  const handleBuy = async () => {
+    if (!product || pendingProductId !== null) return;
+    await startDigitalCheckout(product, setPendingProductId);
+  };
+
+  if (loading) {
+    return (
+      <div className="container section-sm" style={{ display: "flex", justifyContent: "center", padding: 80 }}>
+        <div className="spinner" />
+      </div>
+    );
+  }
+
+  if (!product || !Number.isInteger(selectedId)) {
+    return (
+      <div className="container section-sm" style={{ maxWidth: 720, textAlign: "center" }}>
+        <h1 style={{ marginBottom: 12 }}>Digital Guide Not Found</h1>
+        <p style={{ color: "var(--text2)", marginBottom: 24 }}>This guide is not available right now.</p>
+        <Link to="/digital" className="btn btn-primary">Back to Digital Products</Link>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "48px 0 32px" }}>
+        <div className="container">
+          <Link to="/digital" style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+            Back to Digital Products
+          </Link>
+          <h1 style={{ margin: "12px 0 8px" }}>{product.name}</h1>
+          <p style={{ color: "var(--text2)" }}>{typeLabel(product.productType)}{product.duration ? ` • ${product.duration}` : ""}</p>
+        </div>
+      </div>
+
+      <div className="container section-sm">
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 0.95fr) minmax(320px, 1.05fr)", gap: 28, alignItems: "start" }} className="digital-detail-grid">
+          <div className="card" style={{ padding: 18 }}>
+            <div style={{ width: "100%", minHeight: 320, height: "clamp(320px, 48vw, 620px)", background: "linear-gradient(145deg, #090909, var(--bg3))", borderRadius: 10, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              {product.imageUrl ? (
+                <img src={storageImageUrl(product.imageUrl)} alt={product.name} style={{ width: "100%", height: "100%", objectFit: "contain", objectPosition: "center", display: "block" }} />
+              ) : (
+                <div style={{ color: "var(--text3)", textAlign: "center" }}>
+                  <div style={{ fontSize: "2.5rem", marginBottom: 8 }}>{product.productType === "pdf" ? "📄" : product.productType === "audiobook" ? "🎧" : product.productType === "video" ? "🎬" : "📦"}</div>
+                  <p>{typeLabel(product.productType)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+              <span className="badge badge-dark">{typeLabel(product.productType)}</span>
+              {product.badge && <span className="badge badge-red">{product.badge}</span>}
+            </div>
+            <ProductReviewSummary summary={reviewSummary} />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, margin: "22px 0" }}>
+              <span style={{ fontFamily: "var(--font-display)", fontSize: "1.7rem" }}>${parseFloat(product.price).toFixed(2)}</span>
+              <button onClick={handleBuy} disabled={pendingProductId !== null} className="btn btn-primary">
+                {pendingProductId === product.id ? "Redirecting..." : "Get Access"}
+              </button>
+            </div>
+            {product.description && <p style={{ color: "var(--text2)", lineHeight: 1.8, whiteSpace: "pre-line", marginBottom: 22 }}>{product.description}</p>}
+            <div style={{ marginBottom: 22 }}><TrustBadges type="digital" /></div>
+            <ProductReviews summary={reviewSummary} />
+          </div>
+        </div>
+
+        <RecommendationStrip
+          title="Popular Digital Guides"
+          products={products.map(item => ({ ...item, price: item.price }))}
+          hrefBase="/digital"
+          currentProductId={product.id}
+        />
       </div>
     </div>
   );

@@ -7,7 +7,7 @@ import TidioWidget from "./components/TidioWidget";
 import { PageTransition } from "./components/Motion";
 import Home from "./pages/Home";
 import Shop from "./pages/Shop";
-import Digital from "./pages/Digital";
+import Digital, { DigitalDetail } from "./pages/Digital";
 import DigitalSuccess from "./pages/DigitalSuccess";
 import { CheckoutCancel, CheckoutSuccess } from "./pages/CheckoutResult";
 import Blog from "./pages/Blog";
@@ -39,6 +39,7 @@ function PublicRoutes() {
           <Route path="/" element={<Home />} />
           <Route path="/shop" element={<Shop />} />
           <Route path="/digital" element={<Digital />} />
+          <Route path="/digital/:productId" element={<DigitalDetail />} />
           <Route path="/digital/success" element={<DigitalSuccess />} />
           <Route path="/checkout/success" element={<CheckoutSuccess />} />
           <Route path="/checkout/cancel" element={<CheckoutCancel />} />

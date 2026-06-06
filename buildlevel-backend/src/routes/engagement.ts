@@ -298,7 +298,7 @@ router.post("/engagement/blog/:postId/comments", async (req, res) => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    res.json({ success: true, status, message: "Thank you for your feedback. Your comment is pending approval." });
+    res.json({ success: true, status, message: "Thank you! Your comment has been submitted." });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
@@ -352,7 +352,7 @@ router.post("/reviews", async (req, res) => {
       createdAt: new Date(),
       updatedAt: new Date(),
     });
-    res.json({ success: true, status, message: "Thank you for your feedback. Your review is pending approval." });
+    res.json({ success: true, status, message: "Thank you for your feedback." });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }
