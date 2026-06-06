@@ -43,6 +43,10 @@ function hashToken(token: string) {
   return crypto.createHash("sha256").update(token).digest("hex");
 }
 
+function sqlStringLiteral(value: string) {
+  return sql.raw(`'${value.replace(/\\/g, "\\\\").replace(/'/g, "''")}'`);
+}
+
 function addDays(days: number) {
   return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
 }
@@ -530,7 +534,7 @@ router.post("/subscribe", async (req, res) => {
     const consentHistory = JSON.stringify([consentEntry]);
     await db.execute(sql`
       INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt)
-      VALUES (${email}, ${firstName || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${consentHistory}, ${tokenHash}, NOW())
+      VALUES (${email}, ${firstName || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${sqlStringLiteral(consentHistory)}, ${tokenHash}, NOW())
       ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), consentHistory = VALUES(consentHistory), manageTokenHash = VALUES(manageTokenHash), unsubscribedAt = NULL, updatedAt = NOW()
     `);
     const [subscriberRows] = await db.execute(sql`SELECT id FROM subscribers WHERE email = ${email} LIMIT 1`) as any;
