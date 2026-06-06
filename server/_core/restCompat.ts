@@ -890,6 +890,7 @@ async function ensureShopOrgTables() {
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS product_category_assignments (id INT AUTO_INCREMENT PRIMARY KEY, productId INT NOT NULL, categoryId INT NOT NULL, assignmentType ENUM('primary','subcategory','secondary') NOT NULL DEFAULT 'primary', createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_product_category_assignment (productId, categoryId, assignmentType))`));
   for (const table of ["product_collection_assignments", "product_trend_assignments", "product_event_assignments", "product_recommended_assignments"]) await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS ${table} (id INT AUTO_INCREMENT PRIMARY KEY, productId INT NOT NULL, targetId INT NOT NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_${table} (productId, targetId))`));
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS navigation_items (id INT AUTO_INCREMENT PRIMARY KEY, itemType ENUM('audience','collection','trend','event','custom') NOT NULL, targetId INT NULL, label VARCHAR(160) NOT NULL, slug VARCHAR(160) NOT NULL, displayOrder INT NOT NULL DEFAULT 0, enabled BOOLEAN NOT NULL DEFAULT true, hidden BOOLEAN NOT NULL DEFAULT false, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`));
+  for (const table of ["shop_audiences", "shop_categories", "shop_collections", "shop_trends", "shop_events", "shop_recommended_groups"]) await db.execute(sql.raw(`ALTER TABLE ${table} ADD COLUMN styleSettings JSON NULL`)).catch(() => undefined);
   for (const [slug, name, enabled, order] of seedAudiences) await db.execute(sql`INSERT INTO shop_audiences (name, slug, enabled, hidden, displayOrder, isForYou, published) VALUES (${name}, ${slug}, ${enabled}, ${!enabled}, ${order}, ${slug === "for-you"}, true) ON DUPLICATE KEY UPDATE name = VALUES(name), displayOrder = VALUES(displayOrder), updatedAt = NOW()`);
   const [audienceRows] = await db.execute(sql`SELECT id, slug FROM shop_audiences`) as any;
   const audienceMap = Object.fromEntries((audienceRows || []).map((row: any) => [row.slug, row.id]));
@@ -924,6 +925,21 @@ async function getShopTaxonomy(includeHidden = false) {
   return { audiences: audiences || [], categories: categories || [], productAssignments: assignments || [] };
 }
 
+function sanitizeStyleSettings(value: Record<string, unknown>) {
+  const allowedKeys = new Set(["textCase", "fontStyle", "fontSize", "fontWeight", "letterSpacing", "lineHeight", "textAlign", "textColor", "headingColor", "backgroundColor", "borderColor", "buttonColor", "buttonTextColor", "badgeColor", "highlightColor", "hoverColor", "accentColor", "buttonVariant", "buttonSize", "buttonWidth", "buttonRadius", "badgeText", "badgeTextColor", "badgeBackgroundColor", "badgeBorderColor", "badgePosition", "mobileVisible", "desktopVisible"]);
+  const clean: Record<string, string | boolean> = {};
+  for (const [key, raw] of Object.entries(value || {})) {
+    if (!allowedKeys.has(key)) continue;
+    if (typeof raw === "boolean") { clean[key] = raw; continue; }
+    const text = String(raw ?? "").trim().slice(0, 80);
+    if (!text) continue;
+    if (/color/i.test(key) && !/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(text)) continue;
+    if (key === "fontSize") { clean[key] = String(Math.max(10, Math.min(42, Number.parseInt(text, 10) || 16))); continue; }
+    clean[key] = text.replace(/[{};<>]/g, "");
+  }
+  return clean;
+}
+
 export function registerRestCompatRoutes(app: Express) {
   app.get("/api/shop/taxonomy", async (_req, res) => {
     try { res.json(await getShopTaxonomy(false)); } catch (e: any) { res.status(500).json({ error: e.message }); }
@@ -933,18 +949,18 @@ export function registerRestCompatRoutes(app: Express) {
     try { res.json(await getShopTaxonomy(true)); } catch (e: any) { res.status(500).json({ error: e.message }); }
   });
 
-  const orgEntitySchema = z.object({ name: z.string().min(1).max(160), slug: z.string().min(1).max(160).optional(), description: z.string().optional().default(""), imageUrl: z.string().optional().default(""), icon: z.string().optional().default(""), displayOrder: z.number().optional().default(0), enabled: z.boolean().optional().default(true), hidden: z.boolean().optional().default(false), featured: z.boolean().optional().default(false), published: z.boolean().optional().default(true) });
+  const orgEntitySchema = z.object({ name: z.string().min(1).max(160), slug: z.string().min(1).max(160).optional(), description: z.string().optional().default(""), imageUrl: z.string().optional().default(""), icon: z.string().optional().default(""), displayOrder: z.number().optional().default(0), enabled: z.boolean().optional().default(true), hidden: z.boolean().optional().default(false), featured: z.boolean().optional().default(false), published: z.boolean().optional().default(true), styleSettings: z.record(z.string(), z.unknown()).optional().default({}) });
 
   app.post("/api/admin/shop/audiences", requireAdminRest, async (req, res) => {
-    try { await ensureShopOrgTables(); const data = orgEntitySchema.extend({ isForYou: z.boolean().optional().default(false) }).parse(req.body); const db = await requireDb(); await db.execute(sql`INSERT INTO shop_audiences (name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, isForYou) VALUES (${data.name}, ${data.slug || orgSlug(data.name)}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${data.isForYou})`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+    try { await ensureShopOrgTables(); const data = orgEntitySchema.extend({ isForYou: z.boolean().optional().default(false) }).parse(req.body); const db = await requireDb(); await db.execute(sql`INSERT INTO shop_audiences (name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, isForYou, styleSettings) VALUES (${data.name}, ${data.slug || orgSlug(data.name)}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${data.isForYou}, ${JSON.stringify(sanitizeStyleSettings(data.styleSettings))})`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
   app.put("/api/admin/shop/audiences/:id", requireAdminRest, async (req, res) => {
-    try { await ensureShopOrgTables(); const data = orgEntitySchema.partial().extend({ isForYou: z.boolean().optional() }).parse(req.body); const db = await requireDb(); await db.execute(sql`UPDATE shop_audiences SET name = COALESCE(${data.name ?? null}, name), slug = COALESCE(${data.slug ?? null}, slug), description = COALESCE(${data.description ?? null}, description), imageUrl = COALESCE(${data.imageUrl ?? null}, imageUrl), icon = COALESCE(${data.icon ?? null}, icon), displayOrder = COALESCE(${data.displayOrder ?? null}, displayOrder), enabled = COALESCE(${data.enabled ?? null}, enabled), hidden = COALESCE(${data.hidden ?? null}, hidden), featured = COALESCE(${data.featured ?? null}, featured), published = COALESCE(${data.published ?? null}, published), isForYou = COALESCE(${data.isForYou ?? null}, isForYou), updatedAt = NOW() WHERE id = ${Number(req.params.id)}`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+    try { await ensureShopOrgTables(); const data = orgEntitySchema.partial().extend({ isForYou: z.boolean().optional() }).parse(req.body); const db = await requireDb(); await db.execute(sql`UPDATE shop_audiences SET name = COALESCE(${data.name ?? null}, name), slug = COALESCE(${data.slug ?? null}, slug), description = COALESCE(${data.description ?? null}, description), imageUrl = COALESCE(${data.imageUrl ?? null}, imageUrl), icon = COALESCE(${data.icon ?? null}, icon), displayOrder = COALESCE(${data.displayOrder ?? null}, displayOrder), enabled = COALESCE(${data.enabled ?? null}, enabled), hidden = COALESCE(${data.hidden ?? null}, hidden), featured = COALESCE(${data.featured ?? null}, featured), published = COALESCE(${data.published ?? null}, published), isForYou = COALESCE(${data.isForYou ?? null}, isForYou), styleSettings = COALESCE(${data.styleSettings ? JSON.stringify(sanitizeStyleSettings(data.styleSettings)) : null}, styleSettings), updatedAt = NOW() WHERE id = ${Number(req.params.id)}`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
   app.post("/api/admin/shop/categories", requireAdminRest, async (req, res) => {
-    try { await ensureShopOrgTables(); const data = orgEntitySchema.extend({ audienceId: z.number(), parentId: z.number().nullable().optional() }).parse(req.body); const db = await requireDb(); await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published) VALUES (${data.audienceId}, ${data.parentId || null}, ${data.name}, ${data.slug || orgSlug(data.name)}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published})`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
+    try { await ensureShopOrgTables(); const data = orgEntitySchema.extend({ audienceId: z.number(), parentId: z.number().nullable().optional() }).parse(req.body); const db = await requireDb(); await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, styleSettings) VALUES (${data.audienceId}, ${data.parentId || null}, ${data.name}, ${data.slug || orgSlug(data.name)}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${JSON.stringify(sanitizeStyleSettings(data.styleSettings))})`); res.json({ success: true }); } catch (e: any) { res.status(400).json({ error: e.message }); }
   });
 
   app.put("/api/admin/shop/categories/:id", requireAdminRest, async (req, res) => {

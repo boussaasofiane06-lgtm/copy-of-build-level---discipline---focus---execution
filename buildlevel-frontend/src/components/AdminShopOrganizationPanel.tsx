@@ -2,6 +2,29 @@ import { useEffect, useState } from "react";
 import { Product, ShopAudience, ShopCategory, ShopTaxonomy, adminApi } from "../lib/api";
 
 const panelStyle: React.CSSProperties = { background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 10, padding: 20 };
+const defaultStyle = {
+  textCase: "keep",
+  fontStyle: "regular",
+  fontSize: "16",
+  fontWeight: "600",
+  letterSpacing: "0.08",
+  lineHeight: "1.3",
+  textAlign: "left",
+  textColor: "#f0ede8",
+  headingColor: "#ffffff",
+  backgroundColor: "#111111",
+  borderColor: "#2a2a2a",
+  buttonColor: "#c0392b",
+  buttonTextColor: "#ffffff",
+  badgeBackgroundColor: "#c0392b",
+  badgeTextColor: "#ffffff",
+  accentColor: "#ff6600",
+  buttonVariant: "filled",
+  buttonSize: "medium",
+  buttonWidth: "auto",
+  buttonRadius: "4",
+  badgeText: "Featured",
+};
 
 function slugify(value: string) {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -14,6 +37,8 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
   const [quickName, setQuickName] = useState("");
   const [quickType, setQuickType] = useState<"trends" | "events" | "recommended-groups" | "collections">("trends");
   const [classification, setClassification] = useState({ productId: 0, audienceId: 0, categoryId: 0, subcategoryId: 0 });
+  const [styleTarget, setStyleTarget] = useState({ type: "audience" as "audience" | "category", id: 0 });
+  const [styleForm, setStyleForm] = useState<Record<string, string | boolean>>(defaultStyle);
 
   const load = async () => {
     try {
@@ -74,6 +99,40 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
     load();
   };
 
+  const parseStyle = (value: unknown) => {
+    if (!value) return {};
+    if (typeof value === "string") {
+      try { return JSON.parse(value); } catch { return {}; }
+    }
+    return value as Record<string, string | boolean>;
+  };
+
+  const selectStyleTarget = (type: "audience" | "category", id: number) => {
+    setStyleTarget({ type, id });
+    const source = type === "audience" ? taxonomy.audiences.find(item => item.id === id) : taxonomy.categories.find(item => item.id === id);
+    setStyleForm({ ...defaultStyle, ...parseStyle(source?.styleSettings) });
+  };
+
+  const textWithCase = (text: string) => {
+    if (styleForm.textCase === "uppercase") return text.toUpperCase();
+    if (styleForm.textCase === "lowercase") return text.toLowerCase();
+    if (styleForm.textCase === "title") return text.toLowerCase().replace(/\b\w/g, letter => letter.toUpperCase());
+    if (styleForm.textCase === "sentence") return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+    return text;
+  };
+
+  const contrastWarning = String(styleForm.textColor).toLowerCase() === String(styleForm.backgroundColor).toLowerCase();
+
+  const saveStyle = async () => {
+    if (!styleTarget.id) { showToast("Select an audience or category first", "error"); return; }
+    if (styleTarget.type === "audience") await adminApi.updateShopAudience(styleTarget.id, { styleSettings: styleForm } as any);
+    else await adminApi.updateShopCategory(styleTarget.id, { styleSettings: styleForm } as any);
+    showToast("Style settings saved");
+    load();
+  };
+
+  const resetStyle = () => setStyleForm(defaultStyle);
+
   const selectedAudienceCategories = taxonomy.categories.filter(c => Number(c.audienceId) === Number(categoryForm.audienceId) && !c.parentId);
   const assignmentCategories = taxonomy.categories.filter(c => Number(c.audienceId) === Number(classification.audienceId));
   const assignmentParents = assignmentCategories.filter(c => !c.parentId);
@@ -99,6 +158,7 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
                 <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { hidden: !Boolean(audience.hidden) })}>{audience.hidden ? "Show" : "Hide"}</button>
                 <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { enabled: !Boolean(audience.enabled) })}>{audience.enabled ? "Disable" : "Enable"}</button>
                 <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { featured: !Boolean(audience.featured) })}>{audience.featured ? "Unfeature" : "Feature"}</button>
+                <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("audience", audience.id)}>Style</button>
               </div>
             </div>
           ))}
@@ -121,9 +181,42 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
               <div style={{ display: "flex", gap: 8 }}>
                 <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(category, { hidden: !Boolean(category.hidden) })}>{category.hidden ? "Show" : "Hide"}</button>
                 <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(category, { enabled: !Boolean(category.enabled) })}>{category.enabled ? "Disable" : "Enable"}</button>
+                <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("category", category.id)}>Style</button>
               </div>
             </div>
           ))}
+        </div>
+      </div>
+
+      <div style={panelStyle}>
+        <h2 style={{ fontSize: "1.1rem", marginBottom: 8 }}>Text, Color, Button & Badge Style Customization</h2>
+        <p style={{ color: "var(--text2)", marginBottom: 14 }}>Select Style on any audience or category above, preview changes, then publish. Unsafe CSS and scripts are not accepted.</p>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10 }}>
+          <label><span>Text case</span><select className="input" value={String(styleForm.textCase)} onChange={e => setStyleForm(f => ({ ...f, textCase: e.target.value }))}><option value="uppercase">UPPERCASE</option><option value="lowercase">lowercase</option><option value="title">Title Case</option><option value="sentence">Sentence case</option><option value="keep">Keep as entered</option></select></label>
+          <label><span>Font style</span><select className="input" value={String(styleForm.fontStyle)} onChange={e => setStyleForm(f => ({ ...f, fontStyle: e.target.value }))}><option value="regular">Regular</option><option value="bold">Bold</option><option value="semibold">Semi-bold</option><option value="light">Light</option><option value="italic">Italic</option><option value="underline">Underline</option><option value="strike">Strikethrough</option></select></label>
+          <label><span>Font size</span><input className="input" type="number" min={10} max={42} value={String(styleForm.fontSize)} onChange={e => setStyleForm(f => ({ ...f, fontSize: e.target.value }))} /></label>
+          <label><span>Font weight</span><input className="input" type="number" min={300} max={900} value={String(styleForm.fontWeight)} onChange={e => setStyleForm(f => ({ ...f, fontWeight: e.target.value }))} /></label>
+          <label><span>Letter spacing</span><input className="input" value={String(styleForm.letterSpacing)} onChange={e => setStyleForm(f => ({ ...f, letterSpacing: e.target.value }))} /></label>
+          <label><span>Line height</span><input className="input" value={String(styleForm.lineHeight)} onChange={e => setStyleForm(f => ({ ...f, lineHeight: e.target.value }))} /></label>
+          <label><span>Text align</span><select className="input" value={String(styleForm.textAlign)} onChange={e => setStyleForm(f => ({ ...f, textAlign: e.target.value }))}><option value="left">Left</option><option value="center">Center</option><option value="right">Right</option></select></label>
+          {["textColor", "headingColor", "backgroundColor", "borderColor", "buttonColor", "buttonTextColor", "badgeBackgroundColor", "badgeTextColor", "accentColor"].map(key => (
+            <label key={key}><span>{key}</span><input className="input" type="color" value={String(styleForm[key] || "#ffffff")} onChange={e => setStyleForm(f => ({ ...f, [key]: e.target.value }))} /></label>
+          ))}
+          <label><span>Button variant</span><select className="input" value={String(styleForm.buttonVariant)} onChange={e => setStyleForm(f => ({ ...f, buttonVariant: e.target.value }))}><option value="filled">Filled</option><option value="outlined">Outlined</option><option value="text">Text-only</option></select></label>
+          <label><span>Button size</span><select className="input" value={String(styleForm.buttonSize)} onChange={e => setStyleForm(f => ({ ...f, buttonSize: e.target.value }))}><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
+          <label><span>Button width</span><select className="input" value={String(styleForm.buttonWidth)} onChange={e => setStyleForm(f => ({ ...f, buttonWidth: e.target.value }))}><option value="auto">Automatic</option><option value="full">Full width</option></select></label>
+          <label><span>Badge text</span><input className="input" value={String(styleForm.badgeText)} onChange={e => setStyleForm(f => ({ ...f, badgeText: e.target.value }))} /></label>
+        </div>
+        {contrastWarning && <p style={{ color: "var(--red)", marginTop: 12 }}>Contrast warning: text and background colors are too similar.</p>}
+        <div style={{ marginTop: 16, padding: 18, border: `1px solid ${styleForm.borderColor}`, background: String(styleForm.backgroundColor), color: String(styleForm.textColor), textAlign: styleForm.textAlign as any, borderRadius: 10 }}>
+          <span style={{ display: "inline-block", padding: "4px 8px", marginBottom: 10, color: String(styleForm.badgeTextColor), background: String(styleForm.badgeBackgroundColor), borderRadius: 4 }}>{textWithCase(String(styleForm.badgeText || "Featured"))}</span>
+          <h3 style={{ color: String(styleForm.headingColor), fontSize: `${styleForm.fontSize}px`, fontWeight: Number(styleForm.fontWeight), letterSpacing: `${styleForm.letterSpacing}em`, lineHeight: String(styleForm.lineHeight), fontStyle: styleForm.fontStyle === "italic" ? "italic" : "normal", textDecoration: styleForm.fontStyle === "underline" ? "underline" : styleForm.fontStyle === "strike" ? "line-through" : "none" }}>{textWithCase("Preview Heading")}</h3>
+          <p>This preview checks desktop and mobile-safe colors, text case, spacing, badges, and button style.</p>
+          <button className="btn" style={{ marginTop: 10, width: styleForm.buttonWidth === "full" ? "100%" : "auto", background: styleForm.buttonVariant === "outlined" || styleForm.buttonVariant === "text" ? "transparent" : String(styleForm.buttonColor), border: styleForm.buttonVariant === "text" ? "0" : `1px solid ${styleForm.buttonColor}`, color: String(styleForm.buttonTextColor), borderRadius: `${styleForm.buttonRadius}px` }}>{textWithCase("Shop Now")}</button>
+        </div>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
+          <button className="btn btn-primary btn-sm" onClick={saveStyle}>Save Style</button>
+          <button className="btn btn-outline btn-sm" onClick={resetStyle}>Use Build Level Default Style</button>
         </div>
       </div>
 

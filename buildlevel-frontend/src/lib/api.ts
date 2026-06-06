@@ -362,6 +362,7 @@ export interface ShopAudience {
   featured: boolean | number;
   published: boolean | number;
   isForYou?: boolean | number;
+  styleSettings?: Record<string, string | boolean> | string | null;
 }
 
 export interface ShopCategory {
@@ -376,6 +377,7 @@ export interface ShopCategory {
   hidden: boolean | number;
   featured: boolean | number;
   published: boolean | number;
+  styleSettings?: Record<string, string | boolean> | string | null;
 }
 
 export interface ProductShopAssignment {

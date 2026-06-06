@@ -244,6 +244,34 @@ export default function Shop() {
     taxonomy?.audiences.find(item => item.slug === slug)?.name || (slug ? getAudienceLabel(slug as ApparelAudience) : "Legacy");
   const getDynamicCategoryLabel = (slug?: string | null) =>
     taxonomy?.categories.find(item => item.slug === slug)?.name || getCategoryLabel(slug);
+  const parseStyleSettings = (value: unknown) => {
+    if (!value) return {};
+    if (typeof value === "string") {
+      try { return JSON.parse(value); } catch { return {}; }
+    }
+    return value as Record<string, string>;
+  };
+  const getAudienceStyle = (slug?: string | null) => parseStyleSettings(taxonomy?.audiences.find(item => item.slug === slug)?.styleSettings);
+  const getCategoryStyle = (slug?: string | null) => parseStyleSettings(taxonomy?.categories.find(item => item.slug === slug)?.styleSettings);
+  const textCase = (text: string, style: Record<string, string>) => {
+    if (style.textCase === "uppercase") return text.toUpperCase();
+    if (style.textCase === "lowercase") return text.toLowerCase();
+    if (style.textCase === "title") return text.toLowerCase().replace(/\b\w/g, letter => letter.toUpperCase());
+    if (style.textCase === "sentence") return text.charAt(0).toUpperCase() + text.slice(1).toLowerCase();
+    return text;
+  };
+  const labelStyle = (style: Record<string, string>): React.CSSProperties => ({
+    color: style.textColor || undefined,
+    background: style.backgroundColor || undefined,
+    borderColor: style.borderColor || undefined,
+    fontSize: style.fontSize ? `${Math.min(42, Math.max(10, Number(style.fontSize) || 16))}px` : undefined,
+    fontWeight: style.fontWeight || undefined,
+    letterSpacing: style.letterSpacing ? `${style.letterSpacing}em` : undefined,
+    lineHeight: style.lineHeight || undefined,
+    textAlign: style.textAlign as any,
+    fontStyle: style.fontStyle === "italic" ? "italic" : undefined,
+    textDecoration: style.fontStyle === "underline" ? "underline" : style.fontStyle === "strike" ? "line-through" : undefined,
+  });
   const publicAudiences = taxonomy?.audiences?.length
     ? taxonomy.audiences.filter(item => Boolean(item.enabled) && !Boolean(item.hidden)).map(item => ({ value: item.slug, label: item.name, isForYou: Boolean(item.isForYou) }))
     : APPAREL_AUDIENCES.map(item => ({ ...item, isForYou: false }));
@@ -552,8 +580,8 @@ export default function Shop() {
               </button>
               {publicAudiences.filter(a => audienceHasProducts(a.value) || a.value === "for-you").map(a => (
                 <button key={a.value} onClick={() => { setAudience(a.value); setCategory("all"); }} className="btn btn-sm"
-                  style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-                  {a.label}
+                  style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)", ...labelStyle(getAudienceStyle(a.value)) }}>
+                  {textCase(a.label, getAudienceStyle(a.value))}
                 </button>
               ))}
             </div>
@@ -570,8 +598,8 @@ export default function Shop() {
             </button>
             {availableCategories.map(c => (
               <button key={c} onClick={() => setCategory(c)} className="btn btn-sm"
-                style={{ background: category === c ? "var(--red)" : "transparent", color: category === c ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-                {getDynamicCategoryLabel(c)}
+                style={{ background: category === c ? "var(--red)" : "transparent", color: category === c ? "#fff" : "var(--text2)", border: "1px solid var(--border)", ...labelStyle(getCategoryStyle(c)) }}>
+                {textCase(getDynamicCategoryLabel(c), getCategoryStyle(c))}
               </button>
             ))}
           </div>}
