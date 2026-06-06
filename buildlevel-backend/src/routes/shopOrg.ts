@@ -8,7 +8,7 @@ const router = Router();
 let ensured = false;
 
 const audiences = [
-  ["for-you", "For You", 0, 0],
+  ["for-you", "For You", 1, 0],
   ["mens", "Men", 1, 10],
   ["womens", "Women", 1, 20],
   ["kids", "Kids", 1, 30],
@@ -16,15 +16,23 @@ const audiences = [
   ["home-living", "Home & Living", 1, 50],
 ] as const;
 
-const accessoryCategories = ["Jewelry", "Books", "Phone Cases", "Bags", "Socks", "Hats", "Underwear", "Baby Accessories", "Mouse Pads", "Pet Accessories", "Kitchen Accessories", "Car Accessories", "Tech Accessories", "Travel Accessories", "Stationery Accessories", "Sports & Games", "Face Masks", "Keychains", "Stickers", "Other Accessories"];
-const homeCategories = ["Drinkware", "Can Coolers", "Mugs", "Glassware", "Bottles & Tumblers", "Candles", "Ornaments", "Seasonal Decorations", "Canvas", "Posters", "Postcards", "Journals & Notebooks", "Magnets & Stickers", "Home Décor", "Blankets", "Pillows & Covers", "Towels", "Bathroom", "Rugs & Mats", "Bedding", "Food, Health & Beauty", "Other Home & Living"];
-const legacyCategories: Array<[string, string, string]> = [
-  ["mens", "mens-t-shirts", "T-Shirts"], ["mens", "mens-hoodies", "Hoodies"], ["mens", "mens-hats", "Hats"],
-  ["womens", "womens-t-shirts", "T-Shirts"], ["womens", "womens-hoodies", "Hoodies"], ["womens", "womens-hats", "Hats"],
-  ["kids", "kids-t-shirts", "Kids T-Shirts"], ["kids", "kids-hoodies", "Kids Hoodies"], ["kids", "kids-hats", "Kids Hats"],
-];
-const trends = ["Back to School", "On Sale", "Eco-Friendly", "Assembled in the USA", "Streetwear", "Summer of Soccer 2026", "4th of July"];
-const groups = ["Top Picks", "New Arrivals", "Embroidery", "Engraving", "AOP Clothing", "Personalization Picks", "Early Access", "Printify Choice"];
+const forYouFeatured = ["New Arrivals", "Bestsellers", "New Mockups", "My Favorites"];
+const forYouTrends = ["Back to School", "Jewelry", "On Sale", "Eco-Friendly", "Assembled in the USA", "TikTok", "Streetwear", "Summer of Soccer 2026", "4th of July"];
+const forYouRecommended = ["Top Picks", "New Arrivals", "Embroidery", "Engraving", "AOP Clothing", "Personalization Picks", "Early Access", "Printify Choice"];
+const audienceFeatured: Record<string, string[]> = {
+  mens: ["New Arrivals", "Bestsellers"],
+  womens: ["New Arrivals", "Bestsellers"],
+  kids: ["Bestsellers"],
+  accessories: ["New Arrivals", "Bestsellers"],
+  "home-living": ["New Arrivals", "Bestsellers"],
+};
+const audienceCategories: Record<string, string[]> = {
+  mens: ["Sweatshirts", "Hoodies", "T-Shirts", "Long Sleeves", "Tank Tops", "Sportswear", "Bottoms", "Swimwear", "Shoes", "Outerwear"],
+  womens: ["Sweatshirts", "T-Shirts", "Hoodies", "Long Sleeves", "Tank Tops", "Skirts & Dresses", "Sportswear", "Bottoms", "Swimwear", "Shoes", "Outerwear"],
+  kids: ["T-Shirts", "Long Sleeves", "Sweatshirts", "Baby Clothing", "Sportswear", "Bottoms", "Other"],
+  accessories: ["Jewelry", "Books", "Phone Cases", "Bags", "Socks", "Hats", "Underwear", "Baby Accessories", "Mouse Pads", "Pets", "Kitchen Accessories", "Car Accessories", "Tech Accessories", "Travel Accessories", "Stationery Accessories", "Sports & Games", "Face Masks", "Other"],
+  "home-living": ["Mugs", "Candles", "Ornaments", "Seasonal Decorations", "Glassware", "Bottles & Tumblers", "Canvas", "Posters", "Postcards", "Journals & Notebooks", "Magnets & Stickers", "Home Décor", "Blankets", "Pillows & Covers", "Towels", "Bathroom", "Rugs & Mats", "Bedding", "Food, Health & Beauty"],
+};
 
 function slugify(value: string) {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
@@ -35,6 +43,7 @@ async function ensureShopOrgTables() {
   const db = await getDb();
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS shop_audiences (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) NOT NULL, slug VARCHAR(160) NOT NULL UNIQUE, description TEXT NULL, imageUrl TEXT NULL, icon VARCHAR(64) NULL, displayOrder INT NOT NULL DEFAULT 0, enabled BOOLEAN NOT NULL DEFAULT true, hidden BOOLEAN NOT NULL DEFAULT false, featured BOOLEAN NOT NULL DEFAULT false, draft BOOLEAN NOT NULL DEFAULT false, published BOOLEAN NOT NULL DEFAULT true, isForYou BOOLEAN NOT NULL DEFAULT false, badgeText VARCHAR(80) NULL, badgeStyle VARCHAR(80) NULL, highlightStartAt TIMESTAMP NULL, highlightEndAt TIMESTAMP NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`));
   await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS shop_categories (id INT AUTO_INCREMENT PRIMARY KEY, audienceId INT NOT NULL, parentId INT NULL, name VARCHAR(160) NOT NULL, slug VARCHAR(160) NOT NULL, description TEXT NULL, imageUrl TEXT NULL, icon VARCHAR(64) NULL, displayOrder INT NOT NULL DEFAULT 0, enabled BOOLEAN NOT NULL DEFAULT true, hidden BOOLEAN NOT NULL DEFAULT false, featured BOOLEAN NOT NULL DEFAULT false, draft BOOLEAN NOT NULL DEFAULT false, published BOOLEAN NOT NULL DEFAULT true, badgeText VARCHAR(80) NULL, badgeStyle VARCHAR(80) NULL, highlightStartAt TIMESTAMP NULL, highlightEndAt TIMESTAMP NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_shop_category_scope (audienceId, parentId, slug), INDEX idx_shop_categories_audience (audienceId))`));
+  await db.execute(sql.raw(`ALTER TABLE shop_categories ADD COLUMN categoryType ENUM('category','featured_box','trend','recommended','event') NOT NULL DEFAULT 'category'`)).catch(() => undefined);
   for (const table of ["shop_collections", "shop_trends", "shop_events", "shop_recommended_groups"]) {
     await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS ${table} (id INT AUTO_INCREMENT PRIMARY KEY, name VARCHAR(160) NOT NULL, slug VARCHAR(160) NOT NULL UNIQUE, description TEXT NULL, imageUrl TEXT NULL, icon VARCHAR(64) NULL, displayOrder INT NOT NULL DEFAULT 0, enabled BOOLEAN NOT NULL DEFAULT true, hidden BOOLEAN NOT NULL DEFAULT false, featured BOOLEAN NOT NULL DEFAULT false, draft BOOLEAN NOT NULL DEFAULT false, published BOOLEAN NOT NULL DEFAULT true, badgeText VARCHAR(80) NULL, badgeStyle VARCHAR(80) NULL, startAt TIMESTAMP NULL, endAt TIMESTAMP NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`));
   }
@@ -49,30 +58,27 @@ async function ensureShopOrgTables() {
   }
 
   for (const [slug, name, enabled, order] of audiences) {
-    await db.execute(sql`INSERT INTO shop_audiences (name, slug, enabled, hidden, displayOrder, isForYou, published) VALUES (${name}, ${slug}, ${enabled === 1}, ${enabled === 0}, ${order}, ${slug === "for-you"}, true) ON DUPLICATE KEY UPDATE name = VALUES(name), displayOrder = VALUES(displayOrder), updatedAt = NOW()`);
+    await db.execute(sql`INSERT INTO shop_audiences (name, slug, enabled, hidden, displayOrder, isForYou, published) VALUES (${name}, ${slug}, ${enabled}, ${!enabled}, ${order}, ${slug === "for-you"}, true) ON DUPLICATE KEY UPDATE name = VALUES(name), enabled = VALUES(enabled), hidden = VALUES(hidden), displayOrder = VALUES(displayOrder), updatedAt = NOW()`);
   }
   const [audienceRows] = await db.execute(sql`SELECT id, slug FROM shop_audiences`) as any;
   const audienceMap = Object.fromEntries((audienceRows || []).map((row: any) => [row.slug, row.id]));
-  const seedCategory = async (audienceSlug: string, name: string, parentSlug = "") => {
+  const seedCategory = async (audienceSlug: string, name: string, parentSlug = "", categoryType = "category", order = 0) => {
     const parentId = parentSlug ? (await db.execute(sql`SELECT id FROM shop_categories WHERE slug = ${parentSlug} AND audienceId = ${audienceMap[audienceSlug]} LIMIT 1`) as any)[0]?.[0]?.id || null : null;
-    await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, displayOrder, enabled, published) VALUES (${audienceMap[audienceSlug]}, ${parentId}, ${name}, ${slugify(name)}, 0, true, true) ON DUPLICATE KEY UPDATE name = VALUES(name), updatedAt = NOW()`);
+    await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, displayOrder, enabled, hidden, published, categoryType) VALUES (${audienceMap[audienceSlug]}, ${parentId}, ${name}, ${slugify(name)}, ${order}, true, false, true, ${categoryType}) ON DUPLICATE KEY UPDATE name = VALUES(name), categoryType = VALUES(categoryType), hidden = false, enabled = true, updatedAt = NOW()`);
   };
-  for (const [audienceSlug, slug, label] of legacyCategories) await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, displayOrder, enabled, published) VALUES (${audienceMap[audienceSlug]}, NULL, ${label}, ${slug}, 0, true, true) ON DUPLICATE KEY UPDATE name = VALUES(name), updatedAt = NOW()`);
-  for (const name of accessoryCategories) await seedCategory("accessories", name);
-  for (const name of homeCategories) await seedCategory("home-living", name);
-  await seedCategory("home-living", "Can Coolers", "drinkware");
-  for (const name of trends) await db.execute(sql`INSERT INTO shop_trends (name, slug, enabled, published) VALUES (${name}, ${slugify(name)}, true, true) ON DUPLICATE KEY UPDATE name = VALUES(name), updatedAt = NOW()`);
-  for (const name of groups) await db.execute(sql`INSERT INTO shop_recommended_groups (name, slug, enabled, published) VALUES (${name}, ${slugify(name)}, true, true) ON DUPLICATE KEY UPDATE name = VALUES(name), updatedAt = NOW()`);
+  for (let index = 0; index < forYouFeatured.length; index += 1) await seedCategory("for-you", forYouFeatured[index], "", "featured_box", index);
+  for (let index = 0; index < forYouTrends.length; index += 1) await seedCategory("for-you", forYouTrends[index], "", "trend", index + 20);
+  for (let index = 0; index < forYouRecommended.length; index += 1) await seedCategory("for-you", forYouRecommended[index], "", "recommended", index + 50);
+  for (const [audienceSlug, items] of Object.entries(audienceFeatured)) for (let index = 0; index < items.length; index += 1) await seedCategory(audienceSlug, items[index], "", "featured_box", index);
+  for (const [audienceSlug, items] of Object.entries(audienceCategories)) for (let index = 0; index < items.length; index += 1) await seedCategory(audienceSlug, items[index], "", "category", index + 20);
 
   const [coolers] = await db.execute(sql`SELECT id FROM products WHERE name LIKE '%Can Cooler%' OR name LIKE '%Koozie%' LIMIT 5`) as any;
   const [homeRows] = await db.execute(sql`SELECT id FROM shop_audiences WHERE slug = 'home-living' LIMIT 1`) as any;
-  const [drinkwareRows] = await db.execute(sql`SELECT id FROM shop_categories WHERE slug = 'drinkware' AND audienceId = ${homeRows?.[0]?.id || 0} LIMIT 1`) as any;
-  const [canRows] = await db.execute(sql`SELECT id FROM shop_categories WHERE slug = 'can-coolers' AND audienceId = ${homeRows?.[0]?.id || 0} LIMIT 1`) as any;
+  const [canRows] = await db.execute(sql`SELECT id FROM shop_categories WHERE slug = 'bottles-and-tumblers' AND audienceId = ${homeRows?.[0]?.id || 0} LIMIT 1`) as any;
   for (const product of coolers || []) {
     await db.execute(sql`INSERT INTO product_audience_assignments (productId, audienceId, locked) VALUES (${product.id}, ${homeRows?.[0]?.id || 0}, true) ON DUPLICATE KEY UPDATE audienceId = VALUES(audienceId), locked = true, updatedAt = NOW()`);
-    if (drinkwareRows?.[0]) await db.execute(sql`INSERT INTO product_category_assignments (productId, categoryId, assignmentType) VALUES (${product.id}, ${drinkwareRows[0].id}, 'primary') ON DUPLICATE KEY UPDATE updatedAt = NOW()`);
-    if (canRows?.[0]) await db.execute(sql`INSERT INTO product_category_assignments (productId, categoryId, assignmentType) VALUES (${product.id}, ${canRows[0].id}, 'subcategory') ON DUPLICATE KEY UPDATE updatedAt = NOW()`);
-    await db.execute(sql`UPDATE products SET category = 'can-coolers', updatedAt = NOW() WHERE id = ${product.id}`);
+    if (canRows?.[0]) await db.execute(sql`INSERT INTO product_category_assignments (productId, categoryId, assignmentType) VALUES (${product.id}, ${canRows[0].id}, 'primary') ON DUPLICATE KEY UPDATE updatedAt = NOW()`);
+    await db.execute(sql`UPDATE products SET category = 'bottles-and-tumblers', updatedAt = NOW() WHERE id = ${product.id}`);
   }
   await db.execute(sql.raw(`DELETE a1 FROM shop_audiences a1 JOIN shop_audiences a2 ON a1.slug = a2.slug AND a1.id > a2.id`)).catch(() => undefined);
   await db.execute(sql.raw(`DELETE c1 FROM shop_categories c1 JOIN shop_categories c2 ON c1.audienceId = c2.audienceId AND COALESCE(c1.parentId, 0) = COALESCE(c2.parentId, 0) AND c1.slug = c2.slug AND c1.id > c2.id`)).catch(() => undefined);
@@ -123,6 +129,7 @@ const entitySchema = z.object({
   featured: z.boolean().optional().default(false),
   published: z.boolean().optional().default(true),
   styleSettings: z.record(z.string(), z.unknown()).optional().default({}),
+  categoryType: z.enum(["category", "featured_box", "trend", "recommended", "event"]).optional().default("category"),
 });
 
 function sanitizeStyleSettings(value: Record<string, unknown>) {
@@ -172,7 +179,7 @@ router.post("/admin/shop/categories", requireAdmin, async (req, res) => {
     const nextSlug = data.slug || slugify(data.name);
     const [existing] = await db.execute(sql`SELECT id FROM shop_categories WHERE audienceId = ${data.audienceId} AND COALESCE(parentId, 0) = ${data.parentId || 0} AND (slug = ${nextSlug} OR LOWER(name) = ${data.name.trim().toLowerCase()}) LIMIT 1`) as any;
     if (existing?.[0]) { res.status(409).json({ error: "A category with this name or slug already exists." }); return; }
-    await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, styleSettings) VALUES (${data.audienceId}, ${data.parentId || null}, ${data.name}, ${nextSlug}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${JSON.stringify(sanitizeStyleSettings(data.styleSettings))})`);
+    await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, styleSettings, categoryType) VALUES (${data.audienceId}, ${data.parentId || null}, ${data.name}, ${nextSlug}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${JSON.stringify(sanitizeStyleSettings(data.styleSettings))}, ${data.categoryType})`);
     res.json({ success: true });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

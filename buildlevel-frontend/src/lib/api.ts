@@ -412,6 +412,7 @@ export interface ShopCategory {
   name: string;
   slug: string;
   audienceSlug?: string;
+  categoryType?: "category" | "featured_box" | "trend" | "recommended" | "event";
   displayOrder: number;
   enabled: boolean | number;
   hidden: boolean | number;
