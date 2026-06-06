@@ -1,10 +1,11 @@
 import type { Express, Request, Response, NextFunction } from "express";
+import crypto from "crypto";
 import nodemailer from "nodemailer";
 import Stripe from "stripe";
 import { z } from "zod";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { getDb } from "../db";
-import { products, siteSettings } from "../../drizzle/schema";
+import { digitalProducts, products, siteSettings } from "../../drizzle/schema";
 import { verifyAdminToken } from "./adminAuth";
 
 const SOCIAL_PLATFORMS = ["instagram", "facebook", "tiktok", "youtube", "x", "pinterest"] as const;
@@ -535,6 +536,284 @@ function getTransporter() {
   });
 }
 
+const CART_TTL_DAYS = 30;
+const RECOVERY_TOKEN_HOURS = 72;
+const SUBSCRIPTION_INTERESTS = ["new_apparel", "digital_products", "audiobooks", "featured_products", "blog_motivation", "build_level_news", "all_updates"] as const;
+let retentionTablesEnsured = false;
+const subscriptionRateLimit = new Map<string, number[]>();
+
+function cleanText(value: unknown, max = 500) {
+  return String(value ?? "").trim().replace(/\s+/g, " ").slice(0, max);
+}
+
+function cleanEmail(value: unknown) {
+  return String(value ?? "").trim().toLowerCase().slice(0, 320);
+}
+
+function randomToken(bytes = 32) {
+  return crypto.randomBytes(bytes).toString("hex");
+}
+
+function hashToken(token: string) {
+  return crypto.createHash("sha256").update(token).digest("hex");
+}
+
+function addDays(days: number) {
+  return new Date(Date.now() + days * 24 * 60 * 60 * 1000);
+}
+
+function addHours(hours: number) {
+  return new Date(Date.now() + hours * 60 * 60 * 1000);
+}
+
+function toMoney(value: unknown) {
+  const parsed = Number.parseFloat(String(value ?? "0"));
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function getClientIp(req: Request) {
+  return String(req.headers["cf-connecting-ip"] || req.headers["x-forwarded-for"] || req.socket.remoteAddress || "").split(",")[0].trim();
+}
+
+function getFrontendOrigin(req: Request) {
+  const origin = String(req.headers.origin || process.env.FRONTEND_URL || process.env.PUBLIC_FRONTEND_URL || "https://thebuildlevel.com");
+  try {
+    const url = new URL(origin);
+    return `${url.protocol}//${url.host}`;
+  } catch {
+    return "https://thebuildlevel.com";
+  }
+}
+
+async function requireDb() {
+  const db = await getDb();
+  if (!db) throw new Error("Database is not configured");
+  return db;
+}
+
+async function ensureRetentionTables() {
+  if (retentionTablesEnsured) return;
+  const db = await requireDb();
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS carts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      sessionId VARCHAR(128) NOT NULL UNIQUE,
+      customerEmail VARCHAR(320) NULL,
+      customerFirstName VARCHAR(160) NULL,
+      status ENUM('active','abandoned','converted','recovered','resolved','expired','disabled') NOT NULL DEFAULT 'active',
+      subtotal DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+      itemCount INT NOT NULL DEFAULT 0,
+      recoveryTokenHash VARCHAR(128) NULL,
+      recoveryExpiresAt TIMESTAMP NULL,
+      reminderCount INT NOT NULL DEFAULT 0,
+      remindersDisabled BOOLEAN NOT NULL DEFAULT false,
+      completedOrderId VARCHAR(128) NULL,
+      lastActivityAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expiresAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_carts_email (customerEmail),
+      INDEX idx_carts_status (status),
+      INDEX idx_carts_last_activity (lastActivityAt)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS cart_items (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cartId INT NOT NULL,
+      productType ENUM('apparel','digital') NOT NULL,
+      productId INT NOT NULL,
+      productName VARCHAR(255) NOT NULL,
+      imageUrl TEXT NULL,
+      selectedSize VARCHAR(255) NULL,
+      selectedColor VARCHAR(128) NULL,
+      selectedVariant VARCHAR(255) NULL,
+      printifyProductId VARCHAR(128) NULL,
+      printifyVariantId VARCHAR(128) NULL,
+      quantity INT NOT NULL DEFAULT 1,
+      unitPrice DECIMAL(10,2) NOT NULL,
+      itemTotal DECIMAL(10,2) NOT NULL,
+      validationStatus ENUM('valid','requires_review','unavailable') NOT NULL DEFAULT 'valid',
+      validationMessage TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_cart_item_variant (cartId, productType, productId, selectedVariant),
+      INDEX idx_cart_items_cart (cartId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS abandoned_carts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cartId INT NOT NULL UNIQUE,
+      customerEmail VARCHAR(320) NOT NULL,
+      status ENUM('eligible','paused','recovered','resolved','expired','unsubscribed','blocked') NOT NULL DEFAULT 'eligible',
+      reminderStage VARCHAR(32) NOT NULL DEFAULT 'none',
+      reminderCount INT NOT NULL DEFAULT 0,
+      recoveredAt TIMESTAMP NULL,
+      completedOrderId VARCHAR(128) NULL,
+      couponEnabled BOOLEAN NOT NULL DEFAULT false,
+      lastReminderAt TIMESTAMP NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_abandoned_email (customerEmail),
+      INDEX idx_abandoned_status (status)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS cart_recovery_tokens (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cartId INT NOT NULL,
+      tokenHash VARCHAR(128) NOT NULL UNIQUE,
+      status ENUM('active','used','expired','revoked') NOT NULL DEFAULT 'active',
+      expiresAt TIMESTAMP NOT NULL,
+      usedAt TIMESTAMP NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      INDEX idx_recovery_cart (cartId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS cart_reminders (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      cartId INT NOT NULL,
+      stage VARCHAR(32) NOT NULL,
+      status ENUM('scheduled','sent','failed','skipped','cancelled') NOT NULL DEFAULT 'scheduled',
+      subject VARCHAR(255) NULL,
+      sentAt TIMESTAMP NULL,
+      errorMessage TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_cart_reminder_stage (cartId, stage)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS subscribers (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      email VARCHAR(320) NOT NULL UNIQUE,
+      firstName VARCHAR(160) NULL,
+      status ENUM('active','unsubscribed','blocked') NOT NULL DEFAULT 'active',
+      subscriptionSource VARCHAR(128) NULL,
+      consentStatus ENUM('subscribed','unsubscribed','blocked') NOT NULL DEFAULT 'subscribed',
+      consentIp VARCHAR(128) NULL,
+      consentHistory JSON NULL,
+      manageTokenHash VARCHAR(128) NULL,
+      lastCampaignAt TIMESTAMP NULL,
+      subscribedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      unsubscribedAt TIMESTAMP NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_subscribers_status (status)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS subscriber_preferences (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      subscriberId INT NOT NULL,
+      interest VARCHAR(64) NOT NULL,
+      enabled BOOLEAN NOT NULL DEFAULT true,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_subscriber_interest (subscriberId, interest)
+    )
+  `));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS email_campaigns (id INT AUTO_INCREMENT PRIMARY KEY, campaignType VARCHAR(64) NOT NULL DEFAULT 'newsletter', subject VARCHAR(255) NOT NULL, bodyHtml MEDIUMTEXT NULL, audience JSON NULL, status VARCHAR(32) NOT NULL DEFAULT 'draft', scheduledAt TIMESTAMP NULL, sentAt TIMESTAMP NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP)`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS email_campaign_recipients (id INT AUTO_INCREMENT PRIMARY KEY, campaignId INT NOT NULL, subscriberId INT NULL, email VARCHAR(320) NOT NULL, status VARCHAR(32) NOT NULL DEFAULT 'queued', sentAt TIMESTAMP NULL, errorMessage TEXT NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, UNIQUE KEY uq_campaign_recipient (campaignId, email))`));
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS email_events (id INT AUTO_INCREMENT PRIMARY KEY, eventType VARCHAR(64) NOT NULL, email VARCHAR(320) NULL, cartId INT NULL, campaignId INT NULL, subscriberId INT NULL, metadata JSON NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, INDEX idx_email_events_email (email))`));
+  retentionTablesEnsured = true;
+}
+
+const retentionCartItemSchema = z.object({
+  productType: z.enum(["apparel", "digital"]),
+  productId: z.number().int().positive(),
+  quantity: z.number().int().min(1).max(99).default(1),
+  selectedSize: z.string().optional().default(""),
+  selectedColor: z.string().optional().default(""),
+  selectedVariant: z.string().optional().default(""),
+  printifyVariantId: z.string().optional().default(""),
+});
+
+async function validateRetentionCartItem(raw: z.infer<typeof retentionCartItemSchema>) {
+  const db = await requireDb();
+  const quantity = Math.max(1, Math.min(99, raw.quantity));
+  if (raw.productType === "digital") {
+    const [product] = await db.select().from(digitalProducts).where(eq(digitalProducts.id, raw.productId)).limit(1);
+    if (!product || !product.published) throw new Error(`Digital product ${raw.productId} is not available`);
+    const unitPrice = toMoney(product.price);
+    return { productType: "digital", productId: product.id, productName: product.name, imageUrl: product.imageUrl || "", selectedSize: "", selectedColor: "", selectedVariant: raw.selectedVariant || product.productType, printifyProductId: "", printifyVariantId: "", quantity, unitPrice, itemTotal: unitPrice * quantity, validationStatus: "valid", validationMessage: "" };
+  }
+  const [product] = await db.select().from(products).where(eq(products.id, raw.productId)).limit(1);
+  if (!product || !product.published || product.hidden || product.delisted || !product.inStock) throw new Error(`Apparel product ${raw.productId} is not available`);
+  if (!product.printifyProductId) throw new Error(`${product.name} is missing Printify product mapping`);
+  const variantId = cleanText(raw.printifyVariantId || raw.selectedVariant, 128);
+  let unitPrice = toMoney(product.price);
+  let variantLabel = cleanText(raw.selectedSize || raw.selectedVariant, 255);
+  if (variantId) {
+    const [rows] = await db.execute(sql`SELECT * FROM product_variants WHERE printifyVariantId = ${variantId} LIMIT 1`) as any;
+    const variant = rows?.[0];
+    if (!variant || !variant.enabled || !variant.available) throw new Error(`${product.name} selected variant is unavailable`);
+    unitPrice = toMoney(variant.price);
+    variantLabel = variant.label || variantLabel || variantId;
+  }
+  return { productType: "apparel", productId: product.id, productName: product.name, imageUrl: product.imageUrl || "", selectedSize: cleanText(raw.selectedSize || variantLabel, 255), selectedColor: cleanText(raw.selectedColor, 128), selectedVariant: variantLabel || variantId || String(product.id), printifyProductId: product.printifyProductId || "", printifyVariantId: variantId, quantity, unitPrice, itemTotal: unitPrice * quantity, validationStatus: "valid", validationMessage: "" };
+}
+
+async function getRetentionCartBySession(sessionId: string) {
+  const db = await requireDb();
+  const [rows] = await db.execute(sql`SELECT * FROM carts WHERE sessionId = ${sessionId} LIMIT 1`) as any;
+  return rows?.[0] || null;
+}
+
+async function getRetentionCartWithItems(cartId: number) {
+  const db = await requireDb();
+  const [cartRows] = await db.execute(sql`SELECT * FROM carts WHERE id = ${cartId} LIMIT 1`) as any;
+  const [itemRows] = await db.execute(sql`SELECT * FROM cart_items WHERE cartId = ${cartId} ORDER BY productType, id`) as any;
+  return { cart: cartRows?.[0] || null, items: itemRows || [] };
+}
+
+async function createRetentionRecoveryToken(cartId: number) {
+  const db = await requireDb();
+  const token = randomToken();
+  const tokenHash = hashToken(token);
+  const expiresAt = addHours(RECOVERY_TOKEN_HOURS);
+  await db.execute(sql`INSERT INTO cart_recovery_tokens (cartId, tokenHash, expiresAt) VALUES (${cartId}, ${tokenHash}, ${expiresAt})`);
+  await db.execute(sql`UPDATE carts SET recoveryTokenHash = ${tokenHash}, recoveryExpiresAt = ${expiresAt}, updatedAt = NOW() WHERE id = ${cartId}`);
+  return token;
+}
+
+function sanitizeRetentionCart(cart: any, items: any[], recoveryToken?: string) {
+  return {
+    id: cart?.id,
+    sessionId: cart?.sessionId,
+    customerEmail: cart?.customerEmail || "",
+    customerFirstName: cart?.customerFirstName || "",
+    status: cart?.status || "active",
+    subtotal: Number(cart?.subtotal || 0),
+    itemCount: Number(cart?.itemCount || 0),
+    recoveryUrl: recoveryToken ? `/cart/recover/${recoveryToken}` : undefined,
+    lastActivityAt: cart?.lastActivityAt,
+    expiresAt: cart?.expiresAt,
+    items: items.map((item: any) => ({ productType: item.productType, productId: Number(item.productId), productName: item.productName, imageUrl: item.imageUrl, selectedSize: item.selectedSize, selectedColor: item.selectedColor, selectedVariant: item.selectedVariant, printifyVariantId: item.printifyVariantId, quantity: Number(item.quantity || 1), unitPrice: Number(item.unitPrice || 0), itemTotal: Number(item.itemTotal || 0), validationStatus: item.validationStatus, validationMessage: item.validationMessage })),
+  };
+}
+
+async function getRetentionSettings() {
+  const settings = await getSettingsMap();
+  return {
+    recoveryEnabled: settings.cart_recovery_enabled !== "false",
+    firstReminderHours: Number(settings.cart_recovery_first_hours || 1),
+    secondReminderHours: Number(settings.cart_recovery_second_hours || 24),
+    finalReminderHours: Number(settings.cart_recovery_final_hours || 72),
+    abandonedAfterMinutes: Number(settings.cart_abandoned_after_minutes || 60),
+    reminderSubject: settings.cart_recovery_subject || "You left something behind at Build Level",
+    reminderIntro: settings.cart_recovery_intro || "You left something in your Build Level cart. Your selections are still waiting when you're ready to continue.",
+  };
+}
+
+async function markInactiveRetentionCartsAbandoned() {
+  const settings = await getRetentionSettings();
+  if (!settings.recoveryEnabled) return;
+  const db = await requireDb();
+  await db.execute(sql`UPDATE carts SET status = 'abandoned', updatedAt = NOW() WHERE status = 'active' AND itemCount > 0 AND customerEmail IS NOT NULL AND remindersDisabled = false AND lastActivityAt < DATE_SUB(NOW(), INTERVAL ${settings.abandonedAfterMinutes} MINUTE)`);
+  await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) SELECT id, customerEmail, 'eligible' FROM carts WHERE status = 'abandoned' AND customerEmail IS NOT NULL ON DUPLICATE KEY UPDATE status = IF(status IN ('recovered','resolved','expired','unsubscribed','blocked'), status, 'eligible'), updatedAt = NOW()`);
+}
+
 export function registerRestCompatRoutes(app: Express) {
   app.get("/api/admin/integrations/overview", requireAdminRest, async (_req, res) => {
     try {
@@ -755,6 +1034,317 @@ export function registerRestCompatRoutes(app: Express) {
       res.json({ success: true });
     } catch (e: any) {
       res.status(400).json({ success: false, error: isEmailConfigured() ? e.message : "Email delivery is not configured" });
+    }
+  });
+
+  app.post("/api/cart/sync", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const schema = z.object({
+        sessionId: z.string().min(8).max(128),
+        customerEmail: z.string().email().optional().or(z.literal("")),
+        customerFirstName: z.string().max(160).optional().default(""),
+        items: z.array(retentionCartItemSchema).max(30),
+      });
+      const data = schema.parse(req.body);
+      const db = await requireDb();
+      const email = cleanEmail(data.customerEmail);
+      const firstName = cleanText(data.customerFirstName, 160);
+      const validated = [];
+      for (const item of data.items) validated.push(await validateRetentionCartItem(item));
+      const subtotal = validated.reduce((sum, item) => sum + item.itemTotal, 0);
+      const itemCount = validated.reduce((sum, item) => sum + item.quantity, 0);
+      const status = itemCount === 0 ? "resolved" : "active";
+      const expiresAt = addDays(CART_TTL_DAYS);
+      await db.execute(sql`INSERT INTO carts (sessionId, customerEmail, customerFirstName, status, subtotal, itemCount, lastActivityAt, expiresAt) VALUES (${data.sessionId}, ${email || null}, ${firstName || null}, ${status}, ${subtotal.toFixed(2)}, ${itemCount}, NOW(), ${expiresAt}) ON DUPLICATE KEY UPDATE customerEmail = COALESCE(VALUES(customerEmail), customerEmail), customerFirstName = COALESCE(VALUES(customerFirstName), customerFirstName), status = VALUES(status), subtotal = VALUES(subtotal), itemCount = VALUES(itemCount), lastActivityAt = NOW(), expiresAt = VALUES(expiresAt), updatedAt = NOW()`);
+      const cart = await getRetentionCartBySession(data.sessionId);
+      await db.execute(sql`DELETE FROM cart_items WHERE cartId = ${cart.id}`);
+      for (const item of validated) {
+        await db.execute(sql`INSERT INTO cart_items (cartId, productType, productId, productName, imageUrl, selectedSize, selectedColor, selectedVariant, printifyProductId, printifyVariantId, quantity, unitPrice, itemTotal, validationStatus, validationMessage) VALUES (${cart.id}, ${item.productType}, ${item.productId}, ${item.productName}, ${item.imageUrl}, ${item.selectedSize}, ${item.selectedColor}, ${item.selectedVariant}, ${item.printifyProductId}, ${item.printifyVariantId}, ${item.quantity}, ${item.unitPrice.toFixed(2)}, ${item.itemTotal.toFixed(2)}, ${item.validationStatus}, ${item.validationMessage})`);
+      }
+      const settings = await getRetentionSettings();
+      let recoveryToken = "";
+      if (email && itemCount > 0 && settings.recoveryEnabled) {
+        recoveryToken = await createRetentionRecoveryToken(cart.id);
+        await db.execute(sql`INSERT INTO abandoned_carts (cartId, customerEmail, status) VALUES (${cart.id}, ${email}, 'eligible') ON DUPLICATE KEY UPDATE customerEmail = VALUES(customerEmail), status = IF(status IN ('recovered','resolved','expired'), status, 'eligible'), updatedAt = NOW()`);
+      } else if (itemCount === 0) {
+        await db.execute(sql`UPDATE abandoned_carts SET status = 'resolved', updatedAt = NOW() WHERE cartId = ${cart.id} AND status IN ('eligible','paused')`);
+        await db.execute(sql`UPDATE cart_reminders SET status = 'cancelled' WHERE cartId = ${cart.id} AND status = 'scheduled'`);
+      }
+      const saved = await getRetentionCartWithItems(cart.id);
+      res.json({ success: true, cart: sanitizeRetentionCart(saved.cart, saved.items, recoveryToken || undefined) });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/cart/converted", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ sessionId: z.string().min(8).max(128), completedOrderId: z.string().max(128).optional().default("") }).parse(req.body);
+      const db = await requireDb();
+      const cart = await getRetentionCartBySession(data.sessionId);
+      if (cart) {
+        await db.execute(sql`UPDATE carts SET status = 'converted', completedOrderId = ${data.completedOrderId || null}, remindersDisabled = true, updatedAt = NOW() WHERE id = ${cart.id}`);
+        await db.execute(sql`UPDATE abandoned_carts SET status = 'recovered', recoveredAt = NOW(), completedOrderId = ${data.completedOrderId || null}, updatedAt = NOW() WHERE cartId = ${cart.id}`);
+        await db.execute(sql`UPDATE cart_reminders SET status = 'cancelled' WHERE cartId = ${cart.id} AND status = 'scheduled'`);
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/cart/recover/:token", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const db = await requireDb();
+      const tokenHash = hashToken(String(req.params.token || ""));
+      const [tokenRows] = await db.execute(sql`SELECT * FROM cart_recovery_tokens WHERE tokenHash = ${tokenHash} AND status = 'active' AND expiresAt > NOW() LIMIT 1`) as any;
+      const tokenRow = tokenRows?.[0];
+      if (!tokenRow) { res.status(404).json({ error: "Recovery link is expired or invalid" }); return; }
+      const saved = await getRetentionCartWithItems(tokenRow.cartId);
+      if (!saved.cart || saved.cart.status === "converted") { res.status(404).json({ error: "Cart is no longer available" }); return; }
+      await db.execute(sql`UPDATE cart_recovery_tokens SET status = 'used', usedAt = NOW() WHERE id = ${tokenRow.id}`);
+      res.json({ success: true, cart: sanitizeRetentionCart(saved.cart, saved.items) });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/subscribe", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const ip = getClientIp(req) || "unknown";
+      const now = Date.now();
+      const recent = (subscriptionRateLimit.get(ip) || []).filter((timestamp) => now - timestamp < 60_000);
+      if (recent.length >= 5) { res.status(429).json({ error: "Please wait before subscribing again" }); return; }
+      recent.push(now);
+      subscriptionRateLimit.set(ip, recent);
+      const schema = z.object({
+        email: z.string().email().max(320),
+        firstName: z.string().max(160).optional().default(""),
+        interests: z.array(z.enum(SUBSCRIPTION_INTERESTS)).min(1).default(["all_updates"]),
+        source: z.string().max(128).optional().default("website"),
+        consent: z.boolean().refine(Boolean, "Consent is required"),
+      });
+      const data = schema.parse(req.body);
+      const db = await requireDb();
+      const email = cleanEmail(data.email);
+      const token = randomToken();
+      const tokenHash = hashToken(token);
+      const consentEntry = { at: new Date().toISOString(), source: data.source, ip, interests: data.interests };
+      await db.execute(sql`INSERT INTO subscribers (email, firstName, status, subscriptionSource, consentStatus, consentIp, consentHistory, manageTokenHash, subscribedAt) VALUES (${email}, ${cleanText(data.firstName, 160) || null}, 'active', ${cleanText(data.source, 128)}, 'subscribed', ${ip}, ${[consentEntry] as any}, ${tokenHash}, NOW()) ON DUPLICATE KEY UPDATE firstName = COALESCE(VALUES(firstName), firstName), status = 'active', consentStatus = 'subscribed', subscriptionSource = VALUES(subscriptionSource), consentIp = VALUES(consentIp), consentHistory = VALUES(consentHistory), manageTokenHash = VALUES(manageTokenHash), unsubscribedAt = NULL, updatedAt = NOW()`);
+      const [subscriberRows] = await db.execute(sql`SELECT id FROM subscribers WHERE email = ${email} LIMIT 1`) as any;
+      const subscriberId = Number(subscriberRows?.[0]?.id);
+      for (const interest of data.interests) {
+        await db.execute(sql`INSERT INTO subscriber_preferences (subscriberId, interest, enabled) VALUES (${subscriberId}, ${interest}, true) ON DUPLICATE KEY UPDATE enabled = true, updatedAt = NOW()`);
+      }
+      res.json({ success: true, message: "You're in. Welcome to Build Level.", manageUrl: `/email/preferences/${token}` });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/email/preferences/:token", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const db = await requireDb();
+      const [rows] = await db.execute(sql`SELECT * FROM subscribers WHERE manageTokenHash = ${hashToken(String(req.params.token || ""))} LIMIT 1`) as any;
+      const subscriber = rows?.[0];
+      if (!subscriber) { res.status(404).json({ error: "Preferences link is invalid" }); return; }
+      const [prefs] = await db.execute(sql`SELECT interest, enabled FROM subscriber_preferences WHERE subscriberId = ${subscriber.id}`) as any;
+      res.json({ success: true, subscriber: { email: subscriber.email, firstName: subscriber.firstName, status: subscriber.status, interests: prefs } });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/email/preferences/:token", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ firstName: z.string().max(160).optional().default(""), interests: z.array(z.enum(SUBSCRIPTION_INTERESTS)).min(1), active: z.boolean().default(true) }).parse(req.body);
+      const db = await requireDb();
+      const [rows] = await db.execute(sql`SELECT * FROM subscribers WHERE manageTokenHash = ${hashToken(String(req.params.token || ""))} LIMIT 1`) as any;
+      const subscriber = rows?.[0];
+      if (!subscriber) { res.status(404).json({ error: "Preferences link is invalid" }); return; }
+      await db.execute(sql`UPDATE subscribers SET firstName = ${cleanText(data.firstName, 160) || null}, status = ${data.active ? "active" : "unsubscribed"}, consentStatus = ${data.active ? "subscribed" : "unsubscribed"}, unsubscribedAt = ${data.active ? null : new Date()}, updatedAt = NOW() WHERE id = ${subscriber.id}`);
+      await db.execute(sql`UPDATE subscriber_preferences SET enabled = false WHERE subscriberId = ${subscriber.id}`);
+      for (const interest of data.interests) await db.execute(sql`INSERT INTO subscriber_preferences (subscriberId, interest, enabled) VALUES (${subscriber.id}, ${interest}, true) ON DUPLICATE KEY UPDATE enabled = true, updatedAt = NOW()`);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/email/unsubscribe/:token", async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const db = await requireDb();
+      const [rows] = await db.execute(sql`SELECT * FROM subscribers WHERE manageTokenHash = ${hashToken(String(req.params.token || ""))} LIMIT 1`) as any;
+      const subscriber = rows?.[0];
+      if (!subscriber) { res.status(404).json({ error: "Unsubscribe link is invalid" }); return; }
+      await db.execute(sql`UPDATE subscribers SET status = 'unsubscribed', consentStatus = 'unsubscribed', unsubscribedAt = NOW(), updatedAt = NOW() WHERE id = ${subscriber.id}`);
+      await db.execute(sql`UPDATE abandoned_carts SET status = 'unsubscribed', updatedAt = NOW() WHERE customerEmail = ${subscriber.email} AND status = 'eligible'`);
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/subscribers", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const db = await requireDb();
+      const search = `%${cleanText(req.query.search, 160)}%`;
+      const interest = cleanText(req.query.interest, 64);
+      const status = cleanText(req.query.status, 32);
+      const source = cleanText(req.query.source, 128);
+      const [rows] = await db.execute(sql`SELECT s.*, GROUP_CONCAT(CONCAT(p.interest, ':', p.enabled) ORDER BY p.interest) AS preferences FROM subscribers s LEFT JOIN subscriber_preferences p ON p.subscriberId = s.id WHERE (${search} = '%%' OR s.email LIKE ${search} OR s.firstName LIKE ${search}) AND (${status} = '' OR s.status = ${status}) AND (${source} = '' OR s.subscriptionSource = ${source}) AND (${interest} = '' OR EXISTS (SELECT 1 FROM subscriber_preferences sp WHERE sp.subscriberId = s.id AND sp.interest = ${interest} AND sp.enabled = true)) GROUP BY s.id ORDER BY s.createdAt DESC LIMIT 500`) as any;
+      res.json(rows || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/admin/subscribers/:id", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const id = Number(req.params.id);
+      const data = z.object({ status: z.enum(["active", "unsubscribed", "blocked"]).optional(), firstName: z.string().max(160).optional(), interests: z.array(z.enum(SUBSCRIPTION_INTERESTS)).optional() }).parse(req.body);
+      const db = await requireDb();
+      if (data.status) await db.execute(sql`UPDATE subscribers SET status = ${data.status}, consentStatus = ${data.status === "active" ? "subscribed" : data.status}, unsubscribedAt = ${data.status === "active" ? null : new Date()}, updatedAt = NOW() WHERE id = ${id}`);
+      if (data.firstName !== undefined) await db.execute(sql`UPDATE subscribers SET firstName = ${cleanText(data.firstName, 160) || null}, updatedAt = NOW() WHERE id = ${id}`);
+      if (data.interests) {
+        await db.execute(sql`UPDATE subscriber_preferences SET enabled = false WHERE subscriberId = ${id}`);
+        for (const interest of data.interests) await db.execute(sql`INSERT INTO subscriber_preferences (subscriberId, interest, enabled) VALUES (${id}, ${interest}, true) ON DUPLICATE KEY UPDATE enabled = true, updatedAt = NOW()`);
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/subscribers/export.csv", requireAdminRest, async (_req, res) => {
+    await ensureRetentionTables();
+    const db = await requireDb();
+    const [rows] = await db.execute(sql`SELECT email, firstName, status, subscriptionSource, subscribedAt, unsubscribedAt FROM subscribers ORDER BY createdAt DESC`) as any;
+    const csv = ["email,firstName,status,subscriptionSource,subscribedAt,unsubscribedAt", ...(rows || []).map((row: any) => [row.email, row.firstName || "", row.status, row.subscriptionSource || "", row.subscribedAt || "", row.unsubscribedAt || ""].map((value) => `"${String(value).replace(/"/g, "\"\"")}"`).join(","))].join("\n");
+    res.setHeader("Content-Type", "text/csv");
+    res.setHeader("Content-Disposition", "attachment; filename=build-level-subscribers.csv");
+    res.send(csv);
+  });
+
+  app.get("/api/admin/abandoned-carts", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      await markInactiveRetentionCartsAbandoned();
+      const db = await requireDb();
+      const status = cleanText(req.query.status, 32);
+      const [rows] = await db.execute(sql`SELECT c.*, a.status AS recoveryStatus, a.reminderStage, a.reminderCount AS recoveryReminderCount, a.recoveredAt, a.completedOrderId AS recoveredOrderId FROM carts c LEFT JOIN abandoned_carts a ON a.cartId = c.id WHERE (${status} = '' OR c.status = ${status} OR a.status = ${status}) ORDER BY c.updatedAt DESC LIMIT 300`) as any;
+      res.json(rows || []);
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/abandoned-carts/:id", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const saved = await getRetentionCartWithItems(Number(req.params.id));
+      if (!saved.cart) { res.status(404).json({ error: "Cart not found" }); return; }
+      res.json({ cart: sanitizeRetentionCart(saved.cart, saved.items) });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  app.patch("/api/admin/abandoned-carts/:id", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const id = Number(req.params.id);
+      const { action } = z.object({ action: z.enum(["stop", "resolve", "enable", "delete_expired"]) }).parse(req.body);
+      const db = await requireDb();
+      if (action === "stop") {
+        await db.execute(sql`UPDATE carts SET remindersDisabled = true, status = 'disabled', updatedAt = NOW() WHERE id = ${id}`);
+        await db.execute(sql`UPDATE abandoned_carts SET status = 'paused', updatedAt = NOW() WHERE cartId = ${id}`);
+      } else if (action === "resolve") {
+        await db.execute(sql`UPDATE carts SET remindersDisabled = true, status = 'resolved', updatedAt = NOW() WHERE id = ${id}`);
+        await db.execute(sql`UPDATE abandoned_carts SET status = 'resolved', updatedAt = NOW() WHERE cartId = ${id}`);
+      } else if (action === "enable") {
+        await db.execute(sql`UPDATE carts SET remindersDisabled = false, status = 'active', updatedAt = NOW() WHERE id = ${id}`);
+        await db.execute(sql`UPDATE abandoned_carts SET status = 'eligible', updatedAt = NOW() WHERE cartId = ${id}`);
+      } else {
+        await db.execute(sql`DELETE FROM cart_items WHERE cartId = ${id} AND ${new Date()} > (SELECT expiresAt FROM carts WHERE id = ${id})`);
+        await db.execute(sql`DELETE FROM carts WHERE id = ${id} AND expiresAt < NOW()`);
+      }
+      res.json({ success: true });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.post("/api/admin/abandoned-carts/:id/reminder", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const id = Number(req.params.id);
+      const db = await requireDb();
+      const saved = await getRetentionCartWithItems(id);
+      if (!saved.cart || !saved.cart.customerEmail) { res.status(400).json({ error: "Cart has no customer email" }); return; }
+      const token = await createRetentionRecoveryToken(id);
+      const settings = await getRetentionSettings();
+      const origin = getFrontendOrigin(req);
+      const recoveryUrl = `${origin}/cart/recover/${token}`;
+      const manageToken = randomToken();
+      await db.execute(sql`UPDATE subscribers SET manageTokenHash = ${hashToken(manageToken)}, updatedAt = NOW() WHERE email = ${saved.cart.customerEmail}`);
+      const unsubscribeUrl = `${origin}/email/preferences/${manageToken}`;
+      const itemsText = saved.items.map((item: any) => `${item.productName} (${item.selectedVariant || item.selectedSize || item.productType}) - $${Number(item.itemTotal).toFixed(2)}`).join("\n");
+      if (!isEmailConfigured()) {
+        res.json({ success: true, skipped: true, message: "Email is not configured; reminder was logged but not sent.", recoveryUrl });
+        return;
+      }
+      const transporter = getTransporter();
+      const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
+      await transporter.sendMail({ from, to: saved.cart.customerEmail, subject: settings.reminderSubject, text: `${settings.reminderIntro}\n\n${itemsText}\n\nReturn to cart: ${recoveryUrl}\nUnsubscribe: ${unsubscribeUrl}` });
+      await db.execute(sql`INSERT INTO cart_reminders (cartId, stage, status, subject, sentAt) VALUES (${id}, ${cleanText(req.body?.stage || "manual", 32)}, 'sent', ${settings.reminderSubject}, NOW()) ON DUPLICATE KEY UPDATE status = 'sent', sentAt = NOW(), subject = VALUES(subject)`);
+      await db.execute(sql`UPDATE carts SET reminderCount = reminderCount + 1, updatedAt = NOW() WHERE id = ${id}`);
+      await db.execute(sql`UPDATE abandoned_carts SET reminderCount = reminderCount + 1, lastReminderAt = NOW(), updatedAt = NOW() WHERE cartId = ${id}`);
+      res.json({ success: true, recoveryUrl });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/abandoned-carts/settings", requireAdminRest, async (_req, res) => {
+    await ensureRetentionTables();
+    res.json(await getRetentionSettings());
+  });
+
+  app.post("/api/admin/abandoned-carts/settings", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ recoveryEnabled: z.boolean(), firstReminderHours: z.number().min(0).max(720), secondReminderHours: z.number().min(0).max(720), finalReminderHours: z.number().min(0).max(720), abandonedAfterMinutes: z.number().min(5).max(10080), reminderSubject: z.string().max(255), reminderIntro: z.string().max(1000) }).parse(req.body);
+      const entries: Record<string, string> = { cart_recovery_enabled: String(data.recoveryEnabled), cart_recovery_first_hours: String(data.firstReminderHours), cart_recovery_second_hours: String(data.secondReminderHours), cart_recovery_final_hours: String(data.finalReminderHours), cart_abandoned_after_minutes: String(data.abandonedAfterMinutes), cart_recovery_subject: data.reminderSubject, cart_recovery_intro: data.reminderIntro };
+      for (const [key, value] of Object.entries(entries)) await saveSetting(key, value);
+      res.json({ success: true, settings: await getRetentionSettings() });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
+  app.get("/api/admin/retention/summary", requireAdminRest, async (_req, res) => {
+    try {
+      await ensureRetentionTables();
+      await markInactiveRetentionCartsAbandoned();
+      const db = await requireDb();
+      const [[cartCounts], [subscriberCounts], [productRows]] = await Promise.all([
+        db.execute(sql`SELECT SUM(status='active') AS activeCarts, SUM(status='abandoned') AS abandonedCarts, SUM(status IN ('recovered','converted')) AS recoveredCarts, SUM(CASE WHEN status IN ('recovered','converted') THEN subtotal ELSE 0 END) AS revenueRecovered FROM carts`) as any,
+        db.execute(sql`SELECT COUNT(*) AS totalSubscribers, SUM(status='active') AS activeSubscribers, SUM(status='unsubscribed') AS unsubscribeCount, SUM(createdAt >= DATE_SUB(NOW(), INTERVAL 30 DAY)) AS newSubscribersThisMonth FROM subscribers`) as any,
+        db.execute(sql`SELECT productName, productType, SUM(quantity) AS quantity FROM cart_items GROUP BY productName, productType ORDER BY quantity DESC LIMIT 10`) as any,
+      ]);
+      res.json({ carts: cartCounts?.[0] || {}, subscribers: subscriberCounts?.[0] || {}, mostAddedProducts: productRows || [] });
+    } catch (e: any) {
+      res.status(500).json({ error: e.message });
     }
   });
 
