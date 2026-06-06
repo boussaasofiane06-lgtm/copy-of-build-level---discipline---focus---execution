@@ -677,6 +677,43 @@ router.get("/admin/abandoned-carts", requireAdmin, async (req, res) => {
   }
 });
 
+router.get("/admin/abandoned-carts/settings", requireAdmin, async (_req, res) => {
+  await ensureRetentionTables();
+  res.json(await getRetentionSettings());
+});
+
+router.post("/admin/abandoned-carts/settings", requireAdmin, async (req, res) => {
+  try {
+    await ensureRetentionTables();
+    const schema = z.object({
+      recoveryEnabled: z.boolean(),
+      firstReminderHours: z.number().min(0).max(720),
+      secondReminderHours: z.number().min(0).max(720),
+      finalReminderHours: z.number().min(0).max(720),
+      abandonedAfterMinutes: z.number().min(5).max(10080),
+      reminderSubject: z.string().max(255),
+      reminderIntro: z.string().max(1000),
+    });
+    const data = schema.parse(req.body);
+    const db = await getDb();
+    const entries: Record<string, string> = {
+      cart_recovery_enabled: String(data.recoveryEnabled),
+      cart_recovery_first_hours: String(data.firstReminderHours),
+      cart_recovery_second_hours: String(data.secondReminderHours),
+      cart_recovery_final_hours: String(data.finalReminderHours),
+      cart_abandoned_after_minutes: String(data.abandonedAfterMinutes),
+      cart_recovery_subject: data.reminderSubject,
+      cart_recovery_intro: data.reminderIntro,
+    };
+    for (const [key, value] of Object.entries(entries)) {
+      await db.execute(sql`INSERT INTO site_settings (\`key\`, value, updatedAt) VALUES (${key}, ${value}, NOW()) ON DUPLICATE KEY UPDATE value = VALUES(value), updatedAt = NOW()`);
+    }
+    res.json({ success: true, settings: await getRetentionSettings() });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message });
+  }
+});
+
 router.get("/admin/abandoned-carts/:id", requireAdmin, async (req, res) => {
   try {
     await ensureRetentionTables();
@@ -755,43 +792,6 @@ router.post("/admin/abandoned-carts/:id/reminder", requireAdmin, async (req, res
     await db.execute(sql`UPDATE abandoned_carts SET reminderCount = reminderCount + 1, lastReminderAt = NOW(), updatedAt = NOW() WHERE cartId = ${id}`);
     await saveCartEvent("abandoned_cart_email_sent", { stage: req.body?.stage || "manual" }, saved.cart.customerEmail, id);
     res.json({ success: true, recoveryUrl });
-  } catch (error: any) {
-    res.status(400).json({ error: error.message });
-  }
-});
-
-router.get("/admin/abandoned-carts/settings", requireAdmin, async (_req, res) => {
-  await ensureRetentionTables();
-  res.json(await getRetentionSettings());
-});
-
-router.post("/admin/abandoned-carts/settings", requireAdmin, async (req, res) => {
-  try {
-    await ensureRetentionTables();
-    const schema = z.object({
-      recoveryEnabled: z.boolean(),
-      firstReminderHours: z.number().min(0).max(720),
-      secondReminderHours: z.number().min(0).max(720),
-      finalReminderHours: z.number().min(0).max(720),
-      abandonedAfterMinutes: z.number().min(5).max(10080),
-      reminderSubject: z.string().max(255),
-      reminderIntro: z.string().max(1000),
-    });
-    const data = schema.parse(req.body);
-    const db = await getDb();
-    const entries: Record<string, string> = {
-      cart_recovery_enabled: String(data.recoveryEnabled),
-      cart_recovery_first_hours: String(data.firstReminderHours),
-      cart_recovery_second_hours: String(data.secondReminderHours),
-      cart_recovery_final_hours: String(data.finalReminderHours),
-      cart_abandoned_after_minutes: String(data.abandonedAfterMinutes),
-      cart_recovery_subject: data.reminderSubject,
-      cart_recovery_intro: data.reminderIntro,
-    };
-    for (const [key, value] of Object.entries(entries)) {
-      await db.execute(sql`INSERT INTO site_settings (\`key\`, value, updatedAt) VALUES (${key}, ${value}, NOW()) ON DUPLICATE KEY UPDATE value = VALUES(value), updatedAt = NOW()`);
-    }
-    res.json({ success: true, settings: await getRetentionSettings() });
   } catch (error: any) {
     res.status(400).json({ error: error.message });
   }

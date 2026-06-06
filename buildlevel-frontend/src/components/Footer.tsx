@@ -1,8 +1,12 @@
 import { Link } from "react-router-dom";
+import { useLocation } from "react-router-dom";
 import SocialLinks from "./SocialLinks";
 import SubscribeForm from "./SubscribeForm";
 
 export default function Footer() {
+  const { pathname } = useLocation();
+  const pagesWithDedicatedSubscribe = pathname === "/" || pathname === "/shop" || pathname === "/checkout/success" || pathname.startsWith("/digital") || pathname.startsWith("/blog");
+
   return (
     <footer style={{ background: "var(--bg2)", borderTop: "1px solid var(--border)", padding: "48px 0 24px" }}>
       <div className="container">
@@ -12,9 +16,11 @@ export default function Footer() {
             <h2 style={{ marginBottom: 8 }}>Stay Focused. Execute Daily.</h2>
           </div>
         </div>
-        <div style={{ marginBottom: 40 }}>
-          <SubscribeForm source="footer" compact />
-        </div>
+        {!pagesWithDedicatedSubscribe && (
+          <div style={{ marginBottom: 40 }}>
+            <SubscribeForm source="footer" compact />
+          </div>
+        )}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 40, marginBottom: 40 }}>
           <div>
             <div style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem", fontWeight: 700, letterSpacing: "0.1em", marginBottom: 12 }}>

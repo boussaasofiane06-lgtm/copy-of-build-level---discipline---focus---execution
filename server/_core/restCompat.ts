@@ -1248,6 +1248,23 @@ export function registerRestCompatRoutes(app: Express) {
     }
   });
 
+  app.get("/api/admin/abandoned-carts/settings", requireAdminRest, async (_req, res) => {
+    await ensureRetentionTables();
+    res.json(await getRetentionSettings());
+  });
+
+  app.post("/api/admin/abandoned-carts/settings", requireAdminRest, async (req, res) => {
+    try {
+      await ensureRetentionTables();
+      const data = z.object({ recoveryEnabled: z.boolean(), firstReminderHours: z.number().min(0).max(720), secondReminderHours: z.number().min(0).max(720), finalReminderHours: z.number().min(0).max(720), abandonedAfterMinutes: z.number().min(5).max(10080), reminderSubject: z.string().max(255), reminderIntro: z.string().max(1000) }).parse(req.body);
+      const entries: Record<string, string> = { cart_recovery_enabled: String(data.recoveryEnabled), cart_recovery_first_hours: String(data.firstReminderHours), cart_recovery_second_hours: String(data.secondReminderHours), cart_recovery_final_hours: String(data.finalReminderHours), cart_abandoned_after_minutes: String(data.abandonedAfterMinutes), cart_recovery_subject: data.reminderSubject, cart_recovery_intro: data.reminderIntro };
+      for (const [key, value] of Object.entries(entries)) await saveSetting(key, value);
+      res.json({ success: true, settings: await getRetentionSettings() });
+    } catch (e: any) {
+      res.status(400).json({ error: e.message });
+    }
+  });
+
   app.get("/api/admin/abandoned-carts/:id", requireAdminRest, async (req, res) => {
     try {
       await ensureRetentionTables();
@@ -1310,23 +1327,6 @@ export function registerRestCompatRoutes(app: Express) {
       await db.execute(sql`UPDATE carts SET reminderCount = reminderCount + 1, updatedAt = NOW() WHERE id = ${id}`);
       await db.execute(sql`UPDATE abandoned_carts SET reminderCount = reminderCount + 1, lastReminderAt = NOW(), updatedAt = NOW() WHERE cartId = ${id}`);
       res.json({ success: true, recoveryUrl });
-    } catch (e: any) {
-      res.status(400).json({ error: e.message });
-    }
-  });
-
-  app.get("/api/admin/abandoned-carts/settings", requireAdminRest, async (_req, res) => {
-    await ensureRetentionTables();
-    res.json(await getRetentionSettings());
-  });
-
-  app.post("/api/admin/abandoned-carts/settings", requireAdminRest, async (req, res) => {
-    try {
-      await ensureRetentionTables();
-      const data = z.object({ recoveryEnabled: z.boolean(), firstReminderHours: z.number().min(0).max(720), secondReminderHours: z.number().min(0).max(720), finalReminderHours: z.number().min(0).max(720), abandonedAfterMinutes: z.number().min(5).max(10080), reminderSubject: z.string().max(255), reminderIntro: z.string().max(1000) }).parse(req.body);
-      const entries: Record<string, string> = { cart_recovery_enabled: String(data.recoveryEnabled), cart_recovery_first_hours: String(data.firstReminderHours), cart_recovery_second_hours: String(data.secondReminderHours), cart_recovery_final_hours: String(data.finalReminderHours), cart_abandoned_after_minutes: String(data.abandonedAfterMinutes), cart_recovery_subject: data.reminderSubject, cart_recovery_intro: data.reminderIntro };
-      for (const [key, value] of Object.entries(entries)) await saveSetting(key, value);
-      res.json({ success: true, settings: await getRetentionSettings() });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
