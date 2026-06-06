@@ -24,6 +24,15 @@ import { BLOG_CATEGORIES, DEFAULT_BLOG_CATEGORY, getBlogCategoryLabel, normalize
 
 type Tab = "products" | "digital" | "blog" | "shop-org" | "integrations" | "fulfillment" | "support" | "abandoned" | "subscribers" | "campaigns" | "moderation" | "maintenance";
 
+const adminNavGroups: Array<{ label: string; items: Array<{ tab: Tab; label: string }> }> = [
+  { label: "Products & Content", items: [{ tab: "products", label: "Apparel" }, { tab: "digital", label: "Digital" }, { tab: "blog", label: "Blog" }, { tab: "shop-org", label: "Shop Navigation" }] },
+  { label: "Operations", items: [{ tab: "integrations", label: "Integrations" }, { tab: "fulfillment", label: "Fulfillment" }, { tab: "support", label: "Customer Support" }, { tab: "abandoned", label: "Abandoned Carts" }] },
+  { label: "Marketing & Community", items: [{ tab: "subscribers", label: "Subscribers" }, { tab: "campaigns", label: "Email Campaigns" }, { tab: "moderation", label: "Moderation" }] },
+  { label: "System", items: [{ tab: "maintenance", label: "Maintenance" }] },
+];
+
+const adminTabLabel = (tab: Tab) => adminNavGroups.flatMap(group => group.items).find(item => item.tab === tab)?.label || "Admin";
+
 const defaultMaintenanceConfig: MaintenanceConfig = {
   enabled: false,
   title: "Coming Back Soon",
@@ -157,6 +166,7 @@ export default function Admin() {
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
   const [tab, setTab] = useState<Tab>("products");
+  const [adminMenuOpen, setAdminMenuOpen] = useState(false);
 
   // Products state
   const [products, setProducts] = useState<Product[]>([]);
@@ -190,6 +200,14 @@ export default function Admin() {
   const [blogForm, setBlogForm] = useState({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, featured: false });
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
+
+  const logout = async () => {
+    if (!window.confirm("Are you sure you want to log out of the Build Level Admin Panel?")) return;
+    await adminApi.logout().catch(() => undefined);
+    setAuthed(false);
+    setPassword("");
+    setAdminMenuOpen(false);
+  };
 
   const login = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -513,27 +531,39 @@ export default function Admin() {
 
   return (
     <div style={{ minHeight: "100vh", background: "var(--bg)" }}>
-      {/* Header */}
       <div style={{ background: "var(--bg2)", borderBottom: "1px solid var(--border)", padding: "16px 0" }}>
-        <div className="container" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-          <h2 style={{ fontSize: "1rem" }}>Admin Panel</h2>
-          <button onClick={() => { adminApi.logout(); setAuthed(false); }} className="btn btn-ghost btn-sm">Logout</button>
+        <div className="container admin-shell-header">
+          <div>
+            <h2 style={{ fontSize: "1rem" }}>Admin Panel</h2>
+            <p style={{ color: "var(--text3)", fontSize: "0.8rem" }}>Current section: {adminTabLabel(tab)}</p>
+          </div>
+          <button className="btn btn-outline btn-sm admin-mobile-menu-button" onClick={() => setAdminMenuOpen(current => !current)}>Admin Menu</button>
         </div>
       </div>
 
-      {/* Tabs */}
       <div style={{ borderBottom: "1px solid var(--border)", background: "var(--bg2)" }}>
-        <div className="container" style={{ display: "flex", gap: 0, flexWrap: "wrap", rowGap: 4 }}>
-          {(["products", "digital", "blog", "shop-org", "integrations", "fulfillment", "support", "abandoned", "subscribers", "campaigns", "moderation", "maintenance"] as Tab[]).map(t => (
-            <button key={t} onClick={() => setTab(t)} style={{
-              padding: "14px 24px", background: "none", border: "none", cursor: "pointer",
-              fontFamily: "var(--font-display)", fontSize: "0.8rem", letterSpacing: "0.1em", textTransform: "uppercase",
-              color: tab === t ? "var(--text)" : "var(--text2)",
-              borderBottom: tab === t ? "2px solid var(--red)" : "2px solid transparent",
-            }}>
-              {t === "products" ? "Apparel" : t === "digital" ? "Digital" : t === "blog" ? "Blog" : t === "shop-org" ? "Shop Navigation" : t === "integrations" ? "Integrations" : t === "fulfillment" ? "Fulfillment" : t === "support" ? "Customer Support" : t === "abandoned" ? "Abandoned Carts" : t === "subscribers" ? "Subscribers" : t === "campaigns" ? "Email Campaigns" : t === "moderation" ? "Moderation" : "Maintenance"}
-            </button>
+        <div className={`container admin-nav ${adminMenuOpen ? "admin-nav--open" : ""}`}>
+          {adminNavGroups.map(group => (
+            <div className="admin-nav__group" key={group.label}>
+              <div className="admin-nav__group-label">{group.label}</div>
+              <div className="admin-nav__items">
+                {group.items.map(item => (
+                  <button
+                    key={item.tab}
+                    onClick={() => { setTab(item.tab); setAdminMenuOpen(false); }}
+                    className={`admin-nav__tab ${tab === item.tab ? "admin-nav__tab--active" : ""}`}
+                    aria-current={tab === item.tab ? "page" : undefined}
+                  >
+                    {tab === item.tab ? "● " : ""}{item.label}
+                  </button>
+                ))}
+              </div>
+            </div>
           ))}
+          <div className="admin-nav__group admin-nav__group--system">
+            <div className="admin-nav__group-label">Session</div>
+            <button onClick={logout} className="admin-nav__logout">Logout</button>
+          </div>
         </div>
       </div>
 

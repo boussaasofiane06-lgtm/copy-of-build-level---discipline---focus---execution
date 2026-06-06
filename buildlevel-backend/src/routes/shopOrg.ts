@@ -169,7 +169,10 @@ router.post("/admin/shop/categories", requireAdmin, async (req, res) => {
     await ensureShopOrgTables();
     const data = entitySchema.extend({ audienceId: z.number(), parentId: z.number().nullable().optional() }).parse(req.body);
     const db = await getDb();
-    await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, styleSettings) VALUES (${data.audienceId}, ${data.parentId || null}, ${data.name}, ${data.slug || slugify(data.name)}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${JSON.stringify(sanitizeStyleSettings(data.styleSettings))})`);
+    const nextSlug = data.slug || slugify(data.name);
+    const [existing] = await db.execute(sql`SELECT id FROM shop_categories WHERE audienceId = ${data.audienceId} AND COALESCE(parentId, 0) = ${data.parentId || 0} AND (slug = ${nextSlug} OR LOWER(name) = ${data.name.trim().toLowerCase()}) LIMIT 1`) as any;
+    if (existing?.[0]) { res.status(409).json({ error: "A category with this name or slug already exists." }); return; }
+    await db.execute(sql`INSERT INTO shop_categories (audienceId, parentId, name, slug, description, imageUrl, icon, displayOrder, enabled, hidden, featured, published, styleSettings) VALUES (${data.audienceId}, ${data.parentId || null}, ${data.name}, ${nextSlug}, ${data.description}, ${data.imageUrl}, ${data.icon}, ${data.displayOrder}, ${data.enabled}, ${data.hidden}, ${data.featured}, ${data.published}, ${JSON.stringify(sanitizeStyleSettings(data.styleSettings))})`);
     res.json({ success: true });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });

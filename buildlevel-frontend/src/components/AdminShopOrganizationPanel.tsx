@@ -30,6 +30,39 @@ function slugify(value: string) {
   return value.toLowerCase().replace(/&/g, "and").replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
 }
 
+function CollapsibleList<T>({
+  title,
+  items,
+  renderItem,
+  getKey,
+  initialVisible = 3,
+}: {
+  title: string;
+  items: T[];
+  renderItem: (item: T) => React.ReactNode;
+  getKey: (item: T) => string | number;
+  initialVisible?: number;
+}) {
+  const [showAll, setShowAll] = useState(false);
+  const visible = showAll || items.length <= initialVisible ? items : items.slice(0, initialVisible);
+  const remaining = Math.max(0, items.length - initialVisible);
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <strong style={{ fontFamily: "var(--font-display)", fontSize: "0.82rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+          {title} — {items.length}
+        </strong>
+        {items.length > initialVisible && (
+          <button type="button" className="btn btn-outline btn-sm" onClick={() => setShowAll(current => !current)}>
+            {showAll ? "Show Less" : `Show All ${remaining} More`}
+          </button>
+        )}
+      </div>
+      {visible.map(item => <div key={getKey(item)}>{renderItem(item)}</div>)}
+    </div>
+  );
+}
+
 export default function AdminShopOrganizationPanel({ products, showToast }: { products: Product[]; showToast: (message: string, type?: "success" | "error") => void }) {
   const [taxonomy, setTaxonomy] = useState<ShopTaxonomy>({ audiences: [], categories: [], productAssignments: [] });
   const [audienceForm, setAudienceForm] = useState({ name: "", slug: "", displayOrder: 0, enabled: true, hidden: false, isForYou: false });
@@ -39,6 +72,8 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
   const [classification, setClassification] = useState({ productId: 0, audienceId: 0, categoryId: 0, subcategoryId: 0 });
   const [styleTarget, setStyleTarget] = useState({ type: "audience" as "audience" | "category", id: 0 });
   const [styleForm, setStyleForm] = useState<Record<string, string | boolean>>(defaultStyle);
+  const [expandedAudiences, setExpandedAudiences] = useState<Record<number, boolean>>({});
+  const [orgSearch, setOrgSearch] = useState("");
 
   const load = async () => {
     try {
@@ -70,7 +105,17 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
   };
 
   const saveCategory = async () => {
-    await adminApi.createShopCategory({ ...categoryForm, slug: categoryForm.slug || slugify(categoryForm.name), parentId: categoryForm.parentId || null });
+    const nextSlug = categoryForm.slug || slugify(categoryForm.name);
+    const duplicate = taxonomy.categories.some(category =>
+      Number(category.audienceId) === Number(categoryForm.audienceId) &&
+      Number(category.parentId || 0) === Number(categoryForm.parentId || 0) &&
+      (category.slug === nextSlug || category.name.trim().toLowerCase() === categoryForm.name.trim().toLowerCase())
+    );
+    if (duplicate) {
+      showToast("A category with this name or slug already exists.", "error");
+      return;
+    }
+    await adminApi.createShopCategory({ ...categoryForm, slug: nextSlug, parentId: categoryForm.parentId || null });
     showToast("Category created");
     setCategoryForm(current => ({ ...current, name: "", slug: "", parentId: 0 }));
     load();
@@ -140,12 +185,26 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
   const assignmentCategories = taxonomy.categories.filter(c => Number(c.audienceId) === Number(classification.audienceId));
   const assignmentParents = assignmentCategories.filter(c => !c.parentId);
   const assignmentChildren = assignmentCategories.filter(c => c.parentId);
+  const normalizedSearch = orgSearch.trim().toLowerCase();
+  const matchesSearch = (parts: Array<string | number | null | undefined>) => !normalizedSearch || parts.some(part => String(part || "").toLowerCase().includes(normalizedSearch));
+  const parentCategoriesForAudience = (audienceId: number) => taxonomy.categories.filter(c => Number(c.audienceId) === Number(audienceId) && !c.parentId && matchesSearch([c.name, c.slug]));
+  const childCategoriesFor = (parentId: number) => taxonomy.categories.filter(c => Number(c.parentId) === Number(parentId) && matchesSearch([c.name, c.slug]));
+  const filteredAudiences = taxonomy.audiences.filter(audience => {
+    const categories = taxonomy.categories.filter(category => Number(category.audienceId) === Number(audience.id));
+    return matchesSearch([audience.name, audience.slug]) || categories.some(category => matchesSearch([category.name, category.slug, audience.name]));
+  });
+  const isAudienceExpanded = (audience: ShopAudience) => Boolean(expandedAudiences[audience.id]) || !!normalizedSearch;
 
   return (
     <div style={{ display: "grid", gap: 18 }}>
       <div style={panelStyle}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: 8 }}>Shop Navigation</h2>
         <p style={{ color: "var(--text2)", marginBottom: 14 }}>Manage public audiences including For You, Men, Women, Kids, Accessories, and Home & Living.</p>
+        <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 }}>
+          <input className="input" style={{ maxWidth: 380 }} placeholder="Search audiences, categories, subcategories" value={orgSearch} onChange={e => setOrgSearch(e.target.value)} />
+          <button className="btn btn-outline btn-sm" onClick={() => setExpandedAudiences(Object.fromEntries(taxonomy.audiences.map(a => [a.id, true])))}>Expand All</button>
+          <button className="btn btn-outline btn-sm" onClick={() => setExpandedAudiences({})}>Collapse All</button>
+        </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 14 }}>
           <input className="input" placeholder="Audience name" value={audienceForm.name} onChange={e => setAudienceForm(f => ({ ...f, name: e.target.value }))} />
           <input className="input" placeholder="Slug" value={audienceForm.slug} onChange={e => setAudienceForm(f => ({ ...f, slug: e.target.value }))} />
@@ -153,41 +212,83 @@ export default function AdminShopOrganizationPanel({ products, showToast }: { pr
           <label className="subscribe-interest"><input type="checkbox" checked={audienceForm.isForYou} onChange={e => setAudienceForm(f => ({ ...f, isForYou: e.target.checked }))} /> For You section</label>
           <button className="btn btn-primary btn-sm" onClick={saveAudience} disabled={!audienceForm.name}>Add Audience</button>
         </div>
-        <div style={{ display: "grid", gap: 10 }}>
-          {taxonomy.audiences.map(audience => (
-            <div key={audience.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12, display: "flex", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
-              <div><strong>{audience.name}</strong><p style={{ color: "var(--text3)", fontSize: "0.78rem" }}>{audience.slug} • order {audience.displayOrder} {audience.isForYou ? "• Optional For You" : ""}</p></div>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { hidden: !Boolean(audience.hidden) })}>{audience.hidden ? "Show" : "Hide"}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { enabled: !Boolean(audience.enabled) })}>{audience.enabled ? "Disable" : "Enable"}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { featured: !Boolean(audience.featured) })}>{audience.featured ? "Unfeature" : "Feature"}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("audience", audience.id)}>Style</button>
+        <div style={{ display: "grid", gap: 12 }}>
+          {filteredAudiences.map(audience => {
+            const categories = parentCategoriesForAudience(audience.id);
+            const expanded = isAudienceExpanded(audience);
+            return (
+              <div key={audience.id} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "rgba(255,255,255,0.02)" }}>
+                <button
+                  type="button"
+                  onClick={() => setExpandedAudiences(current => ({ ...current, [audience.id]: !expanded }))}
+                  style={{ width: "100%", display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", padding: 14, background: expanded ? "rgba(255,102,0,0.08)" : "transparent", color: "var(--text)", border: 0, textAlign: "left" }}
+                >
+                  <div>
+                    <strong style={{ fontFamily: "var(--font-display)", letterSpacing: "0.08em", textTransform: "uppercase" }}>{audience.name}</strong>
+                    <p style={{ color: "var(--text3)", fontSize: "0.78rem" }}>{categories.length} Categories • {audience.enabled ? "Enabled" : "Disabled"} • {audience.hidden ? "Hidden" : "Visible"} {audience.isForYou ? "• Optional For You" : ""}</p>
+                  </div>
+                  <span style={{ color: "var(--red)", fontSize: "1.1rem" }}>{expanded ? "▲" : "▼"}</span>
+                </button>
+                {expanded && (
+                  <div style={{ padding: 14, display: "grid", gap: 12, borderTop: "1px solid var(--border)" }}>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                      <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { hidden: !Boolean(audience.hidden) })}>{audience.hidden ? "Show" : "Hide"}</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { enabled: !Boolean(audience.enabled) })}>{audience.enabled ? "Disable" : "Enable"}</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => toggleAudience(audience, { featured: !Boolean(audience.featured) })}>{audience.featured ? "Unfeature" : "Feature"}</button>
+                      <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("audience", audience.id)}>Style</button>
+                      <button className="btn btn-primary btn-sm" onClick={() => setCategoryForm(f => ({ ...f, audienceId: audience.id, parentId: 0 }))}>Add Category Here</button>
+                    </div>
+                    <CollapsibleList
+                      title={`${audience.name} Categories`}
+                      items={categories}
+                      getKey={category => category.id}
+                      renderItem={category => {
+                        const children = childCategoriesFor(category.id);
+                        return (
+                          <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "grid", gap: 8 }}>
+                            <div style={{ display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                              <span style={{ overflowWrap: "anywhere" }}>{category.name} <span style={{ color: "var(--text3)" }}>/{category.slug}</span></span>
+                              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                                <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(category, { hidden: !Boolean(category.hidden) })}>{category.hidden ? "Show" : "Hide"}</button>
+                                <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(category, { enabled: !Boolean(category.enabled) })}>{category.enabled ? "Disable" : "Enable"}</button>
+                                <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("category", category.id)}>Style</button>
+                                <button className="btn btn-primary btn-sm" onClick={() => setCategoryForm(f => ({ ...f, audienceId: audience.id, parentId: category.id }))}>Add Subcategory</button>
+                              </div>
+                            </div>
+                            {children.length > 0 && (
+                              <CollapsibleList
+                                title={`${category.name} Subcategories`}
+                                items={children}
+                                getKey={child => child.id}
+                                renderItem={child => (
+                                  <div style={{ display: "flex", justifyContent: "space-between", gap: 8, flexWrap: "wrap", padding: 8, border: "1px solid rgba(255,255,255,0.08)", borderRadius: 6 }}>
+                                    <span>{child.name} <span style={{ color: "var(--text3)" }}>/{child.slug}</span></span>
+                                    <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("category", child.id)}>Style</button>
+                                  </div>
+                                )}
+                              />
+                            )}
+                          </div>
+                        );
+                      }}
+                    />
+                  </div>
+                )}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
       <div style={panelStyle}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: 8 }}>Shop Categories & Subcategories</h2>
+        <p style={{ color: "var(--text2)", marginBottom: 12 }}>Use this compact form to add a category or subcategory to the selected audience. Existing categories are managed inside each audience accordion above.</p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 10, marginBottom: 14 }}>
           <select className="input" value={categoryForm.audienceId} onChange={e => setCategoryForm(f => ({ ...f, audienceId: Number(e.target.value), parentId: 0 }))}>{taxonomy.audiences.filter(a => !a.isForYou).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
           <select className="input" value={categoryForm.parentId} onChange={e => setCategoryForm(f => ({ ...f, parentId: Number(e.target.value) }))}><option value={0}>Top-level category</option>{selectedAudienceCategories.map(c => <option key={c.id} value={c.id}>Subcategory of {c.name}</option>)}</select>
           <input className="input" placeholder="Category name" value={categoryForm.name} onChange={e => setCategoryForm(f => ({ ...f, name: e.target.value }))} />
           <input className="input" placeholder="Slug" value={categoryForm.slug} onChange={e => setCategoryForm(f => ({ ...f, slug: e.target.value }))} />
           <button className="btn btn-primary btn-sm" onClick={saveCategory} disabled={!categoryForm.name}>Add Category</button>
-        </div>
-        <div style={{ display: "grid", gap: 8 }}>
-          {taxonomy.categories.map(category => (
-            <div key={category.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, display: "flex", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
-              <span>{category.name} <span style={{ color: "var(--text3)" }}>/{category.slug}</span></span>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(category, { hidden: !Boolean(category.hidden) })}>{category.hidden ? "Show" : "Hide"}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(category, { enabled: !Boolean(category.enabled) })}>{category.enabled ? "Disable" : "Enable"}</button>
-                <button className="btn btn-outline btn-sm" onClick={() => selectStyleTarget("category", category.id)}>Style</button>
-              </div>
-            </div>
-          ))}
         </div>
       </div>
 
