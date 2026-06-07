@@ -2,6 +2,7 @@ services:
   - type: web
     name: buildlevel-backend
     runtime: node
+    # Keep this file in backend-only deploy commits so Render notices rootDir changes.
     buildCommand: npm install && npm run build
     startCommand: node dist/index.js
     envVars:
