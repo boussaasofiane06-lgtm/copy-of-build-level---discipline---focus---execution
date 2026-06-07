@@ -27,6 +27,13 @@ async function ensureBlogScheduleColumn() {
   blogScheduleColumnEnsured = true;
 }
 
+async function publishDueScheduledBlogs() {
+  await ensureBlogScheduleColumn();
+  const db = await getDb();
+  if (!db) return;
+  await db.execute(sql.raw(`UPDATE blog_posts SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
+}
+
 function isLocalhostUrl(value: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(value);
 }
@@ -296,6 +303,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return [];
+        await publishDueScheduledBlogs();
         const rows = await db
           .select()
           .from(blogPosts)
@@ -308,7 +316,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return null;
-        await ensureBlogScheduleColumn();
+        await publishDueScheduledBlogs();
         const rows = await db.select().from(blogPosts).where(and(eq(blogPosts.slug, input.slug), or(eq(blogPosts.published, true), lte(blogPosts.scheduledAt, new Date()))));
         return rows[0] || null;
       }),
@@ -316,7 +324,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
     adminList: publicProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
-      await ensureBlogScheduleColumn();
+      await publishDueScheduledBlogs();
       return db.select().from(blogPosts).orderBy(desc(blogPosts.createdAt));
     }),
     adminCreate: publicProcedure

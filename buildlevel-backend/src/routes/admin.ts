@@ -423,7 +423,7 @@ router.post("/fulfillment/orders/:id/retry", requireAdmin, async (req: Request, 
 // ─── Blog Posts ───────────────────────────────────────────────────────────────
 router.get("/blog", requireAdmin, async (req: Request, res: Response) => {
   try {
-    await ensureBlogScheduleColumn();
+    await publishDueScheduledBlogs();
     const db = await getDb();
     const rows = await db.select().from(blogPosts).orderBy(asc(blogPosts.sortOrder), asc(blogPosts.createdAt));
     res.json(rows);
@@ -436,6 +436,12 @@ async function ensureBlogScheduleColumn() {
   const db = await getDb();
   await db.execute(sql.raw(`ALTER TABLE blog_posts ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
   blogScheduleColumnEnsured = true;
+}
+
+async function publishDueScheduledBlogs() {
+  await ensureBlogScheduleColumn();
+  const db = await getDb();
+  await db.execute(sql.raw(`UPDATE blog_posts SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
 }
 
 const scheduledAtSchema = z.union([z.string(), z.date(), z.null()]).optional();

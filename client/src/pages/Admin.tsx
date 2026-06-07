@@ -748,13 +748,16 @@ function BlogTab() {
     if (Number.isNaN(date.getTime())) return "";
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   };
-  const blogStatus = (post: any) => {
-    if (post.published) return "LIVE";
+  const blogStatus = (post: any): { label: string; tone: "published" | "scheduled" | "draft"; detail?: string } => {
+    if (post.published) return { label: "PUBLISHED", tone: "published" };
     if (post.scheduledAt) {
       const scheduled = new Date(post.scheduledAt);
-      if (!Number.isNaN(scheduled.getTime())) return scheduled <= new Date() ? "PUBLISHING" : "SCHEDULED";
+      if (!Number.isNaN(scheduled.getTime())) {
+        if (scheduled <= new Date()) return { label: "PUBLISHED", tone: "published" };
+        return { label: "SCHEDULED", tone: "scheduled", detail: scheduled.toLocaleString() };
+      }
     }
-    return "DRAFT";
+    return { label: "DRAFT", tone: "draft" };
   };
 
   const handleSave = async () => {
@@ -847,14 +850,17 @@ function BlogTab() {
         </div>
       ) : (
         <div className="space-y-3">
-          {posts.map((post: any) => (
+          {posts.map((post: any) => {
+            const status = blogStatus(post);
+            return (
             <div key={post.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 ${post.published ? "bg-green-500/20 text-green-400" : post.scheduledAt ? "bg-[#FF6B00]/20 text-[#FF6B00]" : "bg-[#333] text-[#666]"}`}>
-                    {blogStatus(post)}
+                  <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 border ${status.tone === "published" ? "border-green-400 bg-green-500/20 text-green-300" : status.tone === "scheduled" ? "border-red-500 bg-red-500/20 text-red-200" : "border-white/10 bg-[#333] text-[#888]"}`}>
+                    {status.label}
                   </span>
                   <span className="font-display text-[#FF6B00] text-[10px] tracking-widest">{post.category?.toUpperCase()}</span>
+                  {status.detail && <span className="font-body text-[#888] text-xs">{status.detail}</span>}
                 </div>
                 <p className="font-display text-white font-bold tracking-wide text-sm truncate">{post.title}</p>
                 <p className="font-body text-[#555] text-xs mt-0.5">/blog/{post.slug}</p>
@@ -868,7 +874,8 @@ function BlogTab() {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

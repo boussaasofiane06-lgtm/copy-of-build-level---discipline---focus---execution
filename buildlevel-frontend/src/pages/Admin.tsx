@@ -515,14 +515,30 @@ export default function Admin() {
     return local.toISOString().slice(0, 16);
   };
   const toSchedulePayload = (value: string) => value ? new Date(value).toISOString() : null;
-  const getBlogStatus = (post: BlogPost) => {
-    if (post.published) return "Published";
+  const getBlogStatus = (post: BlogPost): { label: string; tone: "published" | "scheduled" | "draft"; detail?: string } => {
+    if (post.published) return { label: "Published", tone: "published" };
     if (post.scheduledAt) {
       const scheduled = new Date(post.scheduledAt);
-      if (!Number.isNaN(scheduled.getTime())) return scheduled <= new Date() ? "Publishing Now" : `Scheduled ${scheduled.toLocaleString()}`;
+      if (!Number.isNaN(scheduled.getTime())) {
+        if (scheduled <= new Date()) return { label: "Published", tone: "published" };
+        return { label: "Scheduled", tone: "scheduled", detail: scheduled.toLocaleString() };
+      }
     }
-    return "Draft";
+    return { label: "Draft", tone: "draft" };
   };
+  const blogStatusStyle = (tone: "published" | "scheduled" | "draft"): React.CSSProperties => ({
+    display: "inline-flex",
+    alignItems: "center",
+    border: `1px solid ${tone === "published" ? "#22c55e" : tone === "scheduled" ? "var(--red)" : "var(--border)"}`,
+    background: tone === "published" ? "rgba(34,197,94,0.16)" : tone === "scheduled" ? "rgba(192,57,43,0.16)" : "rgba(255,255,255,0.04)",
+    color: tone === "published" ? "#86efac" : tone === "scheduled" ? "#ffb4aa" : "var(--text2)",
+    borderRadius: 4,
+    padding: "3px 8px",
+    fontFamily: "var(--font-display)",
+    fontSize: "0.68rem",
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+  });
 
   const saveBlog = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -1036,10 +1052,19 @@ export default function Admin() {
                   {blog.length === 0 ? <p style={{ color: "var(--text2)", padding: 40, textAlign: "center" }}>No posts yet.</p> :
                     blog.map(p => (
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
+                        {(() => {
+                          const status = getBlogStatus(p);
+                          return (
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.title}</div>
-                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{p.slug} · {getBlogCategoryLabel(p.category)} · {getBlogStatus(p)}</div>
+                          <div style={{ color: "var(--text2)", fontSize: "0.8rem", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <span>{p.slug} · {getBlogCategoryLabel(p.category)}</span>
+                            <span style={blogStatusStyle(status.tone)}>{status.label}</span>
+                            {status.detail && <span style={{ color: "var(--text3)" }}>{status.detail}</span>}
+                          </div>
                         </div>
+                          );
+                        })()}
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => openEditBlog(p)} className="btn btn-outline btn-sm">Edit</button>
                           <button onClick={async () => { if (confirm("Delete?")) { await adminApi.deleteBlogPost(p.id); loadData(); showToast("Deleted"); } }} className="btn btn-sm" style={{ background: "none", border: "1px solid var(--red)", color: "var(--red)" }}>Delete</button>

@@ -25,6 +25,12 @@ async function ensureBlogScheduleColumn() {
   blogScheduleColumnEnsured = true;
 }
 
+async function publishDueScheduledBlogs() {
+  await ensureBlogScheduleColumn();
+  const db = await getDb();
+  await db.execute(sql.raw(`UPDATE blog_posts SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
+}
+
 function normalizeTidioPublicKey(value?: string | null) {
   if (!value) return "";
   const trimmed = value.trim();
@@ -226,7 +232,7 @@ router.get("/products/:id", async (req, res) => {
 // ─── Blog ─────────────────────────────────────────────────────────────────────
 router.get("/blog", async (req, res) => {
   try {
-    await ensureBlogScheduleColumn();
+    await publishDueScheduledBlogs();
     const db = await getDb();
     const rows = await db
       .select()
@@ -241,7 +247,7 @@ router.get("/blog", async (req, res) => {
 
 router.get("/blog/:slug", async (req, res) => {
   try {
-    await ensureBlogScheduleColumn();
+    await publishDueScheduledBlogs();
     const db = await getDb();
     const [row] = await db.select().from(blogPosts).where(and(eq(blogPosts.slug, req.params.slug), or(eq(blogPosts.published, true), lte(blogPosts.scheduledAt, new Date())))).limit(1);
     if (!row) { res.status(404).json({ error: "Not found" }); return; }
