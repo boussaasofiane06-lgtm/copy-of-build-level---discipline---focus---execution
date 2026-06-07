@@ -748,6 +748,12 @@ function BlogTab() {
     if (Number.isNaN(date.getTime())) return "";
     return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
   };
+  const defaultScheduleAtMidnight = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    date.setHours(0, 0, 0, 0);
+    return toDatetimeLocalValue(date.toISOString());
+  };
   const blogStatus = (post: any): { label: string; tone: "published" | "scheduled" | "draft"; detail?: string } => {
     if (post.published) return { label: "PUBLISHED", tone: "published" };
     if (post.scheduledAt) {
@@ -824,12 +830,12 @@ function BlogTab() {
           </div>
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form?.published || false} onChange={e => { const v = e.target.checked; if (editPost) setEditPost(p => p ? { ...p, published: v, scheduledAt: v ? "" : p.scheduledAt } : null); }} className="accent-[#FF6B00]" />
+              <input type="checkbox" checked={form?.published || false} onChange={e => { const v = e.target.checked; if (editPost) setEditPost(p => p ? { ...p, published: v, scheduledAt: v ? "" : (p.scheduledAt || defaultScheduleAtMidnight()) } : null); }} className="accent-[#FF6B00]" />
               <span className="font-display text-[#888] text-xs tracking-widest">PUBLISH (visible to customers)</span>
             </label>
             <label className="flex items-center gap-2">
               <span className="font-display text-[#888] text-xs tracking-widest">SCHEDULE</span>
-              <input type="datetime-local" disabled={form?.published || false} value={form?.scheduledAt || ""} onChange={e => { const v = e.target.value; if (editPost) setEditPost(p => p ? { ...p, scheduledAt: v, published: false } : null); }} className="bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2 outline-none focus:border-[#FF6B00]" />
+              <input type="datetime-local" disabled={form?.published || false} value={form?.scheduledAt || ""} onFocus={() => { if (editPost) setEditPost(p => p ? { ...p, scheduledAt: p.scheduledAt || defaultScheduleAtMidnight(), published: false } : null); }} onChange={e => { const v = e.target.value; if (editPost) setEditPost(p => p ? { ...p, scheduledAt: v, published: false } : null); }} className="bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2 outline-none focus:border-[#FF6B00]" />
             </label>
             <div className="flex gap-2">
               <button onClick={() => { setShowForm(false); setEditPost(null); }} className="admin-btn-secondary">CANCEL</button>

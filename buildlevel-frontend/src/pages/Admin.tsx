@@ -514,6 +514,12 @@ export default function Admin() {
     const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
     return local.toISOString().slice(0, 16);
   };
+  const defaultScheduleAtMidnight = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    date.setHours(0, 0, 0, 0);
+    return toDatetimeLocalValue(date);
+  };
   const toSchedulePayload = (value: string) => value ? new Date(value).toISOString() : null;
   const getBlogStatus = (post: BlogPost): { label: string; tone: "published" | "scheduled" | "draft"; detail?: string } => {
     if (post.published) return { label: "Published", tone: "published" };
@@ -1030,6 +1036,7 @@ export default function Admin() {
                           type="datetime-local"
                           value={blogForm.scheduledAt}
                           disabled={blogForm.published}
+                          onFocus={() => setBlogForm(f => ({ ...f, scheduledAt: f.scheduledAt || defaultScheduleAtMidnight(), published: false }))}
                           onChange={e => setBlogForm(f => ({ ...f, scheduledAt: e.target.value, published: false }))}
                         />
                         <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>
@@ -1037,7 +1044,7 @@ export default function Admin() {
                         </p>
                       </div>
                       <div style={{ display: "flex", gap: 20, gridColumn: "1/-1" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={blogForm.published} onChange={e => setBlogForm(f => ({ ...f, published: e.target.checked, scheduledAt: e.target.checked ? "" : f.scheduledAt }))} /> Published now</label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={blogForm.published} onChange={e => setBlogForm(f => ({ ...f, published: e.target.checked, scheduledAt: e.target.checked ? "" : (f.scheduledAt || defaultScheduleAtMidnight()) }))} /> Published now</label>
                         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={blogForm.featured} onChange={e => setBlogForm(f => ({ ...f, featured: e.target.checked }))} /> Featured</label>
                       </div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
