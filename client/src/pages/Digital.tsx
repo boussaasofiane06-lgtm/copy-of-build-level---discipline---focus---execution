@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { trpc } from "@/lib/trpc";
 import { Loader2 } from "lucide-react";
 
@@ -31,15 +31,30 @@ const releaseCountdown = (scheduledAt?: string | null) => {
   if (Number.isNaN(scheduled.getTime())) return "";
   const diff = scheduled.getTime() - Date.now();
   if (diff <= 0) return "Available soon";
-  const totalMinutes = Math.floor(diff / 60000);
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  const minutes = totalMinutes % 60;
-  return `${days}d ${hours}h ${minutes}m`;
+  const totalSeconds = Math.floor(diff / 1000);
+  const days = Math.floor(totalSeconds / 86400);
+  const hours = Math.floor((totalSeconds % 86400) / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+  return `${days}d ${hours}h ${minutes}m ${seconds}s`;
+};
+
+const DESCRIPTION_PREVIEW_LENGTH = 220;
+const descriptionPreview = (value?: string | null) => {
+  const text = value || "";
+  if (text.length <= DESCRIPTION_PREVIEW_LENGTH) return text;
+  return `${text.slice(0, DESCRIPTION_PREVIEW_LENGTH).trim()}...`;
 };
 
 function ProductCard({ product }: { product: Product }) {
   const [expanded, setExpanded] = useState(false);
+  const [, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!isScheduledDigital(product)) return;
+    const id = window.setInterval(() => setTick(value => value + 1), 1000);
+    return () => window.clearInterval(id);
+  }, [product.id, product.scheduledAt, product.published]);
 
   const categoryLabel =
     product.category === "audiobook" || (product as any).productType === "audiobook"
@@ -81,23 +96,9 @@ function ProductCard({ product }: { product: Product }) {
             {product.badge}
           </div>
         )}
-        {!isScheduledDigital(product) && (
-          <div className="absolute top-3 right-3 border border-green-400 bg-green-500/20 text-green-300 text-xs font-black px-2 py-1 tracking-widest">
-            PUBLISHED
-          </div>
-        )}
         <div className="absolute bottom-3 right-3 bg-black/80 text-orange-400 text-xs font-bold px-2 py-1 border border-orange-500/30 tracking-widest">
           {categoryLabel}
         </div>
-        {isScheduledDigital(product) && (
-          <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-center p-4">
-            <div>
-              <div className="inline-block border border-red-500 bg-red-500/20 text-red-200 text-xs font-black px-3 py-1 tracking-widest mb-3">SCHEDULED</div>
-              <div className="text-white font-black text-xl tracking-widest">{releaseCountdown(product.scheduledAt)}</div>
-              <div className="text-zinc-300 text-xs mt-2">{new Date(product.scheduledAt || "").toLocaleString()}</div>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Content */}
@@ -116,24 +117,22 @@ function ProductCard({ product }: { product: Product }) {
 
         {!isScheduledDigital(product) && product.description && (
           <p className="text-zinc-400 text-sm leading-relaxed mb-4">
-            {product.description}
+            {expanded ? product.description : descriptionPreview(product.description)}
           </p>
         )}
-        {isScheduledDigital(product) && (
-          <div className="border border-red-500/40 bg-red-500/10 p-3 mb-4 text-red-100 text-sm">
-            Preview only. Access opens when this product is published after the countdown.
-          </div>
+        {isScheduledDigital(product) && <p className="text-zinc-500 text-sm leading-relaxed mb-4">Preview only. Access opens when this product is published.</p>}
+
+        {product.description && product.description.length > DESCRIPTION_PREVIEW_LENGTH && !isScheduledDigital(product) && (
+          <button
+            onClick={() => setExpanded(!expanded)}
+            className="text-orange-400 text-xs font-bold tracking-widest uppercase mb-4 flex items-center gap-2 hover:text-orange-300 transition-colors"
+          >
+            <span>{expanded ? "▲" : "▼"}</span>
+            {expanded ? "SHOW LESS" : "READ MORE"}
+          </button>
         )}
 
-        <button
-          onClick={() => setExpanded(!expanded)}
-          className="text-orange-400 text-xs font-bold tracking-widest uppercase mb-4 flex items-center gap-2 hover:text-orange-300 transition-colors"
-        >
-          <span>{expanded ? "▲" : "▼"}</span>
-          DETAILS
-        </button>
-
-        {expanded && (
+        {expanded && !product.description && (
           <div className="mb-4 space-y-2 text-zinc-400 text-sm">
             <div className="flex items-start gap-2">
               <span className="text-orange-500 mt-0.5 shrink-0">▸</span>
@@ -154,10 +153,10 @@ function ProductCard({ product }: { product: Product }) {
 
         <div className="flex items-center justify-between mb-3">
           <div>
-            <span className="text-white font-black text-2xl">
-              ${product.price.toFixed(2)}
+            <span className={`${isScheduledDigital(product) ? "text-zinc-500 text-sm" : "text-white text-2xl"} font-black`}>
+              {isScheduledDigital(product) ? releaseCountdown(product.scheduledAt) : `$${product.price.toFixed(2)}`}
             </span>
-            <span className="text-zinc-600 text-xs ml-2">USD</span>
+            {!isScheduledDigital(product) && <span className="text-zinc-600 text-xs ml-2">USD</span>}
           </div>
           <button
             onClick={handleBuyNow}
