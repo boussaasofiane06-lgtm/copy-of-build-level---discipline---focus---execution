@@ -9,6 +9,20 @@ import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 const router = Router();
 const MAX_PHYSICAL_METADATA_ITEMS = 15;
 
+let digitalScheduleColumnEnsured = false;
+async function ensureDigitalScheduleColumn() {
+  if (digitalScheduleColumnEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`ALTER TABLE digital_products ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  digitalScheduleColumnEnsured = true;
+}
+
+async function publishDueScheduledDigitalProducts() {
+  await ensureDigitalScheduleColumn();
+  const db = await getDb();
+  await db.execute(sql.raw(`UPDATE digital_products SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
+}
+
 class StripeCheckoutError extends Error {
   status: number;
   requestId?: string | null;
@@ -1059,6 +1073,7 @@ router.post("/digital-checkout", async (req: Request, res: Response) => {
       return;
     }
 
+    await publishDueScheduledDigitalProducts();
     const db = await getDb();
     const [product] = await db.select().from(digitalProducts).where(eq(digitalProducts.id, parsedProductId)).limit(1);
     if (!product) { res.status(404).json({ error: "Product not found" }); return; }

@@ -518,6 +518,7 @@ router.delete("/blog/:id", requireAdmin, async (req: Request, res: Response) => 
 // ─── Digital Products ─────────────────────────────────────────────────────────
 router.get("/digital", requireAdmin, async (req: Request, res: Response) => {
   try {
+    await publishDueScheduledDigitalProducts();
     const db = await getDb();
     const rows = await db.select().from(digitalProducts).orderBy(asc(digitalProducts.sortOrder), asc(digitalProducts.createdAt));
     const settings = await getSettingsMap();
@@ -546,6 +547,7 @@ const digitalSchema = z.object({
   downloadLimit: z.number().int().positive().optional(),
   accessExpiresDays: z.number().int().positive().optional(),
   published: z.boolean().default(false),
+  scheduledAt: scheduledAtSchema,
   sortOrder: z.number().default(0),
 });
 
@@ -557,6 +559,20 @@ function getDigitalExpiryDaysKey(productId: number) {
   return `digital_product_${productId}_expires_days`;
 }
 
+let digitalScheduleColumnEnsured = false;
+async function ensureDigitalScheduleColumn() {
+  if (digitalScheduleColumnEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`ALTER TABLE digital_products ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  digitalScheduleColumnEnsured = true;
+}
+
+async function publishDueScheduledDigitalProducts() {
+  await ensureDigitalScheduleColumn();
+  const db = await getDb();
+  await db.execute(sql.raw(`UPDATE digital_products SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
+}
+
 async function saveDigitalAccessSettings(productId: number, data: { downloadLimit?: number; accessExpiresDays?: number }) {
   if (data.downloadLimit !== undefined) await saveSetting(getDigitalLimitKey(productId), String(data.downloadLimit));
   if (data.accessExpiresDays !== undefined) await saveSetting(getDigitalExpiryDaysKey(productId), String(data.accessExpiresDays));
@@ -564,7 +580,9 @@ async function saveDigitalAccessSettings(productId: number, data: { downloadLimi
 
 router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
   try {
+    await ensureDigitalScheduleColumn();
     const data = digitalSchema.parse(req.body);
+    const scheduledAt = data.published ? null : parseScheduledAt(data.scheduledAt) ?? null;
     const db = await getDb();
     await db.insert(digitalProducts).values({
       name: data.name,
@@ -581,6 +599,7 @@ router.post("/digital", requireAdmin, async (req: Request, res: Response) => {
       badge: data.badge,
       stripePaymentLink: data.stripePaymentLink,
       published: data.published,
+      scheduledAt,
       sortOrder: data.sortOrder,
     });
     const [inserted] = await db.select({ id: digitalProducts.id }).from(digitalProducts).orderBy(desc(digitalProducts.createdAt)).limit(1);
@@ -614,11 +633,14 @@ router.post("/digital/upload", requireAdmin, upload.single("file"), async (req: 
 
 router.put("/digital/:id", requireAdmin, async (req: Request, res: Response) => {
   try {
+    await ensureDigitalScheduleColumn();
     const id = parseInt(req.params.id as string);
     const data = digitalSchema.partial().parse(req.body);
     const db = await getDb();
-    const { downloadLimit, accessExpiresDays, ...productData } = data;
+    const { downloadLimit, accessExpiresDays, scheduledAt: rawScheduledAt, ...productData } = data;
     const updateData: Record<string, unknown> = { ...productData, updatedAt: new Date() };
+    if (rawScheduledAt !== undefined) updateData.scheduledAt = parseScheduledAt(rawScheduledAt);
+    if (data.published === true && rawScheduledAt === undefined) updateData.scheduledAt = null;
     if (data.price !== undefined) updateData.price = String(data.price);
     await db.update(digitalProducts).set(updateData).where(eq(digitalProducts.id, id));
     await saveDigitalAccessSettings(id, { downloadLimit, accessExpiresDays });

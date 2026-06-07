@@ -138,6 +138,7 @@ export interface DigitalProduct {
   fileUrl?: string | null;
   imageUrl?: string | null;
   published: boolean;
+  scheduledAt?: string | null;
   downloadCount?: number;
   createdAt?: string;
 }

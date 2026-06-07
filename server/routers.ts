@@ -34,6 +34,27 @@ async function publishDueScheduledBlogs() {
   await db.execute(sql.raw(`UPDATE blog_posts SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
 }
 
+let digitalScheduleColumnEnsured = false;
+async function ensureDigitalScheduleColumn() {
+  if (digitalScheduleColumnEnsured) return;
+  const db = await getDb();
+  if (!db) return;
+  await db.execute(sql.raw(`ALTER TABLE digital_products ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  digitalScheduleColumnEnsured = true;
+}
+
+async function publishDueScheduledDigitalProducts() {
+  await ensureDigitalScheduleColumn();
+  const db = await getDb();
+  if (!db) return;
+  await db.execute(sql.raw(`UPDATE digital_products SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
+}
+
+function cleanDigitalProductForResponse<T extends { published?: boolean | null; fileKey?: string | null; fileUrl?: string | null; stripePaymentLink?: string | null }>(product: T): T {
+  if (product.published) return product;
+  return { ...product, fileKey: null, fileUrl: null, stripePaymentLink: null };
+}
+
 function isLocalhostUrl(value: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(value);
 }
@@ -384,16 +405,18 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
     list: publicProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
+      await publishDueScheduledDigitalProducts();
       const rows = await db
         .select()
         .from(digitalProducts)
-        .where(eq(digitalProducts.published, true))
+        .where(or(eq(digitalProducts.published, true), sql`${digitalProducts.scheduledAt} > NOW()`))
         .orderBy(desc(digitalProducts.sortOrder));
-      return rows.map((p: typeof rows[0]) => ({ ...p, price: parseFloat(String(p.price)) }));
+      return rows.map((p: typeof rows[0]) => cleanDigitalProductForResponse({ ...p, price: parseFloat(String(p.price)) }));
     }),
     adminList: publicProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
+      await publishDueScheduledDigitalProducts();
       const rows = await db.select().from(digitalProducts).orderBy(desc(digitalProducts.createdAt));
       return rows.map((p: typeof rows[0]) => ({ ...p, price: parseFloat(String(p.price)) }));
     }),
@@ -410,11 +433,14 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         badge: z.string().optional(),
         stripePaymentLink: z.string().optional(),
         published: z.boolean().default(false),
+        scheduledAt: z.union([z.string(), z.date(), z.null()]).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("DB unavailable");
-        await db.insert(digitalProducts).values({ ...input, price: String(input.price) });
+        await ensureDigitalScheduleColumn();
+        const scheduledAt = input.published ? null : input.scheduledAt ? new Date(input.scheduledAt) : null;
+        await db.insert(digitalProducts).values({ ...input, scheduledAt, price: String(input.price) });
         return { success: true };
       }),
     adminUpdate: publicProcedure
@@ -431,13 +457,17 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         badge: z.string().optional(),
         stripePaymentLink: z.string().optional(),
         published: z.boolean().optional(),
+        scheduledAt: z.union([z.string(), z.date(), z.null()]).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("DB unavailable");
-        const { id, price, ...rest } = input;
+        await ensureDigitalScheduleColumn();
+        const { id, price, scheduledAt: rawScheduledAt, ...rest } = input;
         const data: Record<string, unknown> = { ...rest };
         if (price !== undefined) data.price = String(price);
+        if (rawScheduledAt !== undefined) data.scheduledAt = rawScheduledAt ? new Date(rawScheduledAt) : null;
+        if (input.published === true && rawScheduledAt === undefined) data.scheduledAt = null;
         await db.update(digitalProducts).set(data).where(eq(digitalProducts.id, id));
         return { success: true };
       }),
@@ -458,6 +488,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       .mutation(async ({ input, ctx }) => {
         const db = await getDb();
         if (!db) throw new Error("DB unavailable");
+        await publishDueScheduledDigitalProducts();
         const rows = await db.select().from(digitalProducts).where(eq(digitalProducts.id, input.productId));
         const product = rows[0];
         if (!product || !product.published) throw new Error("Product not found");

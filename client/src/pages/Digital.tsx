@@ -14,8 +14,28 @@ type Product = {
   badge: string | null;
   stripePaymentLink?: string | null;
   published: boolean | null;
+  scheduledAt?: string | null;
   sortOrder: number | null;
   createdAt: Date | null;
+};
+
+const isScheduledDigital = (product: Product) => {
+  if (product.published || !product.scheduledAt) return false;
+  const scheduled = new Date(product.scheduledAt);
+  return !Number.isNaN(scheduled.getTime()) && scheduled > new Date();
+};
+
+const releaseCountdown = (scheduledAt?: string | null) => {
+  if (!scheduledAt) return "";
+  const scheduled = new Date(scheduledAt);
+  if (Number.isNaN(scheduled.getTime())) return "";
+  const diff = scheduled.getTime() - Date.now();
+  if (diff <= 0) return "Available soon";
+  const totalMinutes = Math.floor(diff / 60000);
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  const minutes = totalMinutes % 60;
+  return `${days}d ${hours}h ${minutes}m`;
 };
 
 function ProductCard({ product }: { product: Product }) {
@@ -29,6 +49,10 @@ function ProductCard({ product }: { product: Product }) {
       : "PDF GUIDE";
 
   const handleBuyNow = () => {
+    if (isScheduledDigital(product)) {
+      alert("This digital product is coming soon. Access opens when the countdown ends.");
+      return;
+    }
     const link = product.stripePaymentLink;
     if (link) {
       window.open(link, "_blank");
@@ -58,6 +82,15 @@ function ProductCard({ product }: { product: Product }) {
         <div className="absolute bottom-3 right-3 bg-black/80 text-orange-400 text-xs font-bold px-2 py-1 border border-orange-500/30 tracking-widest">
           {categoryLabel}
         </div>
+        {isScheduledDigital(product) && (
+          <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-center p-4">
+            <div>
+              <div className="inline-block border border-red-500 bg-red-500/20 text-red-200 text-xs font-black px-3 py-1 tracking-widest mb-3">COMING SOON</div>
+              <div className="text-white font-black text-xl tracking-widest">{releaseCountdown(product.scheduledAt)}</div>
+              <div className="text-zinc-300 text-xs mt-2">{new Date(product.scheduledAt || "").toLocaleString()}</div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Content */}
@@ -74,10 +107,15 @@ function ProductCard({ product }: { product: Product }) {
           <span className="text-zinc-500 text-xs">Digital Product</span>
         </div>
 
-        {product.description && (
+        {!isScheduledDigital(product) && product.description && (
           <p className="text-zinc-400 text-sm leading-relaxed mb-4">
             {product.description}
           </p>
+        )}
+        {isScheduledDigital(product) && (
+          <div className="border border-red-500/40 bg-red-500/10 p-3 mb-4 text-red-100 text-sm">
+            Preview only. Access opens when this product is published after the countdown.
+          </div>
         )}
 
         <button
@@ -116,9 +154,10 @@ function ProductCard({ product }: { product: Product }) {
           </div>
           <button
             onClick={handleBuyNow}
-            className="bg-orange-500 hover:bg-orange-400 text-black font-black text-sm px-6 py-3 tracking-widest uppercase transition-colors duration-200"
+            disabled={isScheduledDigital(product)}
+            className="bg-orange-500 hover:bg-orange-400 text-black font-black text-sm px-6 py-3 tracking-widest uppercase transition-colors duration-200 disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            BUY NOW →
+            {isScheduledDigital(product) ? "COMING SOON" : "BUY NOW →"}
           </button>
         </div>
 

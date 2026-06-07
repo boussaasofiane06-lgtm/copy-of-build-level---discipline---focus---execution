@@ -74,6 +74,7 @@ export const digitalProducts = mysqlTable("digital_products", {
   badge: varchar("badge", { length: 64 }),
   stripePaymentLink: text("stripePaymentLink"),
   published: boolean("published").notNull().default(false),
+  scheduledAt: timestamp("scheduledAt"),
   sortOrder: int("sortOrder").notNull().default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),

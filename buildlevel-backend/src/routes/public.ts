@@ -31,6 +31,25 @@ async function publishDueScheduledBlogs() {
   await db.execute(sql.raw(`UPDATE blog_posts SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
 }
 
+let digitalScheduleColumnEnsured = false;
+async function ensureDigitalScheduleColumn() {
+  if (digitalScheduleColumnEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`ALTER TABLE digital_products ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  digitalScheduleColumnEnsured = true;
+}
+
+async function publishDueScheduledDigitalProducts() {
+  await ensureDigitalScheduleColumn();
+  const db = await getDb();
+  await db.execute(sql.raw(`UPDATE digital_products SET published = true, scheduledAt = NULL, updatedAt = NOW() WHERE published = false AND scheduledAt IS NOT NULL AND scheduledAt <= NOW()`)).catch(() => undefined);
+}
+
+function cleanDigitalProductForResponse<T extends { published?: boolean | null; scheduledAt?: Date | string | null; fileKey?: string | null; fileUrl?: string | null; audioUrl?: string | null; stripePaymentLink?: string | null }>(product: T): T {
+  if (product.published) return product;
+  return { ...product, fileKey: null, fileUrl: null, audioUrl: null, stripePaymentLink: null };
+}
+
 function normalizeTidioPublicKey(value?: string | null) {
   if (!value) return "";
   const trimmed = value.trim();
@@ -260,13 +279,14 @@ router.get("/blog/:slug", async (req, res) => {
 // ─── Digital Products ─────────────────────────────────────────────────────────
 router.get("/digital", async (req, res) => {
   try {
+    await publishDueScheduledDigitalProducts();
     const db = await getDb();
     const rows = await db
       .select()
       .from(digitalProducts)
-      .where(eq(digitalProducts.published, true))
+      .where(or(eq(digitalProducts.published, true), sql`${digitalProducts.scheduledAt} > NOW()`))
       .orderBy(asc(digitalProducts.sortOrder), asc(digitalProducts.createdAt));
-    res.json(rows);
+    res.json(rows.map(cleanDigitalProductForResponse));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

@@ -84,6 +84,7 @@ export interface DigitalProduct {
   downloadLimit?: number;
   accessExpiresDays?: number;
   published: boolean;
+  scheduledAt?: string | null;
   createdAt: string;
 }
 

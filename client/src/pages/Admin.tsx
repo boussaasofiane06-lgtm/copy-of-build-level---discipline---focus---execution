@@ -896,9 +896,9 @@ function DigitalTab() {
   type FormData = {
     id?: number; name: string; description: string; price: string;
     category: string; productType: string; imageUrl: string; fileUrl: string; fileName: string;
-    audioUrl: string; duration: string; badge: string; stripePaymentLink: string; published: boolean;
+    audioUrl: string; duration: string; badge: string; stripePaymentLink: string; published: boolean; scheduledAt: string;
   };
-  const EMPTY_FORM: FormData = { name: "", description: "", price: "", category: "guide", productType: "pdf", imageUrl: "", fileUrl: "", fileName: "", audioUrl: "", duration: "", badge: "", stripePaymentLink: "", published: false };
+  const EMPTY_FORM: FormData = { name: "", description: "", price: "", category: "guide", productType: "pdf", imageUrl: "", fileUrl: "", fileName: "", audioUrl: "", duration: "", badge: "", stripePaymentLink: "", published: false, scheduledAt: "" };
 
   const [showForm, setShowForm] = useState(false);
   const [formData, setFormData] = useState<FormData>(EMPTY_FORM);
@@ -916,9 +916,22 @@ function DigitalTab() {
   const setField = (field: keyof FormData, value: string | boolean) =>
     setFormData(p => ({ ...p, [field]: value }));
 
+  const toDigitalDatetimeLocalValue = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+  const defaultDigitalScheduleAtMidnight = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    date.setHours(0, 0, 0, 0);
+    return toDigitalDatetimeLocalValue(date.toISOString());
+  };
+
   const openAdd = () => { setFormData(EMPTY_FORM); setShowForm(true); };
   const openEdit = (item: any) => {
-    setFormData({ id: item.id, name: item.name, description: item.description || "", price: String(item.price), category: item.category || "guide", productType: item.productType || "pdf", imageUrl: item.imageUrl || "", fileUrl: item.fileUrl || "", fileName: item.fileName || "", audioUrl: item.audioUrl || "", duration: item.duration || "", badge: item.badge || "", stripePaymentLink: item.stripePaymentLink || "", published: item.published ?? false });
+    setFormData({ id: item.id, name: item.name, description: item.description || "", price: String(item.price), category: item.category || "guide", productType: item.productType || "pdf", imageUrl: item.imageUrl || "", fileUrl: item.fileUrl || "", fileName: item.fileName || "", audioUrl: item.audioUrl || "", duration: item.duration || "", badge: item.badge || "", stripePaymentLink: item.stripePaymentLink || "", published: item.published ?? false, scheduledAt: toDigitalDatetimeLocalValue(item.scheduledAt) });
     setShowForm(true);
   };
   const closeForm = () => { setShowForm(false); setFormData(EMPTY_FORM); };
@@ -947,7 +960,7 @@ function DigitalTab() {
     if (!formData.name || !formData.price) { toast.error("Name and price are required"); return; }
     const price = parseFloat(formData.price);
     if (isNaN(price) || price < 0) { toast.error("Invalid price"); return; }
-    const payload = { name: formData.name, description: formData.description || undefined, price: String(price), category: formData.category, imageUrl: formData.imageUrl || undefined, fileUrl: formData.fileUrl || undefined, fileName: formData.fileName || undefined, badge: formData.badge || undefined, stripePaymentLink: formData.stripePaymentLink || undefined, published: formData.published };
+    const payload = { name: formData.name, description: formData.description || undefined, price: String(price), category: formData.category, imageUrl: formData.imageUrl || undefined, fileUrl: formData.fileUrl || undefined, fileName: formData.fileName || undefined, badge: formData.badge || undefined, stripePaymentLink: formData.stripePaymentLink || undefined, published: formData.published, scheduledAt: formData.published ? null : formData.scheduledAt ? new Date(formData.scheduledAt).toISOString() : null };
     setDigitalSaving(true);
     try {
       if (formData.id) {
@@ -960,6 +973,17 @@ function DigitalTab() {
       setShowForm(false); setFormData(EMPTY_FORM); await loadItems();
     } catch { toast.error("Failed to save product"); }
     finally { setDigitalSaving(false); }
+  };
+  const digitalStatus = (item: DigitalProduct): { label: string; tone: "published" | "scheduled" | "draft"; detail?: string } => {
+    if (item.published) return { label: "LIVE", tone: "published" };
+    if (item.scheduledAt) {
+      const scheduled = new Date(item.scheduledAt);
+      if (!Number.isNaN(scheduled.getTime())) {
+        if (scheduled <= new Date()) return { label: "LIVE", tone: "published" };
+        return { label: "SCHEDULED", tone: "scheduled", detail: scheduled.toLocaleString() };
+      }
+    }
+    return { label: "DRAFT", tone: "draft" };
   };
 
   return (
@@ -1041,6 +1065,11 @@ function DigitalTab() {
             <input value={formData.stripePaymentLink} onChange={e => setField('stripePaymentLink', e.target.value)} className="w-full bg-[#111] border border-white/10 text-white font-body text-sm px-3 py-2 outline-none focus:border-[#FF6B00]" placeholder="https://buy.stripe.com/... (paste your Stripe Payment Link)" />
             <p className="font-body text-[#444] text-[10px] mt-1">Create payment links at dashboard.stripe.com → Payment Links. Customers click BUY NOW and go directly to this link.</p>
           </div>
+          <div className="border border-white/10 bg-white/[0.03] p-4">
+            <label className="font-display text-[#888] text-[10px] tracking-widest block mb-1">SCHEDULE DIGITAL RELEASE</label>
+            <input type="datetime-local" disabled={formData.published} value={formData.scheduledAt} onFocus={() => setFormData(f => ({ ...f, scheduledAt: f.scheduledAt || defaultDigitalScheduleAtMidnight(), published: false }))} onChange={e => setFormData(f => ({ ...f, scheduledAt: e.target.value, published: false }))} className="w-full bg-[#111] border border-white/10 text-white font-body text-sm px-3 py-2 outline-none focus:border-[#FF6B00]" />
+            <p className="font-body text-[#555] text-[10px] mt-1">Leave publish off and choose a date/time to show a locked countdown preview.</p>
+          </div>
           {(formData.productType === "audiobook" || formData.productType === "video") && (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
@@ -1055,7 +1084,7 @@ function DigitalTab() {
           )}
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={formData.published} onChange={e => setField('published', e.target.checked)} className="accent-[#FF6B00]" />
+              <input type="checkbox" checked={formData.published} onChange={e => setFormData(f => ({ ...f, published: e.target.checked, scheduledAt: e.target.checked ? "" : (f.scheduledAt || defaultDigitalScheduleAtMidnight()) }))} className="accent-[#FF6B00]" />
               <span className="font-display text-[#888] text-xs tracking-widest">PUBLISH (visible to customers)</span>
             </label>
             <div className="flex gap-2">
@@ -1077,14 +1106,17 @@ function DigitalTab() {
         </div>
       ) : (
         <div className="space-y-3">
-          {items.map((item: any) => (
+          {items.map((item: any) => {
+            const status = digitalStatus(item);
+            return (
             <div key={item.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 ${item.published ? "bg-green-500/20 text-green-400" : "bg-[#333] text-[#666]"}`}>
-                    {item.published ? "LIVE" : "DRAFT"}
+                  <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 border ${status.tone === "published" ? "border-green-400 bg-green-500/20 text-green-300" : status.tone === "scheduled" ? "border-red-500 bg-red-500/20 text-red-200" : "border-white/10 bg-[#333] text-[#888]"}`}>
+                    {status.label}
                   </span>
                   <span className="font-display text-[#FF6B00] text-[10px] tracking-widest">{item.category?.toUpperCase()}</span>
+                  {status.detail && <span className="font-body text-[#888] text-xs">{status.detail}</span>}
                 </div>
                 <p className="font-display text-white font-bold tracking-wide text-sm truncate">{item.name}</p>
                 <p className="font-body text-[#555] text-xs mt-0.5">${item.price.toFixed(2)} · {item.fileUrl ? "File linked ✓" : "No file linked"}</p>
@@ -1098,7 +1130,8 @@ function DigitalTab() {
                 </button>
               </div>
             </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </div>

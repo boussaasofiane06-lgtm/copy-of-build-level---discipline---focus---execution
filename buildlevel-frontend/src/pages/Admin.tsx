@@ -188,7 +188,7 @@ export default function Admin() {
   // Digital form
   const [showDigitalForm, setShowDigitalForm] = useState(false);
   const [editDigital, setEditDigital] = useState<Partial<DigitalProduct> | null>(null);
-  const [digitalForm, setDigitalForm] = useState({ name: "", description: "", price: "", category: "mindset", productType: "pdf" as "pdf"|"audiobook"|"video"|"other", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", accessExpiresDays: "30", published: true });
+  const [digitalForm, setDigitalForm] = useState({ name: "", description: "", price: "", category: "mindset", productType: "pdf" as "pdf"|"audiobook"|"video"|"other", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", accessExpiresDays: "30", published: true, scheduledAt: "" });
   const [digitalUploadProgress, setDigitalUploadProgress] = useState(0);
   const [thumbnailUploadProgress, setThumbnailUploadProgress] = useState(0);
   const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
@@ -403,6 +403,31 @@ export default function Admin() {
   };
 
   // Digital CRUD
+  const toDigitalDatetimeLocalValue = (value?: string | Date | null) => {
+    if (!value) return "";
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  };
+  const defaultDigitalScheduleAtMidnight = () => {
+    const date = new Date();
+    date.setDate(date.getDate() + 1);
+    date.setHours(0, 0, 0, 0);
+    return toDigitalDatetimeLocalValue(date);
+  };
+  const toDigitalSchedulePayload = (value: string) => value ? new Date(value).toISOString() : null;
+  const getDigitalStatus = (product: DigitalProduct): { label: string; tone: "published" | "scheduled" | "draft"; detail?: string } => {
+    if (product.published) return { label: "Published", tone: "published" };
+    if (product.scheduledAt) {
+      const scheduled = new Date(product.scheduledAt);
+      if (!Number.isNaN(scheduled.getTime())) {
+        if (scheduled <= new Date()) return { label: "Published", tone: "published" };
+        return { label: "Scheduled", tone: "scheduled", detail: scheduled.toLocaleString() };
+      }
+    }
+    return { label: "Draft", tone: "draft" };
+  };
   const saveDigital = async (e: React.FormEvent) => {
     e.preventDefault();
     if (digitalUploadProgress > 0 && digitalUploadProgress < 100) {
@@ -415,18 +440,19 @@ export default function Admin() {
       price: parseFloat(digitalForm.price),
       downloadLimit: Number.parseInt(digitalForm.downloadLimit, 10) || 5,
       accessExpiresDays: Number.parseInt(digitalForm.accessExpiresDays, 10) || 30,
+      scheduledAt: digitalForm.published ? null : toDigitalSchedulePayload(digitalForm.scheduledAt),
     };
     try {
       if (editDigital?.id) await adminApi.updateDigitalProduct(editDigital.id, data as any);
       else await adminApi.createDigitalProduct(data as any);
-      showToast(editDigital?.id ? "Updated!" : "Created!");
+      showToast(digitalForm.published ? (editDigital?.id ? "Updated and published!" : "Created and published!") : digitalForm.scheduledAt ? "Digital product scheduled!" : (editDigital?.id ? "Draft updated!" : "Draft created!"));
       setShowDigitalForm(false); setEditDigital(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setThumbnailPreviews([]); setDigitalFileInfo(null); loadData();
     } catch (error: any) { showToast(error?.response?.data?.error || "Error saving"); }
   };
 
   const openEditDigital = (p: DigitalProduct) => {
     setEditDigital(p);
-    setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", fileKey: p.fileKey || "", fileUrl: p.fileUrl || "", fileName: p.fileName || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", version: "1.0", downloadLimit: String(p.downloadLimit || 5), accessExpiresDays: String(p.accessExpiresDays || 30), published: p.published });
+    setDigitalForm({ name: p.name, description: p.description || "", price: p.price, category: p.category, productType: p.productType, imageUrl: p.imageUrl || "", fileKey: p.fileKey || "", fileUrl: p.fileUrl || "", fileName: p.fileName || "", badge: p.badge || "", stripePaymentLink: p.stripePaymentLink || "", duration: p.duration || "", version: "1.0", downloadLimit: String(p.downloadLimit || 5), accessExpiresDays: String(p.accessExpiresDays || 30), published: p.published, scheduledAt: toDigitalDatetimeLocalValue(p.scheduledAt) });
     setThumbnailPreviews(p.imageUrl ? [p.imageUrl] : []);
     setDigitalFileInfo((p.fileName || p.fileKey || p.fileUrl) ? { name: p.fileName || "Stored digital upload", size: 0, mimeType: "Stored file" } : null);
     setShowDigitalForm(true);
@@ -853,7 +879,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Digital Products ({digital.length})</h3>
-                  <button onClick={() => { setEditDigital(null); setDigitalForm({ name: "", description: "", price: "", category: "mindset", productType: "pdf", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", accessExpiresDays: "30", published: true }); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setShowDigitalForm(true); }} className="btn btn-primary btn-sm">+ Add Digital</button>
+                  <button onClick={() => { setEditDigital(null); setDigitalForm({ name: "", description: "", price: "", category: "mindset", productType: "pdf", imageUrl: "", fileKey: "", fileUrl: "", fileName: "", badge: "", stripePaymentLink: "", duration: "", version: "1.0", downloadLimit: "5", accessExpiresDays: "30", published: true, scheduledAt: "" }); setThumbnailPreviews([]); setDigitalFileInfo(null); setDigitalUploadProgress(0); setThumbnailUploadProgress(0); setShowDigitalForm(true); }} className="btn btn-primary btn-sm">+ Add Digital</button>
                 </div>
 
                 {showDigitalForm && (
@@ -953,7 +979,21 @@ export default function Admin() {
                       </div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Stripe Payment Link (optional)</label><input style={inputStyle} value={digitalForm.stripePaymentLink} onChange={e => setDigitalForm(f => ({ ...f, stripePaymentLink: e.target.value }))} placeholder="https://buy.stripe.com/..." /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Description</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={3} value={digitalForm.description} onChange={e => setDigitalForm(f => ({ ...f, description: e.target.value }))} /></div>
-                      <div><label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={digitalForm.published} onChange={e => setDigitalForm(f => ({ ...f, published: e.target.checked }))} /> Published</label></div>
+                      <div style={{ gridColumn: "1/-1", border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "rgba(255,255,255,0.025)" }}>
+                        <label style={labelStyle}>Schedule Digital Release</label>
+                        <input
+                          style={inputStyle}
+                          type="datetime-local"
+                          value={digitalForm.scheduledAt}
+                          disabled={digitalForm.published}
+                          onFocus={() => setDigitalForm(f => ({ ...f, scheduledAt: f.scheduledAt || defaultDigitalScheduleAtMidnight(), published: false }))}
+                          onChange={e => setDigitalForm(f => ({ ...f, scheduledAt: e.target.value, published: false }))}
+                        />
+                        <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>
+                          Leave Published unchecked, then choose when this digital product becomes available. Until then, customers only see the thumbnail and countdown.
+                        </p>
+                      </div>
+                      <div><label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={digitalForm.published} onChange={e => setDigitalForm(f => ({ ...f, published: e.target.checked, scheduledAt: e.target.checked ? "" : (f.scheduledAt || defaultDigitalScheduleAtMidnight()) }))} /> Published / Available now</label></div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
                         <button type="submit" className="btn btn-primary btn-sm" disabled={digitalUploadProgress > 0 && digitalUploadProgress < 100}>
                           {digitalUploadProgress > 0 && digitalUploadProgress < 100 ? "Uploading..." : "Save"}
@@ -966,12 +1006,18 @@ export default function Admin() {
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {digital.length === 0 ? <p style={{ color: "var(--text2)", padding: 40, textAlign: "center" }}>No digital products yet.</p> :
-                    digital.map(p => (
+                    digital.map(p => {
+                      const status = getDigitalStatus(p);
+                      return (
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
                         {p.imageUrl && <img src={storageImageUrl(p.imageUrl)} alt={p.name} style={{ width: 48, height: 48, objectFit: "cover", borderRadius: 4 }} />}
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.name}</div>
-                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>${parseFloat(p.price).toFixed(2)} · {p.productType} · {p.published ? "Published" : "Draft"}</div>
+                          <div style={{ color: "var(--text2)", fontSize: "0.8rem", display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <span>${parseFloat(p.price).toFixed(2)} · {p.productType}</span>
+                            <span style={blogStatusStyle(status.tone)}>{status.label}</span>
+                            {status.detail && <span style={{ color: "var(--text3)" }}>{status.detail}</span>}
+                          </div>
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
                           {p.published && (
@@ -981,7 +1027,7 @@ export default function Admin() {
                           <button onClick={async () => { if (confirm("Delete?")) { await adminApi.deleteDigitalProduct(p.id); loadData(); showToast("Deleted"); } }} className="btn btn-sm" style={{ background: "none", border: "1px solid var(--red)", color: "var(--red)" }}>Delete</button>
                         </div>
                       </div>
-                    ))
+                    );})
                   }
                 </div>
               </div>
