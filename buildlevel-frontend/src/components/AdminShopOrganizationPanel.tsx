@@ -54,6 +54,7 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
   const productAudience = (product: Product) => assignmentFor(product.id)[0]?.audienceName || "Unassigned";
   const productCategory = (product: Product) => assignmentFor(product.id).find(row => row.assignmentType === "primary")?.categoryName || product.category;
   const productSource = (product: Product) => product.printifyProductId ? "Printify" : product.shopifyProductId ? "Shopify" : "Manual Apparel";
+  const productAudienceOptions = taxonomy.audiences;
 
   const filteredProducts = useMemo(() => products.filter(product => {
     const rows = assignmentFor(product.id);
@@ -260,7 +261,7 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
           <h3 style={{ fontSize: "1rem", marginBottom: 12 }}>Products</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 10, marginBottom: 14 }}>
             <input className="input" placeholder="Search product name" value={filters.search} onChange={e => setFilters(f => ({ ...f, search: e.target.value }))} />
-            <select className="input" value={filters.audienceId} onChange={e => setFilters(f => ({ ...f, audienceId: Number(e.target.value), categoryId: 0 }))}><option value={0}>All audiences</option>{taxonomy.audiences.filter(a => !a.isForYou).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+            <select className="input" value={filters.audienceId} onChange={e => setFilters(f => ({ ...f, audienceId: Number(e.target.value), categoryId: 0 }))}><option value={0}>All audiences</option>{productAudienceOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
             <select className="input" value={filters.categoryId} onChange={e => setFilters(f => ({ ...f, categoryId: Number(e.target.value) }))}><option value={0}>All categories</option>{taxonomy.categories.filter(c => !filters.audienceId || Number(c.audienceId) === Number(filters.audienceId)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
             <select className="input" value={filters.source} onChange={e => setFilters(f => ({ ...f, source: e.target.value }))}><option value="">All sources</option><option>Printify</option><option>Manual Apparel</option><option>Shopify</option></select>
             <select className="input" value={filters.published} onChange={e => setFilters(f => ({ ...f, published: e.target.value }))}><option value="">Published/Draft</option><option value="published">Published</option><option value="draft">Draft</option></select>
@@ -276,13 +277,13 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
                     <p style={{ color: "var(--text3)", fontSize: "0.76rem" }}>{productSource(product)} • Printify: {product.printifyProductId || "none"} • {productAudience(product)} / {productCategory(product)}</p>
                   </div>
                 </div>
-                <button className="btn btn-outline btn-sm" onClick={() => setClassification({ productId: product.id, audienceId: taxonomy.audiences.find(a => !a.isForYou)?.id || 0, categoryId: 0 })}>Classify</button>
+                <button className="btn btn-outline btn-sm" onClick={() => setClassification({ productId: product.id, audienceId: productAudienceOptions[0]?.id || 0, categoryId: 0 })}>Classify</button>
               </div>
             ))}
           </div>
           <div style={{ borderTop: "1px solid var(--border)", marginTop: 16, paddingTop: 16, display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
             <select className="input" value={classification.productId} onChange={e => setClassification(f => ({ ...f, productId: Number(e.target.value) }))}>{products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select>
-            <select className="input" value={classification.audienceId} onChange={e => setClassification(f => ({ ...f, audienceId: Number(e.target.value), categoryId: 0 }))}>{taxonomy.audiences.filter(a => !a.isForYou).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
+            <select className="input" value={classification.audienceId} onChange={e => setClassification(f => ({ ...f, audienceId: Number(e.target.value), categoryId: 0 }))}>{productAudienceOptions.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select>
             <select className="input" value={classification.categoryId} onChange={e => setClassification(f => ({ ...f, categoryId: Number(e.target.value) }))}><option value={0}>Select category</option>{taxonomy.categories.filter(c => Number(c.audienceId) === Number(classification.audienceId)).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select>
             <button className="btn btn-primary btn-sm" onClick={assignProduct} disabled={!classification.productId || !classification.audienceId}>Save Product Classification</button>
           </div>
