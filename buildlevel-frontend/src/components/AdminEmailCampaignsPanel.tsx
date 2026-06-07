@@ -20,13 +20,14 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
   const [preview, setPreview] = useState<{ html: string; eligibleSubscribers: number; subject: string } | null>(null);
   const [testEmail, setTestEmail] = useState("");
   const [audience, setAudience] = useState<string[]>(["all_updates"]);
+  const [currentMonthOnly, setCurrentMonthOnly] = useState(false);
 
-  const load = async () => {
+  const load = async (nextAudience = audience, monthOnly = currentMonthOnly) => {
     try {
       const [settingsData, queueData, previewData] = await Promise.all([
         adminApi.getMonthlyDigestSettings(),
-        adminApi.getMonthlyDigestQueue(),
-        adminApi.previewMonthlyDigest(audience),
+        adminApi.getMonthlyDigestQueue({ audience: nextAudience, currentMonthOnly: monthOnly }),
+        adminApi.previewMonthlyDigest(nextAudience),
       ]);
       setSettings({ ...defaultSettings, ...settingsData });
       setQueue(queueData);
@@ -38,11 +39,12 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
 
   useEffect(() => { load(); }, []);
 
-  const refreshQueue = async () => {
-    const result = await adminApi.refreshMonthlyDigestQueue();
+  const refreshQueue = async (monthOnly = currentMonthOnly) => {
+    const result = await adminApi.refreshMonthlyDigestQueue({ audience, currentMonthOnly: monthOnly });
     setQueue(result.queue);
-    showToast("Monthly Digest queue refreshed");
-    load();
+    setCurrentMonthOnly(monthOnly);
+    showToast(monthOnly ? "Queue refreshed with new items from this month" : "Monthly Digest queue refreshed");
+    load(audience, monthOnly);
   };
 
   const saveSettings = async () => {
@@ -63,7 +65,7 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
 
   const sendTest = async () => {
     if (!testEmail) { showToast("Enter a test email first", "error"); return; }
-    const result = await adminApi.sendMonthlyDigestTest(testEmail);
+    const result = await adminApi.sendMonthlyDigestTest(testEmail, audience);
     showToast(result.skipped ? result.message || "Test skipped" : "Test email sent");
   };
 
@@ -75,7 +77,12 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
   };
 
   const toggleAudience = (value: string) => {
-    setAudience(current => current.includes(value) ? current.filter(item => item !== value) : [...current, value]);
+    setAudience(current => {
+      const next = current.includes(value) ? current.filter(item => item !== value) : [...current, value];
+      const normalized = next.length ? (value === "all_updates" && !current.includes("all_updates") ? ["all_updates"] : next.filter(item => item !== "all_updates")) : [];
+      load(normalized, currentMonthOnly);
+      return normalized;
+    });
   };
 
   return (
@@ -95,8 +102,9 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
         </div>
         <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
           <button className="btn btn-primary btn-sm" onClick={saveSettings}>Save Settings</button>
-          <button className="btn btn-outline btn-sm" onClick={refreshQueue}>Refresh Queue</button>
-          <button className="btn btn-outline btn-sm" onClick={load}>Preview</button>
+          <button className="btn btn-outline btn-sm" onClick={() => refreshQueue(false)}>Refresh Queue</button>
+          <button className="btn btn-outline btn-sm" onClick={() => refreshQueue(true)}>Refresh New This Month</button>
+          <button className="btn btn-outline btn-sm" onClick={() => load()}>Preview</button>
         </div>
       </div>
 
@@ -118,6 +126,9 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
             </label>
           ))}
         </div>
+        <p style={{ color: "var(--text3)", fontSize: "0.78rem", marginTop: 10 }}>
+          Queue and preview use only selected audience types. {currentMonthOnly ? "Showing new items added this month only." : "Use Refresh New This Month to remove older queue items from this view."}
+        </p>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(320px, 0.8fr)", gap: 18 }}>

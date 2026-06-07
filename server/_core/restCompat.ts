@@ -830,36 +830,75 @@ async function getMonthlyDigestSettings() {
   };
 }
 
-async function refreshMonthlyDigestQueue() {
+function normalizeDigestAudience(audience?: string[]) {
+  const clean = (Array.isArray(audience) && audience.length ? audience : ["all_updates"]).filter(Boolean);
+  return clean.includes("all_updates") ? ["all_updates"] : Array.from(new Set(clean));
+}
+
+function digestContentTypesForAudience(audience?: string[]) {
+  const interests = normalizeDigestAudience(audience);
+  if (interests.includes("all_updates")) return ["apparel", "featured", "digital", "audiobook", "blog", "news", "announcement"];
+  const types = new Set<string>();
+  if (interests.includes("new_apparel")) types.add("apparel");
+  if (interests.includes("featured_products")) types.add("featured");
+  if (interests.includes("digital_products")) types.add("digital");
+  if (interests.includes("audiobooks")) types.add("audiobook");
+  if (interests.includes("blog_motivation")) types.add("blog");
+  if (interests.includes("build_level_news")) { types.add("news"); types.add("announcement"); }
+  return Array.from(types);
+}
+
+function rowMatchesAudience(row: any, audience?: string[]) {
+  const types = digestContentTypesForAudience(audience);
+  return types.length > 0 && types.includes(String(row.contentType));
+}
+
+async function refreshMonthlyDigestQueue(audience?: string[], currentMonthOnly = false) {
   const db = await requireDb();
+  const allowedTypes = digestContentTypesForAudience(audience);
+  if (currentMonthOnly) {
+    if (allowedTypes.length === 0) await db.execute(sql`DELETE FROM monthly_digest_queue WHERE createdAt >= DATE_FORMAT(NOW(), '%Y-%m-01')`);
+    else await db.execute(sql`DELETE FROM monthly_digest_queue WHERE contentType IN (${sql.join(allowedTypes.map(type => sql`${type}`), sql`, `)})`);
+  }
   const [apparelRows, digitalRows, blogRows] = await Promise.all([
-    db.select().from(products).where(eq(products.published, true)).limit(20),
-    db.select().from(digitalProducts).where(eq(digitalProducts.published, true)).limit(20),
-    db.select().from(blogPosts).where(eq(blogPosts.published, true)).limit(20),
+    allowedTypes.some(type => type === "apparel" || type === "featured") ? db.select().from(products).where(eq(products.published, true)).limit(20) : Promise.resolve([]),
+    allowedTypes.some(type => type === "digital" || type === "audiobook") ? db.select().from(digitalProducts).where(eq(digitalProducts.published, true)).limit(20) : Promise.resolve([]),
+    allowedTypes.includes("blog") ? db.select().from(blogPosts).where(eq(blogPosts.published, true)).limit(20) : Promise.resolve([]),
   ]);
-  for (const product of apparelRows.filter((product: any) => !product.hidden && !product.delisted && product.inStock)) {
+  const isThisMonth = (value?: Date | string | null) => {
+    if (!currentMonthOnly) return true;
+    const date = value ? new Date(value) : new Date();
+    const now = new Date();
+    return date.getFullYear() === now.getFullYear() && date.getMonth() === now.getMonth();
+  };
+  for (const product of apparelRows.filter((product: any) => !product.hidden && !product.delisted && product.inStock && isThisMonth(product.createdAt))) {
     const type = product.featured ? "featured" : "apparel";
+    if (!allowedTypes.includes(type)) continue;
     await db.execute(sql`INSERT INTO monthly_digest_queue (contentType, contentId, title, imageUrl, url, summary, included, sortOrder) VALUES (${type}, ${product.id}, ${product.name}, ${product.imageUrl || ""}, '/shop', ${product.description || ""}, true, 0) ON DUPLICATE KEY UPDATE title = VALUES(title), imageUrl = VALUES(imageUrl), url = VALUES(url), summary = VALUES(summary), updatedAt = NOW()`);
   }
-  for (const product of digitalRows) {
+  for (const product of digitalRows.filter((product: any) => isThisMonth(product.createdAt))) {
     const type = product.productType === "audiobook" ? "audiobook" : "digital";
+    if (!allowedTypes.includes(type)) continue;
     await db.execute(sql`INSERT INTO monthly_digest_queue (contentType, contentId, title, imageUrl, url, summary, included, sortOrder) VALUES (${type}, ${product.id}, ${product.name}, ${product.imageUrl || ""}, ${`/digital/${product.id}`}, ${product.description || ""}, true, 0) ON DUPLICATE KEY UPDATE title = VALUES(title), imageUrl = VALUES(imageUrl), url = VALUES(url), summary = VALUES(summary), updatedAt = NOW()`);
   }
-  for (const post of blogRows) {
+  for (const post of blogRows.filter((post: any) => isThisMonth(post.createdAt))) {
     await db.execute(sql`INSERT INTO monthly_digest_queue (contentType, contentId, title, imageUrl, url, summary, included, sortOrder) VALUES ('blog', ${post.id}, ${post.title}, ${post.imageUrl || ""}, ${`/blog/${post.slug}`}, ${post.excerpt || ""}, true, 0) ON DUPLICATE KEY UPDATE title = VALUES(title), imageUrl = VALUES(imageUrl), url = VALUES(url), summary = VALUES(summary), updatedAt = NOW()`);
   }
 }
 
-async function getDigestQueueRows() {
+async function getDigestQueueRows(audience?: string[], currentMonthOnly = false) {
   const db = await requireDb();
-  const [rows] = await db.execute(sql`SELECT * FROM monthly_digest_queue ORDER BY included DESC, sortOrder ASC, createdAt DESC LIMIT 100`) as any;
-  return rows || [];
+  const [rows] = currentMonthOnly
+    ? await db.execute(sql`SELECT * FROM monthly_digest_queue WHERE createdAt >= DATE_FORMAT(NOW(), '%Y-%m-01') ORDER BY included DESC, sortOrder ASC, createdAt DESC LIMIT 100`) as any
+    : await db.execute(sql`SELECT * FROM monthly_digest_queue ORDER BY included DESC, sortOrder ASC, createdAt DESC LIMIT 100`) as any;
+  return (rows || []).filter((row: any) => rowMatchesAudience(row, audience));
 }
 
 async function getEligibleSubscriberRows(audience?: string[]) {
   const db = await requireDb();
-  const interests = Array.isArray(audience) && audience.length ? audience : ["all_updates"];
-  const [rows] = await db.execute(sql`SELECT DISTINCT s.* FROM subscribers s LEFT JOIN subscriber_preferences p ON p.subscriberId = s.id WHERE s.status = 'active' AND s.consentStatus = 'subscribed' AND (p.interest = 'all_updates' OR p.interest IN (${sql.join(interests.map(interest => sql`${interest}`), sql`, `)}))`) as any;
+  const interests = normalizeDigestAudience(audience);
+  const includeAllUpdates = interests.includes("all_updates");
+  const [rows] = await db.execute(sql`SELECT DISTINCT s.* FROM subscribers s LEFT JOIN subscriber_preferences p ON p.subscriberId = s.id WHERE s.status = 'active' AND s.consentStatus = 'subscribed' AND ${includeAllUpdates ? sql`p.interest = 'all_updates'` : sql`p.interest IN (${sql.join(interests.map(interest => sql`${interest}`), sql`, `)})`}`) as any;
   return rows || [];
 }
 
@@ -1716,20 +1755,23 @@ export function registerRestCompatRoutes(app: Express) {
     }
   });
 
-  app.post("/api/admin/email/monthly-digest/queue/refresh", requireAdminRest, async (_req, res) => {
+  app.post("/api/admin/email/monthly-digest/queue/refresh", requireAdminRest, async (req, res) => {
     try {
       await ensureRetentionTables();
-      await refreshMonthlyDigestQueue();
-      res.json({ success: true, queue: await getDigestQueueRows() });
+      const data = z.object({ audience: z.array(z.string()).optional().default(["all_updates"]), currentMonthOnly: z.boolean().optional().default(false) }).parse(req.body || {});
+      await refreshMonthlyDigestQueue(data.audience, data.currentMonthOnly);
+      res.json({ success: true, queue: await getDigestQueueRows(data.audience, data.currentMonthOnly) });
     } catch (e: any) {
       res.status(400).json({ error: e.message });
     }
   });
 
-  app.get("/api/admin/email/monthly-digest/queue", requireAdminRest, async (_req, res) => {
+  app.get("/api/admin/email/monthly-digest/queue", requireAdminRest, async (req, res) => {
     try {
       await ensureRetentionTables();
-      res.json(await getDigestQueueRows());
+      const audience = String(req.query.audience || "all_updates").split(",").filter(Boolean);
+      const currentMonthOnly = String(req.query.currentMonthOnly || "") === "true";
+      res.json(await getDigestQueueRows(audience, currentMonthOnly));
     } catch (e: any) {
       res.status(500).json({ error: e.message });
     }
@@ -1752,8 +1794,9 @@ export function registerRestCompatRoutes(app: Express) {
     try {
       await ensureRetentionTables();
       const settings = await getMonthlyDigestSettings();
-      const queue = await getDigestQueueRows();
-      const subscribers = await getEligibleSubscriberRows(String(req.query.audience || "all_updates").split(",").filter(Boolean));
+      const audience = String(req.query.audience || "all_updates").split(",").filter(Boolean);
+      const queue = await getDigestQueueRows(audience);
+      const subscribers = await getEligibleSubscriberRows(audience);
       res.json({ subject: settings.subject, html: buildMonthlyDigestHtml(settings, queue, getFrontendOrigin(req)), eligibleSubscribers: subscribers.length, queue });
     } catch (e: any) {
       res.status(500).json({ error: e.message });
@@ -1763,9 +1806,9 @@ export function registerRestCompatRoutes(app: Express) {
   app.post("/api/admin/email/monthly-digest/test", requireAdminRest, async (req, res) => {
     try {
       await ensureRetentionTables();
-      const data = z.object({ email: z.string().email() }).parse(req.body);
+      const data = z.object({ email: z.string().email(), audience: z.array(z.string()).optional().default(["all_updates"]) }).parse(req.body);
       const settings = await getMonthlyDigestSettings();
-      const queue = await getDigestQueueRows();
+      const queue = await getDigestQueueRows(data.audience);
       if (!isEmailConfigured()) {
         res.json({ success: true, skipped: true, message: "Email is not configured; test was not sent." });
         return;
@@ -1784,7 +1827,7 @@ export function registerRestCompatRoutes(app: Express) {
       await ensureRetentionTables();
       const data = z.object({ confirm: z.literal(true), audience: z.array(z.string()).optional().default(["all_updates"]) }).parse(req.body);
       const settings = await getMonthlyDigestSettings();
-      const queue = await getDigestQueueRows();
+      const queue = await getDigestQueueRows(data.audience);
       const subscribers = await getEligibleSubscriberRows(data.audience);
       const db = await requireDb();
       const [existingCampaigns] = await db.execute(sql`SELECT id FROM email_campaigns WHERE campaignType = 'newsletter' AND subject = ${settings.subject} AND status = 'sent' AND createdAt >= DATE_FORMAT(NOW(), '%Y-%m-01') LIMIT 1`) as any;
