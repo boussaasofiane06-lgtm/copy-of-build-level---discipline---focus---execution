@@ -48,6 +48,7 @@ export const blogPosts = mysqlTable("blog_posts", {
   category: varchar("category", { length: 64 }).notNull().default("mindset"),
   readTime: varchar("readTime", { length: 32 }),
   published: boolean("published").notNull().default(false),
+  scheduledAt: timestamp("scheduledAt"),
   featured: boolean("featured").notNull().default(false),
   sortOrder: int("sortOrder").notNull().default(0),
   createdAt: timestamp("createdAt").defaultNow().notNull(),

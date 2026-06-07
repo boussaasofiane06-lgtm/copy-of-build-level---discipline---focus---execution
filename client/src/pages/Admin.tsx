@@ -726,10 +726,10 @@ function BlogTab() {
   const [showForm, setShowForm] = useState(false);
   const [editPost, setEditPost] = useState<null | {
     id?: number; title: string; slug: string; excerpt: string;
-    content: string; imageUrl: string; category: string; published: boolean;
+    content: string; imageUrl: string; category: string; published: boolean; scheduledAt?: string;
   }>(null);
 
-  const EMPTY_POST = { title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: "mindset", published: false };
+  const EMPTY_POST = { title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: "mindset", published: false, scheduledAt: "" };
 
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [blogSaving, setBlogSaving] = useState(false);
@@ -742,6 +742,20 @@ function BlogTab() {
   useEffect(() => { loadPosts(); }, [loadPosts]);
 
   const form = editPost || (showForm ? EMPTY_POST : null);
+  const toDatetimeLocalValue = (value?: string | null) => {
+    if (!value) return "";
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+  };
+  const blogStatus = (post: any) => {
+    if (post.published) return "LIVE";
+    if (post.scheduledAt) {
+      const scheduled = new Date(post.scheduledAt);
+      if (!Number.isNaN(scheduled.getTime())) return scheduled <= new Date() ? "PUBLISHING" : "SCHEDULED";
+    }
+    return "DRAFT";
+  };
 
   const handleSave = async () => {
     if (!form) return;
@@ -749,10 +763,10 @@ function BlogTab() {
     setBlogSaving(true);
     try {
       if (editPost?.id) {
-        await updateBlogPost(editPost.id, { title: form.title, slug: form.slug, excerpt: form.excerpt || undefined, content: form.content, imageUrl: form.imageUrl || undefined, published: form.published });
+        await updateBlogPost(editPost.id, { title: form.title, slug: form.slug, excerpt: form.excerpt || undefined, content: form.content, imageUrl: form.imageUrl || undefined, published: form.published, scheduledAt: form.published ? null : form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null } as any);
         toast.success("Post updated!"); setEditPost(null);
       } else {
-        await createBlogPost({ title: form.title, slug: form.slug, excerpt: form.excerpt || undefined, content: form.content, imageUrl: form.imageUrl || undefined, published: form.published, featured: false });
+        await createBlogPost({ title: form.title, slug: form.slug, excerpt: form.excerpt || undefined, content: form.content, imageUrl: form.imageUrl || undefined, published: form.published, scheduledAt: form.published ? null : form.scheduledAt ? new Date(form.scheduledAt).toISOString() : null, featured: false } as any);
         toast.success("Post created!"); setShowForm(false);
       }
       await loadPosts();
@@ -807,8 +821,12 @@ function BlogTab() {
           </div>
           <div className="flex items-center justify-between">
             <label className="flex items-center gap-2 cursor-pointer">
-              <input type="checkbox" checked={form?.published || false} onChange={e => { const v = e.target.checked; if (editPost) setEditPost(p => p ? { ...p, published: v } : null); }} className="accent-[#FF6B00]" />
+              <input type="checkbox" checked={form?.published || false} onChange={e => { const v = e.target.checked; if (editPost) setEditPost(p => p ? { ...p, published: v, scheduledAt: v ? "" : p.scheduledAt } : null); }} className="accent-[#FF6B00]" />
               <span className="font-display text-[#888] text-xs tracking-widest">PUBLISH (visible to customers)</span>
+            </label>
+            <label className="flex items-center gap-2">
+              <span className="font-display text-[#888] text-xs tracking-widest">SCHEDULE</span>
+              <input type="datetime-local" disabled={form?.published || false} value={form?.scheduledAt || ""} onChange={e => { const v = e.target.value; if (editPost) setEditPost(p => p ? { ...p, scheduledAt: v, published: false } : null); }} className="bg-[#111] border border-white/10 text-white font-body text-xs px-3 py-2 outline-none focus:border-[#FF6B00]" />
             </label>
             <div className="flex gap-2">
               <button onClick={() => { setShowForm(false); setEditPost(null); }} className="admin-btn-secondary">CANCEL</button>
@@ -833,8 +851,8 @@ function BlogTab() {
             <div key={post.id} className="bg-[#1A1A1A] border border-white/10 p-4 flex items-start justify-between gap-4">
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 ${post.published ? "bg-green-500/20 text-green-400" : "bg-[#333] text-[#666]"}`}>
-                    {post.published ? "LIVE" : "DRAFT"}
+                  <span className={`font-display text-[10px] tracking-widest px-2 py-0.5 ${post.published ? "bg-green-500/20 text-green-400" : post.scheduledAt ? "bg-[#FF6B00]/20 text-[#FF6B00]" : "bg-[#333] text-[#666]"}`}>
+                    {blogStatus(post)}
                   </span>
                   <span className="font-display text-[#FF6B00] text-[10px] tracking-widest">{post.category?.toUpperCase()}</span>
                 </div>
@@ -842,7 +860,7 @@ function BlogTab() {
                 <p className="font-body text-[#555] text-xs mt-0.5">/blog/{post.slug}</p>
               </div>
               <div className="flex items-center gap-2 flex-shrink-0">
-                <button onClick={() => { setEditPost({ id: post.id, title: post.title, slug: post.slug, excerpt: post.excerpt || "", content: post.content, imageUrl: post.imageUrl || "", category: post.category || "mindset", published: post.published ?? false }); setShowForm(false); }} className="p-1.5 text-[#555] hover:text-white transition-colors">
+                <button onClick={() => { setEditPost({ id: post.id, title: post.title, slug: post.slug, excerpt: post.excerpt || "", content: post.content, imageUrl: post.imageUrl || "", category: post.category || "mindset", published: post.published ?? false, scheduledAt: toDatetimeLocalValue(post.scheduledAt) }); setShowForm(false); }} className="p-1.5 text-[#555] hover:text-white transition-colors">
                   <Pencil size={14} />
                 </button>
                 <button onClick={async () => { if (window.confirm(`Delete "${post.title}"?`)) { setBlogDeleting(post.id); try { await deleteBlogPost(post.id); toast.success("Post deleted"); await loadPosts(); } catch { toast.error("Delete failed"); } finally { setBlogDeleting(null); } } }} disabled={blogDeleting === post.id} className="p-1.5 text-[#555] hover:text-red-400 transition-colors disabled:opacity-50">

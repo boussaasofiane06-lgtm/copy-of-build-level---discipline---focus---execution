@@ -105,6 +105,7 @@ export interface BlogPost {
   excerpt?: string | null;
   imageUrl?: string | null;
   published: boolean;
+  scheduledAt?: string | null;
   featured: boolean;
   tags?: string[];
   createdAt?: string;

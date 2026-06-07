@@ -198,7 +198,7 @@ export default function Admin() {
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
   const [editBlog, setEditBlog] = useState<Partial<BlogPost> | null>(null);
-  const [blogForm, setBlogForm] = useState({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, featured: false });
+  const [blogForm, setBlogForm] = useState({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, scheduledAt: "", featured: false });
 
   const showToast = (msg: string) => { setToast(msg); setTimeout(() => setToast(""), 3000); };
 
@@ -507,20 +507,37 @@ export default function Admin() {
   };
 
   // Blog CRUD
+  const toDatetimeLocalValue = (value?: string | Date | null) => {
+    if (!value) return "";
+    const date = value instanceof Date ? value : new Date(value);
+    if (Number.isNaN(date.getTime())) return "";
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+    return local.toISOString().slice(0, 16);
+  };
+  const toSchedulePayload = (value: string) => value ? new Date(value).toISOString() : null;
+  const getBlogStatus = (post: BlogPost) => {
+    if (post.published) return "Published";
+    if (post.scheduledAt) {
+      const scheduled = new Date(post.scheduledAt);
+      if (!Number.isNaN(scheduled.getTime())) return scheduled <= new Date() ? "Publishing Now" : `Scheduled ${scheduled.toLocaleString()}`;
+    }
+    return "Draft";
+  };
+
   const saveBlog = async (e: React.FormEvent) => {
     e.preventDefault();
     try {
-      const payload = { ...blogForm, category: normalizeBlogCategory(blogForm.category) };
+      const payload = { ...blogForm, category: normalizeBlogCategory(blogForm.category), scheduledAt: blogForm.published ? null : toSchedulePayload(blogForm.scheduledAt) };
       if (editBlog?.id) await adminApi.updateBlogPost(editBlog.id, payload as any);
       else await adminApi.createBlogPost(payload as any);
-      showToast(editBlog?.id ? "Updated!" : "Created!");
+      showToast(blogForm.published ? (editBlog?.id ? "Updated and published!" : "Created and published!") : blogForm.scheduledAt ? "Post scheduled!" : (editBlog?.id ? "Draft updated!" : "Draft created!"));
       setShowBlogForm(false); setEditBlog(null); loadData();
     } catch { showToast("Error saving"); }
   };
 
   const openEditBlog = (p: BlogPost) => {
     setEditBlog(p);
-    setBlogForm({ title: p.title, slug: p.slug, excerpt: p.excerpt || "", content: p.content || "", imageUrl: p.imageUrl || "", category: normalizeBlogCategory(p.category), readTime: p.readTime || "", published: p.published, featured: p.featured });
+    setBlogForm({ title: p.title, slug: p.slug, excerpt: p.excerpt || "", content: p.content || "", imageUrl: p.imageUrl || "", category: normalizeBlogCategory(p.category), readTime: p.readTime || "", published: p.published, scheduledAt: toDatetimeLocalValue(p.scheduledAt), featured: p.featured });
     setShowBlogForm(true);
   };
 
@@ -953,7 +970,7 @@ export default function Admin() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
                   <h3 style={{ fontSize: "1rem" }}>Blog Posts ({blog.length})</h3>
-                  <button onClick={() => { setEditBlog(null); setBlogForm({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, featured: false }); setShowBlogForm(true); }} className="btn btn-primary btn-sm">+ Add Post</button>
+                  <button onClick={() => { setEditBlog(null); setBlogForm({ title: "", slug: "", excerpt: "", content: "", imageUrl: "", category: DEFAULT_BLOG_CATEGORY, readTime: "", published: true, scheduledAt: "", featured: false }); setShowBlogForm(true); }} className="btn btn-primary btn-sm">+ Add Post</button>
                 </div>
 
                 {showBlogForm && (
@@ -990,8 +1007,21 @@ export default function Admin() {
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Image URL</label><input style={inputStyle} value={blogForm.imageUrl} onChange={e => setBlogForm(f => ({ ...f, imageUrl: e.target.value }))} /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Excerpt</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={2} value={blogForm.excerpt} onChange={e => setBlogForm(f => ({ ...f, excerpt: e.target.value }))} /></div>
                       <div style={{ gridColumn: "1/-1" }}><label style={labelStyle}>Content</label><textarea style={{ ...inputStyle, resize: "vertical" }} rows={8} value={blogForm.content} onChange={e => setBlogForm(f => ({ ...f, content: e.target.value }))} /></div>
+                      <div style={{ gridColumn: "1/-1", border: "1px solid var(--border)", borderRadius: 8, padding: 14, background: "rgba(255,255,255,0.025)" }}>
+                        <label style={labelStyle}>Schedule Publish</label>
+                        <input
+                          style={inputStyle}
+                          type="datetime-local"
+                          value={blogForm.scheduledAt}
+                          disabled={blogForm.published}
+                          onChange={e => setBlogForm(f => ({ ...f, scheduledAt: e.target.value, published: false }))}
+                        />
+                        <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 6 }}>
+                          Leave Published unchecked, then choose a date and time. The post will become visible automatically when this time arrives. Check Published to publish right away.
+                        </p>
+                      </div>
                       <div style={{ display: "flex", gap: 20, gridColumn: "1/-1" }}>
-                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={blogForm.published} onChange={e => setBlogForm(f => ({ ...f, published: e.target.checked }))} /> Published</label>
+                        <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={blogForm.published} onChange={e => setBlogForm(f => ({ ...f, published: e.target.checked, scheduledAt: e.target.checked ? "" : f.scheduledAt }))} /> Published now</label>
                         <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}><input type="checkbox" checked={blogForm.featured} onChange={e => setBlogForm(f => ({ ...f, featured: e.target.checked }))} /> Featured</label>
                       </div>
                       <div style={{ gridColumn: "1/-1", display: "flex", gap: 12 }}>
@@ -1008,7 +1038,7 @@ export default function Admin() {
                       <div key={p.id} style={{ background: "var(--bg2)", border: "1px solid var(--border)", borderRadius: 6, padding: "14px 20px", display: "flex", alignItems: "center", gap: 16 }}>
                         <div style={{ flex: 1 }}>
                           <div style={{ fontWeight: 500, marginBottom: 2 }}>{p.title}</div>
-                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{p.slug} · {getBlogCategoryLabel(p.category)} · {p.published ? "Published" : "Draft"}</div>
+                          <div style={{ color: "var(--text2)", fontSize: "0.8rem" }}>{p.slug} · {getBlogCategoryLabel(p.category)} · {getBlogStatus(p)}</div>
                         </div>
                         <div style={{ display: "flex", gap: 8 }}>
                           <button onClick={() => openEditBlog(p)} className="btn btn-outline btn-sm">Edit</button>

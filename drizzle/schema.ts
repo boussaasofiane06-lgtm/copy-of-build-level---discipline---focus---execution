@@ -67,6 +67,7 @@ export const blogPosts = mysqlTable("blog_posts", {
   imageUrl: text("imageUrl"),
   category: varchar("category", { length: 64 }).notNull().default("mindset"),
   published: boolean("published").notNull().default(false),
+  scheduledAt: timestamp("scheduledAt"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });

@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { eq, asc, and } from "drizzle-orm";
+import { eq, asc, and, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { Readable } from "stream";
 import { getDb } from "../db/index.js";
@@ -16,6 +16,14 @@ const DEFAULT_MAINTENANCE = {
   returnText: "Discipline. Focus. Execution.",
   contactEmail: "info@thebuildlevel.com",
 };
+
+let blogScheduleColumnEnsured = false;
+async function ensureBlogScheduleColumn() {
+  if (blogScheduleColumnEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`ALTER TABLE blog_posts ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  blogScheduleColumnEnsured = true;
+}
 
 function normalizeTidioPublicKey(value?: string | null) {
   if (!value) return "";
@@ -218,11 +226,12 @@ router.get("/products/:id", async (req, res) => {
 // ─── Blog ─────────────────────────────────────────────────────────────────────
 router.get("/blog", async (req, res) => {
   try {
+    await ensureBlogScheduleColumn();
     const db = await getDb();
     const rows = await db
       .select()
       .from(blogPosts)
-      .where(eq(blogPosts.published, true))
+      .where(or(eq(blogPosts.published, true), lte(blogPosts.scheduledAt, new Date())))
       .orderBy(asc(blogPosts.sortOrder), asc(blogPosts.createdAt));
     res.json(rows);
   } catch (e: any) {
@@ -232,8 +241,9 @@ router.get("/blog", async (req, res) => {
 
 router.get("/blog/:slug", async (req, res) => {
   try {
+    await ensureBlogScheduleColumn();
     const db = await getDb();
-    const [row] = await db.select().from(blogPosts).where(eq(blogPosts.slug, req.params.slug)).limit(1);
+    const [row] = await db.select().from(blogPosts).where(and(eq(blogPosts.slug, req.params.slug), or(eq(blogPosts.published, true), lte(blogPosts.scheduledAt, new Date())))).limit(1);
     if (!row) { res.status(404).json({ error: "Not found" }); return; }
     res.json(row);
   } catch (e: any) {

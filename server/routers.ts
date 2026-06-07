@@ -11,12 +11,21 @@ import { adminRouter } from "./admin";
 import { integrationsRouter, publicChatRouter } from "./integrations";
 import { getDb } from "./db";
 import { products, blogPosts, digitalProducts, digitalPurchases, aiVideos, affiliateProducts, membershipTiers } from "../drizzle/schema";
-import { eq, desc, and } from "drizzle-orm";
+import { eq, desc, and, lte, or, sql } from "drizzle-orm";
 import crypto from "crypto";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY || "", {
   apiVersion: "2026-05-27.dahlia",
 });
+
+let blogScheduleColumnEnsured = false;
+async function ensureBlogScheduleColumn() {
+  if (blogScheduleColumnEnsured) return;
+  const db = await getDb();
+  if (!db) return;
+  await db.execute(sql.raw(`ALTER TABLE blog_posts ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  blogScheduleColumnEnsured = true;
+}
 
 function isLocalhostUrl(value: string) {
   return /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i.test(value);
@@ -264,6 +273,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return [];
+        await ensureBlogScheduleColumn();
         const rows = await db
           .select()
           .from(products)
@@ -289,7 +299,7 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         const rows = await db
           .select()
           .from(blogPosts)
-          .where(eq(blogPosts.published, true))
+          .where(or(eq(blogPosts.published, true), lte(blogPosts.scheduledAt, new Date())))
           .orderBy(desc(blogPosts.createdAt));
         return input.category ? rows.filter((p: typeof rows[0]) => p.category === input.category) : rows;
       }),
@@ -298,13 +308,15 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
       .query(async ({ input }) => {
         const db = await getDb();
         if (!db) return null;
-        const rows = await db.select().from(blogPosts).where(and(eq(blogPosts.slug, input.slug), eq(blogPosts.published, true)));
+        await ensureBlogScheduleColumn();
+        const rows = await db.select().from(blogPosts).where(and(eq(blogPosts.slug, input.slug), or(eq(blogPosts.published, true), lte(blogPosts.scheduledAt, new Date()))));
         return rows[0] || null;
       }),
     // Admin: list all (including unpublished)
     adminList: publicProcedure.query(async () => {
       const db = await getDb();
       if (!db) return [];
+      await ensureBlogScheduleColumn();
       return db.select().from(blogPosts).orderBy(desc(blogPosts.createdAt));
     }),
     adminCreate: publicProcedure
@@ -316,11 +328,14 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         imageUrl: z.string().optional(),
         category: z.string().default("mindset"),
         published: z.boolean().default(false),
+        scheduledAt: z.union([z.string(), z.date(), z.null()]).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("DB unavailable");
-        await db.insert(blogPosts).values(input);
+        await ensureBlogScheduleColumn();
+        const scheduledAt = input.published ? null : input.scheduledAt ? new Date(input.scheduledAt) : null;
+        await db.insert(blogPosts).values({ ...input, scheduledAt });
         return { success: true };
       }),
     adminUpdate: publicProcedure
@@ -333,12 +348,17 @@ Keep responses concise, helpful, and on-brand. Use the BUILD LEVEL tone: direct,
         imageUrl: z.string().optional(),
         category: z.string().optional(),
         published: z.boolean().optional(),
+        scheduledAt: z.union([z.string(), z.date(), z.null()]).optional(),
       }))
       .mutation(async ({ input }) => {
         const db = await getDb();
         if (!db) throw new Error("DB unavailable");
+        await ensureBlogScheduleColumn();
         const { id, ...data } = input;
-        await db.update(blogPosts).set(data).where(eq(blogPosts.id, id));
+        const updateData: Record<string, unknown> = { ...data };
+        if (data.scheduledAt !== undefined) updateData.scheduledAt = data.scheduledAt ? new Date(data.scheduledAt) : null;
+        if (data.published === true && data.scheduledAt === undefined) updateData.scheduledAt = null;
+        await db.update(blogPosts).set(updateData).where(eq(blogPosts.id, id));
         return { success: true };
       }),
     adminDelete: publicProcedure

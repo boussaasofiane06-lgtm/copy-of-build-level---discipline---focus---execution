@@ -61,6 +61,7 @@ export interface BlogPost {
   category: string;
   readTime?: string;
   published: boolean;
+  scheduledAt?: string | null;
   featured: boolean;
   createdAt: string;
 }

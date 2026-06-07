@@ -423,11 +423,29 @@ router.post("/fulfillment/orders/:id/retry", requireAdmin, async (req: Request, 
 // ─── Blog Posts ───────────────────────────────────────────────────────────────
 router.get("/blog", requireAdmin, async (req: Request, res: Response) => {
   try {
+    await ensureBlogScheduleColumn();
     const db = await getDb();
     const rows = await db.select().from(blogPosts).orderBy(asc(blogPosts.sortOrder), asc(blogPosts.createdAt));
     res.json(rows);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
+
+let blogScheduleColumnEnsured = false;
+async function ensureBlogScheduleColumn() {
+  if (blogScheduleColumnEnsured) return;
+  const db = await getDb();
+  await db.execute(sql.raw(`ALTER TABLE blog_posts ADD COLUMN scheduledAt TIMESTAMP NULL`)).catch(() => undefined);
+  blogScheduleColumnEnsured = true;
+}
+
+const scheduledAtSchema = z.union([z.string(), z.date(), z.null()]).optional();
+function parseScheduledAt(value: z.infer<typeof scheduledAtSchema>) {
+  if (value === undefined) return undefined;
+  if (value === null || value === "") return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) throw new Error("Invalid scheduled publish date");
+  return date;
+}
 
 const blogSchema = z.object({
   title: z.string().min(1),
@@ -438,13 +456,16 @@ const blogSchema = z.object({
   category: z.string().default("mindset"),
   readTime: z.string().optional(),
   published: z.boolean().default(false),
+  scheduledAt: scheduledAtSchema,
   featured: z.boolean().default(false),
   sortOrder: z.number().default(0),
 });
 
 router.post("/blog", requireAdmin, async (req: Request, res: Response) => {
   try {
+    await ensureBlogScheduleColumn();
     const data = blogSchema.parse(req.body);
+    const scheduledAt = data.published ? null : parseScheduledAt(data.scheduledAt) ?? null;
     const db = await getDb();
     await db.insert(blogPosts).values({
       title: data.title,
@@ -455,6 +476,7 @@ router.post("/blog", requireAdmin, async (req: Request, res: Response) => {
       category: data.category,
       readTime: data.readTime,
       published: data.published,
+      scheduledAt,
       featured: data.featured,
       sortOrder: data.sortOrder,
     });
@@ -465,10 +487,15 @@ router.post("/blog", requireAdmin, async (req: Request, res: Response) => {
 
 router.put("/blog/:id", requireAdmin, async (req: Request, res: Response) => {
   try {
+    await ensureBlogScheduleColumn();
     const id = parseInt(req.params.id as string);
     const data = blogSchema.partial().parse(req.body);
+    const { scheduledAt: rawScheduledAt, ...rest } = data;
+    const updateData: Record<string, unknown> = { ...rest, updatedAt: new Date() };
+    if (rawScheduledAt !== undefined) updateData.scheduledAt = parseScheduledAt(rawScheduledAt);
+    if (data.published === true && rawScheduledAt === undefined) updateData.scheduledAt = null;
     const db = await getDb();
-    await db.update(blogPosts).set({ ...data, updatedAt: new Date() }).where(eq(blogPosts.id, id));
+    await db.update(blogPosts).set(updateData).where(eq(blogPosts.id, id));
     res.json({ success: true });
   } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
