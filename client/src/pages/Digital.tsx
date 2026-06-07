@@ -42,10 +42,12 @@ function ProductCard({ product }: { product: Product }) {
   const [expanded, setExpanded] = useState(false);
 
   const categoryLabel =
-    product.category === "audiobook"
+    product.category === "audiobook" || (product as any).productType === "audiobook"
       ? "AUDIOBOOK"
-      : product.category === "video"
+      : product.category === "video" || (product as any).productType === "video"
       ? "VIDEO COURSE"
+      : product.category === "other" || (product as any).productType === "other"
+      ? "OTHER"
       : "PDF GUIDE";
 
   const handleBuyNow = () => {
@@ -79,13 +81,18 @@ function ProductCard({ product }: { product: Product }) {
             {product.badge}
           </div>
         )}
+        {!isScheduledDigital(product) && (
+          <div className="absolute top-3 right-3 border border-green-400 bg-green-500/20 text-green-300 text-xs font-black px-2 py-1 tracking-widest">
+            PUBLISHED
+          </div>
+        )}
         <div className="absolute bottom-3 right-3 bg-black/80 text-orange-400 text-xs font-bold px-2 py-1 border border-orange-500/30 tracking-widest">
           {categoryLabel}
         </div>
         {isScheduledDigital(product) && (
           <div className="absolute inset-0 bg-black/70 flex items-center justify-center text-center p-4">
             <div>
-              <div className="inline-block border border-red-500 bg-red-500/20 text-red-200 text-xs font-black px-3 py-1 tracking-widest mb-3">COMING SOON</div>
+              <div className="inline-block border border-red-500 bg-red-500/20 text-red-200 text-xs font-black px-3 py-1 tracking-widest mb-3">SCHEDULED</div>
               <div className="text-white font-black text-xl tracking-widest">{releaseCountdown(product.scheduledAt)}</div>
               <div className="text-zinc-300 text-xs mt-2">{new Date(product.scheduledAt || "").toLocaleString()}</div>
             </div>
@@ -172,7 +179,7 @@ function ProductCard({ product }: { product: Product }) {
 }
 
 export default function Digital() {
-  const [filter, setFilter] = useState<"all" | "guide" | "audiobook">("all");
+  const [filter, setFilter] = useState<"all" | "guide" | "audiobook" | "video" | "other">("all");
 
   const { data: products, isLoading, error } = trpc.digital.list.useQuery();
 
@@ -183,7 +190,9 @@ export default function Digital() {
   const filtered = (products || []).filter((p: any) => {
     if (filter === "all") return true;
     if (filter === "guide") return !p.category || p.category === "guide";
-    if (filter === "audiobook") return p.category === "audiobook";
+    if (filter === "audiobook") return p.category === "audiobook" || p.productType === "audiobook";
+    if (filter === "video") return p.category === "video" || p.productType === "video";
+    if (filter === "other") return p.category === "other" || p.productType === "other";
     return true;
   });
 
@@ -222,7 +231,7 @@ export default function Digital() {
       <div className="border-b border-zinc-800 sticky top-0 bg-black/95 backdrop-blur z-10">
         <div className="max-w-6xl mx-auto px-4">
           <div className="flex gap-0">
-            {(["all", "guide", "audiobook"] as const).map((f) => (
+            {(["all", "guide", "audiobook", "video", "other"] as const).map((f) => (
               <button
                 key={f}
                 onClick={() => setFilter(f)}
@@ -236,7 +245,11 @@ export default function Digital() {
                   ? "ALL PRODUCTS"
                   : f === "guide"
                   ? "PDF GUIDES"
-                  : "AUDIOBOOKS"}
+                  : f === "audiobook"
+                  ? "AUDIOBOOKS"
+                  : f === "video"
+                  ? "VIDEO COURSES"
+                  : "OTHER"}
               </button>
             ))}
           </div>

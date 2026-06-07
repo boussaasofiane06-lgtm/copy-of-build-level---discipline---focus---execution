@@ -13,7 +13,7 @@ const storageImageUrl = (value?: string | null) => {
   return value;
 };
 
-const typeLabel = (t: string) => ({ pdf: "PDF Guide", audiobook: "Audiobook", video: "Video Course", other: "Digital" }[t] || "Digital");
+const typeLabel = (t: string) => ({ pdf: "PDF Guide", audiobook: "Audiobook", video: "Video Course", other: "Other" }[t] || "Digital");
 
 const isScheduledDigital = (product: DigitalProduct, now = new Date()) => {
   if (product.published || !product.scheduledAt) return false;
@@ -121,10 +121,15 @@ export default function Digital() {
                     </div>
                   )}
                   {p.badge && <span className="badge badge-red" style={{ position: "absolute", top: 12, left: 12 }}>{p.badge}</span>}
+                  {!comingSoon && (
+                    <span style={{ position: "absolute", top: 12, right: 12, border: "1px solid #22c55e", background: "rgba(34,197,94,0.18)", color: "#86efac", borderRadius: 4, padding: "5px 9px", fontFamily: "var(--font-display)", fontSize: "0.66rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                      Published
+                    </span>
+                  )}
                   {comingSoon && (
                     <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.55)", display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center", padding: 18 }}>
                       <div>
-                        <span className="badge badge-red">Coming Soon</span>
+                        <span style={{ border: "1px solid var(--red)", background: "rgba(192,57,43,0.2)", color: "#ffb4aa", borderRadius: 4, padding: "6px 10px", fontFamily: "var(--font-display)", fontSize: "0.7rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>Scheduled</span>
                         <p style={{ color: "#fff", fontFamily: "var(--font-display)", fontSize: "1rem", marginTop: 10 }}>{releaseCountdown(p.scheduledAt, now)}</p>
                         <p style={{ color: "rgba(255,255,255,0.78)", fontSize: "0.72rem", marginTop: 6 }}>{p.scheduledAt ? new Date(p.scheduledAt).toLocaleString() : ""}</p>
                       </div>
@@ -268,6 +273,7 @@ export function DigitalDetail() {
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
               <span className="badge badge-dark">{typeLabel(product.productType)}</span>
               {product.badge && <span className="badge badge-red">{product.badge}</span>}
+              {!comingSoon && <span style={{ border: "1px solid #22c55e", background: "rgba(34,197,94,0.16)", color: "#86efac", borderRadius: 4, padding: "5px 9px", fontFamily: "var(--font-display)", fontSize: "0.66rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>Published</span>}
             </div>
             <ProductReviewSummary summary={reviewSummary} />
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 18, margin: "22px 0" }}>
