@@ -22,6 +22,7 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
   const [filters, setFilters] = useState({ audienceId: 0, categoryId: 0, source: "", published: "", availability: "", search: "" });
   const [classification, setClassification] = useState({ productId: 0, audienceId: 0, categoryId: 0 });
   const [eventName, setEventName] = useState("");
+  const [createdEventSlug, setCreatedEventSlug] = useState("");
 
   const load = async () => {
     try {
@@ -49,6 +50,9 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
     ["recommended", "Recommended"],
     ["event", "Temporary Events"],
   ];
+  const eventItems = (taxonomy.events || []).slice().sort((a, b) =>
+    Number(a.displayOrder || 0) - Number(b.displayOrder || 0) || a.name.localeCompare(b.name)
+  );
 
   const assignmentFor = (productId: number) => taxonomy.productAssignments.filter(row => Number(row.productId) === productId);
   const productAudience = (product: Product) => assignmentFor(product.id)[0]?.audienceName || "Unassigned";
@@ -178,10 +182,18 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
   };
 
   const createEvent = async () => {
-    await adminApi.createShopEvent({ name: eventName, slug: slugify(eventName) });
-    showToast("Event or promotion created");
-    setEventName("");
-    load();
+    const name = eventName.trim();
+    if (!name) return;
+    const slug = slugify(name);
+    try {
+      await adminApi.createShopEvent({ name, slug });
+      setCreatedEventSlug(slug);
+      setEventName("");
+      await load();
+      showToast("Event or promotion saved");
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Could not save event or promotion", "error");
+    }
   };
 
   return (
@@ -305,11 +317,23 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
           <p style={{ color: "var(--text2)", marginBottom: 12 }}>Create temporary events such as Mother’s Day, Father’s Day, Back to School, 4th of July, Black Friday, or custom Build Level promotions.</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             <input className="input" style={{ maxWidth: 360 }} placeholder="Event or promotion name" value={eventName} onChange={e => setEventName(e.target.value)} />
-            <button className="btn btn-primary btn-sm" onClick={createEvent} disabled={!eventName}>Create Event</button>
+            <button className="btn btn-primary btn-sm" onClick={createEvent} disabled={!eventName.trim()}>Save Event / Promotion</button>
           </div>
-          <p style={{ color: "var(--text3)", fontSize: "0.8rem", marginTop: 12 }}>Events remain saved in admin. Hide or disable them when no longer relevant; products are never deleted.</p>
-          <div style={{ display: "grid", gap: 8, marginTop: 16 }}>
-            {(taxonomy.events || []).map(event => (
+          <p style={{ color: "var(--text3)", fontSize: "0.8rem", marginTop: 12 }}>Saved events and promotions appear below. Hide or disable them when no longer relevant; products are never deleted.</p>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 18, marginBottom: 10 }}>
+            <div>
+              <h4 style={{ fontSize: "0.9rem" }}>Saved Events & Promotions ({eventItems.length})</h4>
+              {createdEventSlug && <p style={{ color: "var(--text3)", fontSize: "0.75rem", marginTop: 4 }}>Last saved: /{createdEventSlug}</p>}
+            </div>
+            <button className="btn btn-outline btn-sm" onClick={load}>Refresh Events</button>
+          </div>
+          <div style={{ display: "grid", gap: 8 }}>
+            {eventItems.length === 0 && (
+              <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 14, color: "var(--text2)" }}>
+                No saved events yet. Create one above and it will appear in this list.
+              </div>
+            )}
+            {eventItems.map(event => (
               <div key={event.id} className="shop-management-row">
                 <div><strong>{event.name}</strong><p style={{ color: "var(--text3)", fontSize: "0.75rem" }}>/{event.slug} • {event.enabled ? "Enabled" : "Disabled"} • {event.hidden ? "Hidden" : "Visible"}</p></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
