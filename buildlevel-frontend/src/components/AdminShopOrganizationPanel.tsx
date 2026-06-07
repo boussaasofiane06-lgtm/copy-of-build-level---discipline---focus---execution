@@ -22,6 +22,7 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
   const [filters, setFilters] = useState({ audienceId: 0, categoryId: 0, source: "", published: "", availability: "", search: "" });
   const [classification, setClassification] = useState({ productId: 0, audienceId: 0, categoryId: 0 });
   const [eventName, setEventName] = useState("");
+  const [eventAudienceId, setEventAudienceId] = useState(0);
   const [createdEventSlug, setCreatedEventSlug] = useState("");
 
   const load = async () => {
@@ -34,6 +35,7 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
       const firstAudience = audiences.find(a => a.slug === selectedAudienceSlug) || audiences[0];
       setCategoryForm(f => ({ ...f, audienceId: f.audienceId || firstAudience?.id || 0 }));
       setClassification(f => ({ ...f, productId: f.productId || products[0]?.id || 0, audienceId: f.audienceId || firstAudience?.id || 0 }));
+      setEventAudienceId(current => current || firstAudience?.id || 0);
     } catch (error: any) {
       showToast(error?.response?.data?.error || "Failed to load Shop Management", "error");
     }
@@ -50,9 +52,10 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
     ["recommended", "Recommended"],
     ["event", "Temporary Events"],
   ];
-  const eventItems = (taxonomy.events || []).slice().sort((a, b) =>
+  const eventItems = taxonomy.categories.filter(category => (category as any).categoryType === "event").slice().sort((a, b) =>
     Number(a.displayOrder || 0) - Number(b.displayOrder || 0) || a.name.localeCompare(b.name)
   );
+  const audienceNameById = (audienceId: number) => taxonomy.audiences.find(audience => Number(audience.id) === Number(audienceId))?.name || "Unassigned audience";
 
   const assignmentFor = (productId: number) => taxonomy.productAssignments.filter(row => Number(row.productId) === productId);
   const productAudience = (product: Product) => assignmentFor(product.id)[0]?.audienceName || "Unassigned";
@@ -184,13 +187,35 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
   const createEvent = async () => {
     const name = eventName.trim();
     if (!name) return;
+    const audienceId = eventAudienceId || selectedAudience?.id || taxonomy.audiences[0]?.id || 0;
+    if (!audienceId) { showToast("Select an audience for this event.", "error"); return; }
     const slug = slugify(name);
+    const existingEvent = taxonomy.categories.find(category =>
+      Number(category.audienceId) === Number(audienceId) &&
+      category.slug === slug &&
+      ((category as any).categoryType === "event" || category.name.toLowerCase() === name.toLowerCase())
+    );
     try {
-      await adminApi.createShopEvent({ name, slug });
+      if (existingEvent) {
+        await adminApi.updateShopCategory(existingEvent.id, { name, slug, categoryType: "event", hidden: false, enabled: true, published: true } as any);
+      } else {
+        await adminApi.createShopCategory({
+          audienceId,
+          name,
+          slug,
+          categoryType: "event",
+          displayOrder: eventItems.filter(event => Number(event.audienceId) === Number(audienceId)).length + 80,
+          enabled: true,
+          hidden: false,
+          published: true,
+        } as any);
+      }
+      const audience = taxonomy.audiences.find(item => Number(item.id) === Number(audienceId));
+      if (audience?.slug) setSelectedAudienceSlug(audience.slug);
       setCreatedEventSlug(slug);
       setEventName("");
       await load();
-      showToast("Event or promotion saved");
+      showToast(`Event saved under ${audience?.name || "selected audience"}`);
     } catch (error: any) {
       showToast(error?.response?.data?.error || "Could not save event or promotion", "error");
     }
@@ -314,12 +339,16 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
       {tab === "events" && (
         <div style={panelStyle}>
           <h3 style={{ fontSize: "1rem", marginBottom: 12 }}>Events & Promotions</h3>
-          <p style={{ color: "var(--text2)", marginBottom: 12 }}>Create temporary events such as Mother’s Day, Father’s Day, Back to School, 4th of July, Black Friday, or custom Build Level promotions.</p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+          <p style={{ color: "var(--text2)", marginBottom: 12 }}>Create temporary events such as Mother’s Day, Father’s Day, Back to School, 4th of July, Black Friday, or custom Build Level promotions, then choose which audience it belongs under.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+            <select className="input" value={eventAudienceId} onChange={e => setEventAudienceId(Number(e.target.value))}>
+              <option value={0}>Select audience</option>
+              {taxonomy.audiences.map(audience => <option key={audience.id} value={audience.id}>{audience.name}</option>)}
+            </select>
             <input className="input" style={{ maxWidth: 360 }} placeholder="Event or promotion name" value={eventName} onChange={e => setEventName(e.target.value)} />
-            <button className="btn btn-primary btn-sm" onClick={createEvent} disabled={!eventName.trim()}>Save Event / Promotion</button>
+            <button className="btn btn-primary btn-sm" onClick={createEvent} disabled={!eventName.trim() || !eventAudienceId}>Save Event / Promotion</button>
           </div>
-          <p style={{ color: "var(--text3)", fontSize: "0.8rem", marginTop: 12 }}>Saved events and promotions appear below. Hide or disable them when no longer relevant; products are never deleted.</p>
+          <p style={{ color: "var(--text3)", fontSize: "0.8rem", marginTop: 12 }}>Saved events and promotions appear below and under the selected audience in Audiences & Categories. Hide, disable, or delete them when no longer relevant; products are never deleted.</p>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, flexWrap: "wrap", marginTop: 18, marginBottom: 10 }}>
             <div>
               <h4 style={{ fontSize: "0.9rem" }}>Saved Events & Promotions ({eventItems.length})</h4>
@@ -335,12 +364,13 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
             )}
             {eventItems.map(event => (
               <div key={event.id} className="shop-management-row">
-                <div><strong>{event.name}</strong><p style={{ color: "var(--text3)", fontSize: "0.75rem" }}>/{event.slug} • {event.enabled ? "Enabled" : "Disabled"} • {event.hidden ? "Hidden" : "Visible"}</p></div>
+                <div><strong>{event.name}</strong><p style={{ color: "var(--text3)", fontSize: "0.75rem" }}>{audienceNameById(Number(event.audienceId))} • /{event.slug} • {event.enabled ? "Enabled" : "Disabled"} • {event.hidden ? "Hidden" : "Visible"}</p></div>
                 <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  <button className="btn btn-outline btn-sm" onClick={async () => { const name = window.prompt("Edit event name", event.name); if (name && name !== event.name) { await adminApi.updateShopEvent(event.id, { name, slug: slugify(name) }); showToast("Event updated"); load(); } }}>Edit</button>
-                  <button className="btn btn-outline btn-sm" onClick={async () => { await adminApi.updateShopEvent(event.id, { hidden: !Boolean(event.hidden) }); showToast("Event updated"); load(); }}>{event.hidden ? "Show" : "Hide"}</button>
-                  <button className="btn btn-outline btn-sm" onClick={async () => { await adminApi.updateShopEvent(event.id, { enabled: !Boolean(event.enabled) }); showToast("Event updated"); load(); }}>{event.enabled ? "Disable" : "Enable"}</button>
-                  <button className="btn btn-outline btn-sm" onClick={async () => { if (window.confirm(`Delete event "${event.name}"? Products will not be deleted.`)) { await adminApi.deleteShopEvent(event.id); showToast("Event deleted"); load(); } }}>Delete</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => { setSelectedAudienceSlug(event.audienceSlug || taxonomy.audiences.find(audience => Number(audience.id) === Number(event.audienceId))?.slug || selectedAudienceSlug); setTab("audiences"); }}>View Audience</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => openEditCategory(event)}>Edit</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(event, { hidden: !Boolean(event.hidden) })}>{event.hidden ? "Show" : "Hide"}</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => toggleCategory(event, { enabled: !Boolean(event.enabled) })}>{event.enabled ? "Disable" : "Enable"}</button>
+                  <button className="btn btn-outline btn-sm" onClick={() => deleteCategory(event)}>Delete</button>
                 </div>
               </div>
             ))}
