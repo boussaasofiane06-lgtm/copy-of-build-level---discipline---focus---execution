@@ -536,6 +536,27 @@ async function getEligibleSubscriberRows(audience?: string[]) {
   return rows || [];
 }
 
+async function getDigestSubscriberRows(audience?: string[]) {
+  const db = await getDb();
+  const interests = normalizeDigestAudience(audience);
+  const includeAllUpdates = interests.includes("all_updates");
+  const [rows] = await db.execute(sql`
+    SELECT s.*, GROUP_CONCAT(CASE WHEN p.enabled = true THEN p.interest END) AS interests
+    FROM subscribers s
+    LEFT JOIN subscriber_preferences p ON p.subscriberId = s.id
+    WHERE s.status = 'active'
+      AND s.consentStatus = 'subscribed'
+      AND ${includeAllUpdates ? sql`1=1` : sql`s.id IN (SELECT subscriberId FROM subscriber_preferences WHERE enabled = true AND interest IN (${sql.join(interests.map(interest => sql`${interest}`), sql`, `)}))`}
+    GROUP BY s.id
+  `) as any;
+  return rows || [];
+}
+
+function subscriberAudience(subscriber: any) {
+  const interests = String(subscriber.interests || "").split(",").map(item => item.trim()).filter(Boolean);
+  return interests.length ? interests : ["all_updates"];
+}
+
 function buildMonthlyDigestHtml(settings: Awaited<ReturnType<typeof getMonthlyDigestSettings>>, queueRows: any[], origin = "https://thebuildlevel.com") {
   const selected = queueRows.filter(row => row.included).slice(0, 7);
   const itemsHtml = selected.map(row => `
@@ -1077,7 +1098,7 @@ router.post("/admin/email/monthly-digest/send", requireAdmin, async (req, res) =
     const data = z.object({ confirm: z.literal(true), audience: z.array(z.string()).optional().default(["all_updates"]) }).parse(req.body);
     const settings = await getMonthlyDigestSettings();
     const queue = await getDigestQueueRows(data.audience);
-    const subscribers = await getEligibleSubscriberRows(data.audience);
+    const subscribers = await getDigestSubscriberRows(data.audience);
     const db = await getDb();
     const [existingCampaigns] = await db.execute(sql`SELECT id FROM email_campaigns WHERE campaignType = 'newsletter' AND subject = ${settings.subject} AND status = 'sent' AND createdAt >= DATE_FORMAT(NOW(), '%Y-%m-01') LIMIT 1`) as any;
     if (existingCampaigns?.[0]) {
@@ -1091,8 +1112,13 @@ router.post("/admin/email/monthly-digest/send", requireAdmin, async (req, res) =
     let failed = 0;
     for (const subscriber of subscribers) {
       try {
+        const subscriberQueue = queue.filter(row => rowMatchesAudience(row, subscriberAudience(subscriber)));
+        if (subscriberQueue.length === 0) {
+          await db.execute(sql`INSERT INTO email_campaign_recipients (campaignId, subscriberId, email, status, sentAt, errorMessage) VALUES (${campaignId}, ${subscriber.id}, ${subscriber.email}, 'skipped', NOW(), 'No matching content for subscriber preferences') ON DUPLICATE KEY UPDATE status = status`);
+          continue;
+        }
         await db.execute(sql`INSERT INTO email_campaign_recipients (campaignId, subscriberId, email, status, sentAt) VALUES (${campaignId}, ${subscriber.id}, ${subscriber.email}, ${isEmailConfigured() ? "sent" : "skipped"}, NOW()) ON DUPLICATE KEY UPDATE status = status`);
-        if (isEmailConfigured()) await sendCustomerEmail({ to: subscriber.email, subject: settings.subject, text: settings.introduction, html: buildMonthlyDigestHtml(settings, queue) });
+        if (isEmailConfigured()) await sendCustomerEmail({ to: subscriber.email, subject: settings.subject, text: settings.introduction, html: buildMonthlyDigestHtml(settings, subscriberQueue) });
         sent += 1;
       } catch {
         failed += 1;

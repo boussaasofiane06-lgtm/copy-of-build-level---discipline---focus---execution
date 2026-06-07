@@ -90,7 +90,7 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
       <div style={panelStyle}>
         <h2 style={{ fontSize: "1.1rem", marginBottom: 8 }}>Email Campaigns → Monthly Digest</h2>
         <p style={{ color: "var(--text2)", marginBottom: 16 }}>
-          One admin-approved monthly marketing email. Product edits and blog publishing do not send emails automatically.
+          One admin-approved monthly email. Each subscriber automatically receives only the content matching their saved preferences. Unsubscribed subscribers receive nothing.
         </p>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 12 }}>
           <label><span>Enabled</span><select className="input" value={settings.enabled ? "true" : "false"} onChange={event => setSettings(s => ({ ...s, enabled: event.target.value === "true" }))}><option value="true">Enabled</option><option value="false">Disabled</option></select></label>
@@ -127,7 +127,7 @@ export default function AdminEmailCampaignsPanel({ showToast }: { showToast: (me
           ))}
         </div>
         <p style={{ color: "var(--text3)", fontSize: "0.78rem", marginTop: 10 }}>
-          Queue and preview use only selected audience types. {currentMonthOnly ? "Showing new items added this month only." : "Use Refresh New This Month to remove older queue items from this view."}
+          Queue and preview use selected audience types. When sending, each active subscriber is filtered again by their own preferences automatically. {currentMonthOnly ? "Showing new items added this month only." : "Use Refresh New This Month to remove older queue items from this view."}
         </p>
       </div>
 

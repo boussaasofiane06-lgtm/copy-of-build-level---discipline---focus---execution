@@ -902,6 +902,19 @@ async function getEligibleSubscriberRows(audience?: string[]) {
   return rows || [];
 }
 
+async function getDigestSubscriberRows(audience?: string[]) {
+  const db = await requireDb();
+  const interests = normalizeDigestAudience(audience);
+  const includeAllUpdates = interests.includes("all_updates");
+  const [rows] = await db.execute(sql`SELECT s.*, GROUP_CONCAT(CASE WHEN p.enabled = true THEN p.interest END) AS interests FROM subscribers s LEFT JOIN subscriber_preferences p ON p.subscriberId = s.id WHERE s.status = 'active' AND s.consentStatus = 'subscribed' AND ${includeAllUpdates ? sql`1=1` : sql`s.id IN (SELECT subscriberId FROM subscriber_preferences WHERE enabled = true AND interest IN (${sql.join(interests.map(interest => sql`${interest}`), sql`, `)}))`} GROUP BY s.id`) as any;
+  return rows || [];
+}
+
+function subscriberAudience(subscriber: any) {
+  const interests = String(subscriber.interests || "").split(",").map(item => item.trim()).filter(Boolean);
+  return interests.length ? interests : ["all_updates"];
+}
+
 function buildMonthlyDigestHtml(settings: Awaited<ReturnType<typeof getMonthlyDigestSettings>>, queueRows: any[], origin = "https://thebuildlevel.com") {
   const selected = queueRows.filter(row => row.included).slice(0, 7);
   const itemsHtml = selected.map(row => `<tr><td style="padding:18px 0;border-top:1px solid #2a2a2a">${row.imageUrl ? `<img src="${String(row.imageUrl).startsWith("http") ? row.imageUrl : origin + row.imageUrl}" alt="" style="width:100%;max-width:520px;border-radius:10px;background:#111" />` : ""}<h3 style="color:#fff;font-family:Arial,sans-serif;margin:14px 0 8px;text-transform:uppercase">${row.title}</h3><p style="color:#aaa;line-height:1.6">${row.summary || ""}</p><a href="${origin}${row.url || "/"}" style="display:inline-block;background:#c0392b;color:#fff;padding:11px 16px;text-decoration:none;text-transform:uppercase;border-radius:4px">View ${row.contentType === "blog" ? "Blog" : "Product"}</a></td></tr>`).join("");
@@ -1828,7 +1841,7 @@ export function registerRestCompatRoutes(app: Express) {
       const data = z.object({ confirm: z.literal(true), audience: z.array(z.string()).optional().default(["all_updates"]) }).parse(req.body);
       const settings = await getMonthlyDigestSettings();
       const queue = await getDigestQueueRows(data.audience);
-      const subscribers = await getEligibleSubscriberRows(data.audience);
+      const subscribers = await getDigestSubscriberRows(data.audience);
       const db = await requireDb();
       const [existingCampaigns] = await db.execute(sql`SELECT id FROM email_campaigns WHERE campaignType = 'newsletter' AND subject = ${settings.subject} AND status = 'sent' AND createdAt >= DATE_FORMAT(NOW(), '%Y-%m-01') LIMIT 1`) as any;
       if (existingCampaigns?.[0]) {
@@ -1842,11 +1855,16 @@ export function registerRestCompatRoutes(app: Express) {
       let failed = 0;
       for (const subscriber of subscribers) {
         try {
+          const subscriberQueue = queue.filter((row: any) => rowMatchesAudience(row, subscriberAudience(subscriber)));
+          if (subscriberQueue.length === 0) {
+            await db.execute(sql`INSERT INTO email_campaign_recipients (campaignId, subscriberId, email, status, sentAt, errorMessage) VALUES (${campaignId}, ${subscriber.id}, ${subscriber.email}, 'skipped', NOW(), 'No matching content for subscriber preferences') ON DUPLICATE KEY UPDATE status = status`);
+            continue;
+          }
           await db.execute(sql`INSERT INTO email_campaign_recipients (campaignId, subscriberId, email, status, sentAt) VALUES (${campaignId}, ${subscriber.id}, ${subscriber.email}, ${isEmailConfigured() ? "sent" : "skipped"}, NOW()) ON DUPLICATE KEY UPDATE status = status`);
           if (isEmailConfigured()) {
             const transporter = getTransporter();
             const from = cleanEnv(process.env.ZOHO_SMTP_FROM) || BUSINESS_EMAIL;
-            await transporter.sendMail({ from, to: subscriber.email, subject: settings.subject, text: settings.introduction, html: buildMonthlyDigestHtml(settings, queue) });
+            await transporter.sendMail({ from, to: subscriber.email, subject: settings.subject, text: settings.introduction, html: buildMonthlyDigestHtml(settings, subscriberQueue) });
           }
           sent += 1;
         } catch {
