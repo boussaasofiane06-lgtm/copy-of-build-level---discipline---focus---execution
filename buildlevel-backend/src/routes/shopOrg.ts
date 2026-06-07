@@ -59,7 +59,7 @@ async function ensureShopOrgTables() {
   }
 
   for (const [slug, name, enabled, order] of audiences) {
-    await db.execute(sql`INSERT INTO shop_audiences (name, slug, enabled, hidden, displayOrder, isForYou, published) VALUES (${name}, ${slug}, ${enabled}, ${!enabled}, ${order}, ${slug === "for-you"}, true) ON DUPLICATE KEY UPDATE name = VALUES(name), enabled = VALUES(enabled), hidden = VALUES(hidden), displayOrder = VALUES(displayOrder), updatedAt = NOW()`);
+    await db.execute(sql`INSERT INTO shop_audiences (name, slug, enabled, hidden, displayOrder, isForYou, published) VALUES (${name}, ${slug}, ${enabled}, ${!enabled}, ${order}, ${slug === "for-you"}, true) ON DUPLICATE KEY UPDATE name = VALUES(name), enabled = VALUES(enabled), hidden = VALUES(hidden), displayOrder = VALUES(displayOrder), isForYou = VALUES(isForYou), published = VALUES(published), updatedAt = NOW()`);
   }
   const [audienceRows] = await db.execute(sql`SELECT id, slug FROM shop_audiences`) as any;
   const audienceMap = Object.fromEntries((audienceRows || []).map((row: any) => [row.slug, row.id]));

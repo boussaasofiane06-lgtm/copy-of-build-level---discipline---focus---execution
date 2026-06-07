@@ -54,7 +54,16 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
   const productAudience = (product: Product) => assignmentFor(product.id)[0]?.audienceName || "Unassigned";
   const productCategory = (product: Product) => assignmentFor(product.id).find(row => row.assignmentType === "primary")?.categoryName || product.category;
   const productSource = (product: Product) => product.printifyProductId ? "Printify" : product.shopifyProductId ? "Shopify" : "Manual Apparel";
-  const productAudienceOptions = taxonomy.audiences;
+  const productAudienceOptions = Array.from(new Map(taxonomy.audiences.map(audience => [audience.slug, audience])).values())
+    .sort((a, b) => {
+      if (a.slug === "for-you") return -1;
+      if (b.slug === "for-you") return 1;
+      return Number(a.displayOrder || 0) - Number(b.displayOrder || 0) || a.name.localeCompare(b.name);
+    });
+  const getProductAudienceId = (product: Product) => {
+    const assignedSlug = assignmentFor(product.id)[0]?.audienceSlug;
+    return productAudienceOptions.find(audience => audience.slug === assignedSlug)?.id || productAudienceOptions[0]?.id || 0;
+  };
 
   const filteredProducts = useMemo(() => products.filter(product => {
     const rows = assignmentFor(product.id);
@@ -277,7 +286,7 @@ export default function AdminShopOrganizationPanel({ products, showToast, onChan
                     <p style={{ color: "var(--text3)", fontSize: "0.76rem" }}>{productSource(product)} • Printify: {product.printifyProductId || "none"} • {productAudience(product)} / {productCategory(product)}</p>
                   </div>
                 </div>
-                <button className="btn btn-outline btn-sm" onClick={() => setClassification({ productId: product.id, audienceId: productAudienceOptions[0]?.id || 0, categoryId: 0 })}>Classify</button>
+                <button className="btn btn-outline btn-sm" onClick={() => setClassification({ productId: product.id, audienceId: getProductAudienceId(product), categoryId: 0 })}>Classify</button>
               </div>
             ))}
           </div>
