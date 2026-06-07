@@ -21,6 +21,52 @@ type ProductOption = {
   label: string;
   price?: number;
   variantId?: string;
+  size?: string;
+  color?: string;
+};
+
+type VariantDimension = "size" | "color";
+type ProductVariantSelection = Partial<Record<VariantDimension, string>>;
+
+const priceSuffixPattern = /\s+-\s+\$?(\d+(?:\.\d{1,2})?)\s*$/;
+const sizePattern = /^(?:XXS|XS|S|M|L|XL|XXL|XXXL|[2-6]XL|ONE SIZE|ONESIZE|OS|OSFA|\d+(?:\.\d+)?(?:OZ|ML|L|IN|CM)?)$/i;
+
+const uniqueValues = (values: Array<string | undefined>) => {
+  const seen = new Set<string>();
+  return values.filter((value): value is string => {
+    const clean = String(value || "").trim();
+    if (!clean || seen.has(clean)) return false;
+    seen.add(clean);
+    return true;
+  });
+};
+
+const stripEmbeddedPrice = (label: string) => label.replace(priceSuffixPattern, "").trim();
+
+const parseEmbeddedPrice = (label: string) => {
+  const match = label.match(priceSuffixPattern);
+  if (!match?.[1]) return NaN;
+  return Number.parseFloat(match[1]);
+};
+
+const isLikelySize = (value: string) => sizePattern.test(value.trim().toUpperCase().replace(/\s+/g, ""));
+
+const deriveOptionAttributes = (rawLabel: string) => {
+  const label = stripEmbeddedPrice(rawLabel.replace(/^"+|"+$/g, "").trim());
+  const parts = label.split(/\s*\/\s*/).map(part => part.trim()).filter(Boolean);
+
+  if (parts.length >= 2) {
+    const sizePart = parts.find(isLikelySize);
+    if (sizePart) {
+      const colorParts = parts.filter(part => part !== sizePart);
+      return { label, size: sizePart, color: colorParts.join(" / ") || undefined };
+    }
+
+    return { label, color: parts[0], size: parts.slice(1).join(" / ") };
+  }
+
+  if (isLikelySize(label)) return { label, size: label };
+  return { label, color: /^default$/i.test(label) ? undefined : label };
 };
 
 const storageImageUrl = (value?: string | null) => {
@@ -57,22 +103,35 @@ const parseProductOption = (value: string, fallbackPrice: number): ProductOption
   if (trimmed.startsWith("{")) {
     try {
       const parsed = JSON.parse(trimmed);
-      const price = Number.parseFloat(String(parsed?.price || ""));
+      const rawLabel = String(parsed?.label || value);
+      const price = Number.parseFloat(String(parsed?.price || "")) || parseEmbeddedPrice(rawLabel);
+      const option = deriveOptionAttributes(rawLabel);
       return {
         value,
-        label: String(parsed?.label || value),
+        label: option.label,
         price: Number.isFinite(price) && price > 0 ? price : fallbackPrice,
         variantId: parsed?.variantId ? String(parsed.variantId) : undefined,
+        size: option.size,
+        color: option.color,
       };
     } catch {
       const labelMatch = trimmed.match(/"label"\s*:\s*"([^"]+)/i);
       if (!labelMatch?.[1]) return null;
-      return { value, label: labelMatch[1], price: fallbackPrice };
+      const option = deriveOptionAttributes(labelMatch[1]);
+      return { value, label: option.label, price: fallbackPrice, size: option.size, color: option.color };
     }
   }
   const cleaned = trimmed.replace(/^"+|"+$/g, "").replace(/[{}]/g, "").trim();
   if (!cleaned || /^(label|variantId|price)\s*:/i.test(cleaned)) return null;
-  return { value, label: cleaned, price: fallbackPrice };
+  const embeddedPrice = parseEmbeddedPrice(cleaned);
+  const option = deriveOptionAttributes(cleaned);
+  return {
+    value,
+    label: option.label,
+    price: Number.isFinite(embeddedPrice) && embeddedPrice > 0 ? embeddedPrice : fallbackPrice,
+    size: option.size,
+    color: option.color,
+  };
 };
 
 const repairOptionValues = (values: string[]) => {
@@ -113,16 +172,52 @@ const getProductOptions = (product: Product) => {
     .filter((option): option is ProductOption => !!option && !!option.label);
 };
 
-const getSelectedProductOption = (product: Product, selectedSizes: Record<number, string>) => {
+const getProductVariantChoices = (product: Product) => {
   const options = getProductOptions(product);
-  const selectedValue = selectedSizes[product.id] || options[0]?.value || "";
-  return options.find(option => option.value === selectedValue) || options[0] || parseProductOption(selectedValue, Number.parseFloat(product.price));
+  return {
+    options,
+    sizes: uniqueValues(options.map(option => option.size)),
+    colors: uniqueValues(options.map(option => option.color)),
+  };
 };
 
-const getProductDisplayPrice = (product: Product, selectedSizes: Record<number, string>) => {
-  const options = getProductOptions(product).filter(option => Number.isFinite(option.price || NaN) && (option.price || 0) > 0);
-  const selected = getSelectedProductOption(product, selectedSizes);
+const getEffectiveSelection = (product: Product, selections: Record<number, ProductVariantSelection>) => {
+  const choices = getProductVariantChoices(product);
+  const selection = selections[product.id] || {};
+  return {
+    size: choices.sizes.length === 1 ? choices.sizes[0] : selection.size,
+    color: choices.colors.length === 1 ? choices.colors[0] : selection.color,
+  };
+};
+
+const getSelectedProductOption = (product: Product, selections: Record<number, ProductVariantSelection>) => {
+  const choices = getProductVariantChoices(product);
+  const { options, sizes, colors } = choices;
+  if (!options.length) return null;
+
+  const selected = getEffectiveSelection(product, selections);
+  if (sizes.length > 0 && !selected.size) return null;
+  if (colors.length > 0 && !selected.color) return null;
+  if (!sizes.length && !colors.length) return options[0];
+
+  return options.find(option =>
+    (!sizes.length || option.size === selected.size) &&
+    (!colors.length || option.color === selected.color)
+  ) || null;
+};
+
+const getProductDisplayPrice = (product: Product, selections: Record<number, ProductVariantSelection>) => {
+  const choices = getProductVariantChoices(product);
+  const selected = getSelectedProductOption(product, selections);
   if (selected?.price) return `$${selected.price.toFixed(2)}`;
+  if (choices.options.length > 0 && (choices.sizes.length > 0 || choices.colors.length > 0)) {
+    const missing = [
+      choices.sizes.length > 1 && !getEffectiveSelection(product, selections).size ? "size" : "",
+      choices.colors.length > 1 && !getEffectiveSelection(product, selections).color ? "color" : "",
+    ].filter(Boolean).join(" and ");
+    return missing ? `Select ${missing} for price` : "Select available options";
+  }
+  const options = getProductOptions(product).filter(option => Number.isFinite(option.price || NaN) && (option.price || 0) > 0);
   if (options.length > 1) {
     const prices = Array.from(new Set(options.map(option => option.price as number))).sort((a, b) => a - b);
     if (prices.length > 1) return `$${prices[0].toFixed(2)} - $${prices[prices.length - 1].toFixed(2)}`;
@@ -137,7 +232,7 @@ export default function Shop() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [cartOpen, setCartOpen] = useState(false);
   const [checkingOut, setCheckingOut] = useState(false);
-  const [selectedSizes, setSelectedSizes] = useState<Record<number, string>>({});
+  const [variantSelections, setVariantSelections] = useState<Record<number, ProductVariantSelection>>({});
   const [viewProduct, setViewProduct] = useState<Product | null>(null);
   const [viewImage, setViewImage] = useState("");
   const [productReviews, setProductReviews] = useState<ReviewSummaryData>({ reviews: [], averageRating: 0, count: 0 });
@@ -275,14 +370,15 @@ export default function Shop() {
   const publicAudiences = taxonomy?.audiences?.length
     ? Array.from(new Map(taxonomy.audiences.filter(item => Boolean(item.enabled) && !Boolean(item.hidden)).map(item => [item.slug, { value: item.slug, label: item.name, isForYou: Boolean(item.isForYou) }])).values())
     : APPAREL_AUDIENCES.map(item => ({ ...item, isForYou: false }));
+  const isAssignedToForYou = (product: Product) => getProductAudienceSlug(product) === "for-you" || getAssignmentRows(product.id).some(item => item.audienceSlug === "for-you");
   const audienceHasProducts = (value: string) =>
     value === "for-you"
-      ? storefrontProducts.some(product => product.featured || getProductStatus(product) === "New Release")
+      ? storefrontProducts.some(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
       : storefrontProducts.some(product => getProductAudienceSlug(product) === value);
   const audienceFiltered = audience === "all"
     ? storefrontProducts
     : audience === "for-you"
-      ? storefrontProducts.filter(product => product.featured || getProductStatus(product) === "New Release")
+      ? storefrontProducts.filter(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
       : storefrontProducts.filter(p => getProductAudienceSlug(p) === audience);
   const sortCategories = (categories: string[]) => {
     const priority = (audience === "all" ? ["mens", "womens", "kids"].flatMap(a => STOREFRONT_CATEGORY_PRIORITY[a as ApparelAudience] || []) : STOREFRONT_CATEGORY_PRIORITY[audience as ApparelAudience]) || [];
@@ -302,13 +398,115 @@ export default function Shop() {
       .filter(item => item.category === product.category || item.featured)
       .slice(0, 4);
 
+  const variantChoiceStyle = (active: boolean, compact = false, disabled = false): React.CSSProperties => ({
+    padding: compact ? "6px 10px" : "8px 12px",
+    fontSize: compact ? "0.68rem" : "0.72rem",
+    fontFamily: "var(--font-display)",
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    background: active ? "var(--red)" : "var(--bg3)",
+    color: active ? "#fff" : "var(--text2)",
+    border: "1px solid var(--border)",
+    borderRadius: 2,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.42 : 1,
+  });
+
+  const isChoiceAvailable = (product: Product, dimension: VariantDimension, value: string) => {
+    const choices = getProductVariantChoices(product);
+    const selected = getEffectiveSelection(product, variantSelections);
+    return choices.options.some(option => {
+      if (dimension === "size") {
+        return option.size === value && (!choices.colors.length || !selected.color || option.color === selected.color);
+      }
+      return option.color === value && (!choices.sizes.length || !selected.size || option.size === selected.size);
+    });
+  };
+
+  const updateVariantSelection = (product: Product, dimension: VariantDimension, value: string) => {
+    setVariantSelections(prev => {
+      const nextSelection: ProductVariantSelection = { ...(prev[product.id] || {}), [dimension]: value };
+      const choices = getProductVariantChoices(product);
+      if (dimension === "size" && nextSelection.color && !choices.options.some(option => option.size === value && option.color === nextSelection.color)) {
+        delete nextSelection.color;
+      }
+      if (dimension === "color" && nextSelection.size && !choices.options.some(option => option.color === value && option.size === nextSelection.size)) {
+        delete nextSelection.size;
+      }
+      return { ...prev, [product.id]: nextSelection };
+    });
+  };
+
+  const renderVariantSelectors = (product: Product, compact = false) => {
+    if (shouldHideOptions(product)) return null;
+    const choices = getProductVariantChoices(product);
+    if (!choices.options.length || (!choices.sizes.length && !choices.colors.length)) return null;
+    const selected = getEffectiveSelection(product, variantSelections);
+    const selectedOption = getSelectedProductOption(product, variantSelections);
+    const missing = [
+      choices.sizes.length > 1 && !selected.size ? "size" : "",
+      choices.colors.length > 1 && !selected.color ? "color" : "",
+    ].filter(Boolean).join(" and ");
+
+    return (
+      <div style={{ display: "grid", gap: compact ? 8 : 12, marginBottom: compact ? 12 : 18 }}>
+        {choices.sizes.length > 0 && (
+          <div>
+            <p style={{ color: "var(--text3)", fontFamily: "var(--font-display)", fontSize: "0.68rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>Select Size</p>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {choices.sizes.map(size => {
+                const disabled = !isChoiceAvailable(product, "size", size);
+                return (
+                  <button key={size} type="button" disabled={disabled} onClick={() => updateVariantSelection(product, "size", size)}
+                    style={variantChoiceStyle(selected.size === size, compact, disabled)}>
+                    {size}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {choices.colors.length > 0 && (
+          <div>
+            <p style={{ color: "var(--text3)", fontFamily: "var(--font-display)", fontSize: "0.68rem", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6 }}>Select Color</p>
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+              {choices.colors.map(color => {
+                const disabled = !isChoiceAvailable(product, "color", color);
+                return (
+                  <button key={color} type="button" disabled={disabled} onClick={() => updateVariantSelection(product, "color", color)}
+                    style={variantChoiceStyle(selected.color === color, compact, disabled)}>
+                    {color}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
+        {!selectedOption && missing && (
+          <p style={{ color: "var(--text3)", fontSize: compact ? "0.72rem" : "0.8rem" }}>
+            Choose a {missing} to see the price.
+          </p>
+        )}
+      </div>
+    );
+  };
+
+  const canAddProductToCart = (product: Product) => isPurchasable(product) && (!getProductOptions(product).length || !!getSelectedProductOption(product, variantSelections));
+  const getAddToCartLabel = (product: Product) => {
+    if (!isPurchasable(product)) return getProductStatus(product) || "Not Available";
+    if (getProductOptions(product).length && !getSelectedProductOption(product, variantSelections)) return "Select Options";
+    return "Add to Cart";
+  };
+
   const addToCart = (product: Product) => {
-    const option = getSelectedProductOption(product, selectedSizes);
+    const option = getSelectedProductOption(product, variantSelections);
+    if (getProductOptions(product).length && !option) return;
     globalCart.addApparel({
       product,
       quantity: 1,
       unitPrice: option?.price || Number.parseFloat(product.price),
-      selectedSize: option?.label || "",
+      selectedSize: option?.size || "",
+      selectedColor: option?.color || "",
       selectedVariant: option?.value || option?.label || "",
       printifyVariantId: option?.variantId,
     });
@@ -521,31 +719,19 @@ export default function Shop() {
               )}
               {!shouldHidePrice(viewProduct) && (
                 <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-                  <span style={{ fontFamily: "var(--font-display)", fontSize: "1.35rem" }}>{getProductDisplayPrice(viewProduct, selectedSizes)}</span>
-                  {viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
+                  <span style={{ fontFamily: "var(--font-display)", fontSize: getSelectedProductOption(viewProduct, variantSelections) || !getProductOptions(viewProduct).length ? "1.35rem" : "0.9rem", color: getSelectedProductOption(viewProduct, variantSelections) || !getProductOptions(viewProduct).length ? "var(--text)" : "var(--text2)" }}>{getProductDisplayPrice(viewProduct, variantSelections)}</span>
+                  {getSelectedProductOption(viewProduct, variantSelections) && viewProduct.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through" }}>${parseFloat(viewProduct.compareAtPrice).toFixed(2)}</span>}
                 </div>
               )}
-              {!shouldHideOptions(viewProduct) && getProductOptions(viewProduct).length > 0 && (
-                <div style={{ display: "flex", gap: 6, marginBottom: 18, flexWrap: "wrap" }}>
-                  {getProductOptions(viewProduct).map(option => (
-                    <button key={option.value} onClick={() => setSelectedSizes(prev => ({ ...prev, [viewProduct.id]: option.value }))}
-                      style={{ padding: "6px 12px", fontSize: "0.72rem", fontFamily: "var(--font-display)", letterSpacing: "0.05em",
-                        background: (selectedSizes[viewProduct.id] || getProductOptions(viewProduct)[0]?.value) === option.value ? "var(--red)" : "var(--bg3)",
-                        color: (selectedSizes[viewProduct.id] || getProductOptions(viewProduct)[0]?.value) === option.value ? "#fff" : "var(--text2)",
-                        border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
-                      {option.label}{option.price && !shouldHidePrice(viewProduct) ? ` - $${option.price.toFixed(2)}` : ""}
-                    </button>
-                  ))}
-                </div>
-              )}
+              {renderVariantSelectors(viewProduct)}
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
               <div style={{ marginBottom: 18 }}><TrustBadges type="apparel" /></div>
               <div style={{ border: "1px solid rgba(255,102,0,0.35)", borderRadius: 10, padding: 12, margin: "18px 0", background: "rgba(255,102,0,0.06)" }}>
                 <strong>Build Level Promise</strong>
                 <p style={{ color: "var(--text2)", fontSize: "0.85rem", marginTop: 6 }}>Premium standards, secure checkout, and products selected for Discipline • Focus • Execution.</p>
               </div>
-              <button onClick={() => addToCart(viewProduct)} disabled={!isPurchasable(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
-                {isPurchasable(viewProduct) ? "Add to Cart" : (getProductStatus(viewProduct) || "Not Available")}
+              <button onClick={() => addToCart(viewProduct)} disabled={!canAddProductToCart(viewProduct)} className="btn btn-primary" style={{ width: "100%", marginBottom: 10 }}>
+                {getAddToCartLabel(viewProduct)}
               </button>
               <ReportProblemButton source="Product question" style={{ width: "100%", marginBottom: 10 }} />
               <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
@@ -644,29 +830,17 @@ export default function Shop() {
                   <div style={{ marginBottom: 10 }}><ProductReviewSummary summary={reviewSummaries[p.id]} compact /></div>
                   {!shouldHidePrice(p) && (
                     <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
-                      <span style={{ fontFamily: "var(--font-display)", fontSize: "1rem" }}>{getProductDisplayPrice(p, selectedSizes)}</span>
-                      {p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
+                      <span style={{ fontFamily: "var(--font-display)", fontSize: getSelectedProductOption(p, variantSelections) || !getProductOptions(p).length ? "1rem" : "0.78rem", color: getSelectedProductOption(p, variantSelections) || !getProductOptions(p).length ? "var(--text)" : "var(--text2)" }}>{getProductDisplayPrice(p, variantSelections)}</span>
+                      {getSelectedProductOption(p, variantSelections) && p.compareAtPrice && <span style={{ color: "var(--text3)", textDecoration: "line-through", fontSize: "0.8rem" }}>${parseFloat(p.compareAtPrice).toFixed(2)}</span>}
                     </div>
                   )}
-                  {!shouldHideOptions(p) && getProductOptions(p).length > 0 && (
-                    <div style={{ display: "flex", gap: 6, marginBottom: 12, flexWrap: "wrap" }}>
-                      {getProductOptions(p).map(option => (
-                        <button key={option.value} onClick={() => setSelectedSizes(prev => ({ ...prev, [p.id]: option.value }))}
-                          style={{ padding: "4px 10px", fontSize: "0.7rem", fontFamily: "var(--font-display)", letterSpacing: "0.05em",
-                            background: (selectedSizes[p.id] || getProductOptions(p)[0]?.value) === option.value ? "var(--red)" : "var(--bg3)",
-                            color: (selectedSizes[p.id] || getProductOptions(p)[0]?.value) === option.value ? "#fff" : "var(--text2)",
-                            border: "1px solid var(--border)", borderRadius: 2, cursor: "pointer" }}>
-                          {option.label}{option.price && !shouldHidePrice(p) ? ` - $${option.price.toFixed(2)}` : ""}
-                        </button>
-                      ))}
-                    </div>
-                  )}
+                  {renderVariantSelectors(p, true)}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
                     <button onClick={() => setViewProduct(p)} className="btn btn-outline btn-sm" style={{ width: "100%" }}>
                       View
                     </button>
-                    <button onClick={() => addToCart(p)} disabled={!isPurchasable(p)} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
-                      {isPurchasable(p) ? "Add to Cart" : (getProductStatus(p) || "Not Available")}
+                    <button onClick={() => addToCart(p)} disabled={!canAddProductToCart(p)} className="btn btn-primary btn-sm" style={{ width: "100%" }}>
+                      {getAddToCartLabel(p)}
                     </button>
                   </div>
                 </div>
