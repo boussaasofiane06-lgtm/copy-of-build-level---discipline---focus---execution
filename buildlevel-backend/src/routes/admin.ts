@@ -116,7 +116,7 @@ async function ensureFulfillmentTables() {
       orderTotal DECIMAL(10,2) NULL,
       currency VARCHAR(8) DEFAULT 'usd',
       orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
-      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
+      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
       printifyOrderId VARCHAR(128) NULL UNIQUE,
       printifyExternalId VARCHAR(128) NULL,
       printifyStatus VARCHAR(128) NULL,
@@ -128,6 +128,7 @@ async function ensureFulfillmentTables() {
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE orders MODIFY fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending'`)).catch(() => undefined);
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS order_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -356,6 +357,72 @@ router.get("/fulfillment/orders/:id", requireAdmin, async (req: Request, res: Re
     ]);
     res.json({ order, items, attempts, events });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+function validateAdminShippingAddress(address: any) {
+  if (!address) return "Missing shipping address";
+  if (!String(address.name || "").trim()) return "Missing customer name";
+  if (!String(address.line1 || "").trim()) return "Missing address line 1";
+  if (!String(address.city || "").trim()) return "Missing city";
+  if (!String(address.state || "").trim()) return "Missing state/region";
+  if (!String(address.postal_code || "").trim()) return "Missing postal code";
+  if (!String(address.country || "").trim()) return "Missing country";
+  return "";
+}
+
+router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const id = Number(req.params.id);
+    const data = z.object({
+      customerName: z.string().max(255).optional().default(""),
+      customerPhone: z.string().max(64).optional().default(""),
+      line1: z.string().max(255).optional().default(""),
+      line2: z.string().max(255).optional().default(""),
+      city: z.string().max(128).optional().default(""),
+      state: z.string().max(128).optional().default(""),
+      postalCode: z.string().max(64).optional().default(""),
+      country: z.string().max(2).optional().default(""),
+    }).parse(req.body || {});
+    const db = await getDb();
+    const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+    if (!order) { res.status(404).json({ error: "Order not found" }); return; }
+    const address = {
+      ...(order.shippingAddress as any || {}),
+      name: data.customerName.trim(),
+      displayName: data.customerName.trim(),
+      phone: data.customerPhone.trim(),
+      line1: data.line1.trim(),
+      line2: data.line2.trim(),
+      city: data.city.trim(),
+      state: data.state.trim(),
+      postal_code: data.postalCode.trim(),
+      country: data.country.trim().toUpperCase(),
+      correctedByAdmin: true,
+    };
+    const items = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
+    const reviewReasons: string[] = [];
+    if (order.stripePaymentStatus !== "paid") reviewReasons.push(`Payment status is ${order.stripePaymentStatus || "unknown"}`);
+    const addressError = validateAdminShippingAddress(address);
+    if (addressError) reviewReasons.push(addressError);
+    for (const item of items.filter(item => item.productType === "apparel")) {
+      if (!item.printifyProductId) reviewReasons.push(`Missing Printify product ID for ${item.productName}`);
+      if (!item.printifyVariantId) reviewReasons.push(`Missing Printify variant ID for ${item.productName}`);
+    }
+    const nextStatus = reviewReasons.length === 0 ? "Ready for Printify Test" : "Requires Admin Review";
+    await db.update(orders).set({
+      customerName: data.customerName.trim() || null,
+      customerPhone: data.customerPhone.trim() || null,
+      shippingAddress: address,
+      fulfillmentStatus: nextStatus as any,
+      errorMessage: reviewReasons.length ? reviewReasons.join("; ") : null,
+      processing: false,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, id));
+    await db.insert(orderEvents).values({ orderId: id, eventType: "admin.customer_shipping_updated", payload: { nextStatus, missing: reviewReasons, address } as any, createdAt: new Date() });
+    const [updated] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
+    res.json({ success: true, order: updated, missing: reviewReasons });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 router.post("/fulfillment/orders/:id/hold", requireAdmin, async (req: Request, res: Response) => {

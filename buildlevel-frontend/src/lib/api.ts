@@ -225,6 +225,7 @@ export interface FulfillmentOrder {
   stripePaymentIntentId?: string | null;
   orderTotal?: string | null;
   currency?: string | null;
+  shippingAddress?: Record<string, unknown> | null;
   orderType: string;
   fulfillmentStatus: string;
   printifyOrderId?: string | null;
@@ -600,6 +601,8 @@ export const adminApi = {
   resolveFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/resolve`).then(r => r.data),
   refreshFulfillmentOrder: (id: number) => api.post<{ success: true; data?: unknown }>(`/admin/fulfillment/orders/${id}/refresh`).then(r => r.data),
   retryFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/retry`).then(r => r.data),
+  updateFulfillmentCustomerShipping: (id: number, data: { customerName?: string; customerPhone?: string; line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string }) =>
+    api.patch<{ success: true; order: FulfillmentOrder; missing: string[] }>(`/admin/fulfillment/orders/${id}/customer-shipping`, data).then(r => r.data),
   getSubscribers: (params?: { search?: string; status?: string; interest?: string; source?: string }) =>
     api.get<Subscriber[]>("/admin/subscribers", { params }).then(r => r.data),
   updateSubscriber: (id: number, data: { status?: "active" | "unsubscribed" | "blocked"; firstName?: string; interests?: string[] }) =>

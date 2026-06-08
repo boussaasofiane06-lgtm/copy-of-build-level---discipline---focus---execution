@@ -13,6 +13,19 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
   const [selected, setSelected] = useState<{ order: FulfillmentOrder; items: FulfillmentOrderItem[]; attempts: unknown[]; events: unknown[] } | null>(null);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
+  const [editingCustomer, setEditingCustomer] = useState(false);
+  const [customerForm, setCustomerForm] = useState({ customerName: "", customerPhone: "", line1: "", line2: "", city: "", state: "", postalCode: "", country: "" });
+
+  const address = selected?.order.shippingAddress as any;
+  const missingFields = selected ? [
+    !selected.order.customerName ? "Customer name" : "",
+    !selected.order.customerEmail ? "Customer email" : "",
+    !selected.order.customerPhone ? "Phone" : "",
+    !address?.line1 ? "Address line 1" : "",
+    !address?.city ? "City" : "",
+    !address?.postal_code ? "ZIP / postal code" : "",
+    !address?.country ? "Country" : "",
+  ].filter(Boolean) : [];
 
   const load = async () => {
     setLoading(true);
@@ -28,7 +41,20 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
   useEffect(() => { load(); }, [status]);
 
   const open = async (id: number) => {
-    setSelected(await adminApi.getFulfillmentOrder(id));
+    const next = await adminApi.getFulfillmentOrder(id);
+    setSelected(next);
+    const shipping = next.order.shippingAddress as any;
+    setCustomerForm({
+      customerName: next.order.customerName || shipping?.displayName || shipping?.name || "",
+      customerPhone: next.order.customerPhone || shipping?.phone || "",
+      line1: shipping?.line1 || "",
+      line2: shipping?.line2 || "",
+      city: shipping?.city || "",
+      state: shipping?.state || "",
+      postalCode: shipping?.postal_code || "",
+      country: shipping?.country || "",
+    });
+    setEditingCustomer(false);
   };
 
   const action = async (label: string, run: () => Promise<unknown>) => {
@@ -43,6 +69,19 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
     }
   };
 
+  const saveCustomerShipping = async () => {
+    if (!selected) return;
+    try {
+      const result = await adminApi.updateFulfillmentCustomerShipping(selected.order.id, customerForm);
+      showToast(result.missing.length ? `Saved. Missing: ${result.missing.join(", ")}` : "Customer/shipping info saved. Ready for Printify Test.");
+      setEditingCustomer(false);
+      await load();
+      await open(selected.order.id);
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Could not save customer/shipping info");
+    }
+  };
+
   return (
     <div style={{ display: "grid", gap: 18 }}>
       <div style={panelStyle}>
@@ -54,7 +93,7 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
           </div>
           <select className="input" style={{ maxWidth: 260 }} value={status} onChange={e => setStatus(e.target.value)}>
             <option value="">All statuses</option>
-            {["Paid", "Awaiting Fulfillment", "Processing", "Printify Order Created", "Awaiting Production Approval", "Requires Admin Review", "Failed", "Cancelled", "Shipped", "Delivered"].map(item => <option key={item} value={item}>{item}</option>)}
+            {["Paid", "Awaiting Fulfillment", "Ready for Printify Test", "Processing", "Printify Order Created", "Awaiting Production Approval", "Requires Admin Review", "Failed", "Cancelled", "Shipped", "Delivered"].map(item => <option key={item} value={item}>{item}</option>)}
           </select>
         </div>
       </div>
@@ -85,8 +124,45 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
             <div style={{ display: "grid", gap: 16 }}>
               <div>
                 <h4>Order #{selected.order.id}</h4>
-                <p style={{ color: "var(--text2)", marginTop: 4 }}>{selected.order.customerName || "Customer"} · {selected.order.customerEmail}</p>
+                <p style={{ color: "var(--text2)", marginTop: 4 }}>{selected.order.customerName || "Missing customer name"} · {selected.order.customerEmail}</p>
+                <p style={{ color: "var(--text2)", fontSize: "0.82rem", marginTop: 4 }}>Phone: {selected.order.customerPhone || "Missing phone"}</p>
                 <p style={{ color: "var(--text3)", fontSize: "0.8rem" }}>Created {new Date(selected.order.createdAt).toLocaleString()}</p>
+              </div>
+              <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", marginBottom: 10 }}>
+                  <h5>Customer / Shipping Info</h5>
+                  <button className="btn btn-outline btn-sm" onClick={() => setEditingCustomer(current => !current)}>{editingCustomer ? "Cancel Edit" : "Edit Customer / Shipping Info"}</button>
+                </div>
+                {missingFields.length > 0 && <p style={{ color: "var(--red)", fontSize: "0.8rem", marginBottom: 8 }}>Missing: {missingFields.join(", ")}</p>}
+                {!editingCustomer ? (
+                  <div style={{ color: "var(--text2)", fontSize: "0.84rem", lineHeight: 1.7 }}>
+                    <div>Name: {selected.order.customerName || "Missing"}</div>
+                    <div>Email: {selected.order.customerEmail || "Missing"}</div>
+                    <div>Phone: {selected.order.customerPhone || "Missing"}</div>
+                    <div>Address: {address?.line1 || "Missing"}{address?.line2 ? `, ${address.line2}` : ""}</div>
+                    <div>{address?.city || "Missing city"}, {address?.state || ""} {address?.postal_code || "Missing ZIP"}</div>
+                    <div>Country: {address?.country || "Missing"}</div>
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: 10 }}>
+                    {[
+                      ["customerName", "Customer name"],
+                      ["customerPhone", "Phone"],
+                      ["line1", "Address line 1"],
+                      ["line2", "Address line 2"],
+                      ["city", "City"],
+                      ["state", "State"],
+                      ["postalCode", "ZIP"],
+                      ["country", "Country"],
+                    ].map(([key, label]) => (
+                      <label key={key} style={{ display: "grid", gap: 4, color: "var(--text2)", fontSize: "0.75rem" }}>
+                        {label}
+                        <input className="input" value={(customerForm as any)[key]} onChange={event => setCustomerForm(form => ({ ...form, [key]: event.target.value }))} />
+                      </label>
+                    ))}
+                    <button className="btn btn-primary btn-sm" style={{ gridColumn: "1/-1" }} onClick={saveCustomerShipping}>Save Customer / Shipping Info</button>
+                  </div>
+                )}
               </div>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn btn-outline btn-sm" onClick={() => action("Hold order", () => adminApi.holdFulfillmentOrder(selected.order.id))}>Hold</button>

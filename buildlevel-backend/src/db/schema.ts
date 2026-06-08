@@ -271,7 +271,7 @@ export const orders = mysqlTable("orders", {
   orderTotal: decimal("orderTotal", { precision: 10, scale: 2 }),
   currency: varchar("currency", { length: 8 }).default("usd"),
   orderType: mysqlEnum("orderType", ["apparel", "digital", "mixed"]).notNull().default("apparel"),
-  fulfillmentStatus: mysqlEnum("fulfillmentStatus", ["Payment Pending", "Paid", "Awaiting Fulfillment", "Processing", "Printify Order Created", "Awaiting Production Approval", "Sent to Production", "Requires Admin Review", "Failed", "Cancelled", "Shipped", "Delivered"]).notNull().default("Payment Pending"),
+  fulfillmentStatus: mysqlEnum("fulfillmentStatus", ["Payment Pending", "Paid", "Awaiting Fulfillment", "Ready for Printify Test", "Processing", "Printify Order Created", "Awaiting Production Approval", "Sent to Production", "Requires Admin Review", "Failed", "Cancelled", "Shipped", "Delivered"]).notNull().default("Payment Pending"),
   printifyOrderId: varchar("printifyOrderId", { length: 128 }),
   printifyExternalId: varchar("printifyExternalId", { length: 128 }),
   printifyStatus: varchar("printifyStatus", { length: 128 }),

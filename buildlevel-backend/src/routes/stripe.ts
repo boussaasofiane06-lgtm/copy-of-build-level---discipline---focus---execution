@@ -141,6 +141,7 @@ type OrderStatus =
   | "Payment Pending"
   | "Paid"
   | "Awaiting Fulfillment"
+  | "Ready for Printify Test"
   | "Processing"
   | "Printify Order Created"
   | "Awaiting Production Approval"
@@ -219,7 +220,7 @@ async function ensureFulfillmentTables(dbOverride?: any) {
       orderTotal DECIMAL(10,2) NULL,
       currency VARCHAR(8) DEFAULT 'usd',
       orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
-      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
+      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
       printifyOrderId VARCHAR(128) NULL UNIQUE,
       printifyExternalId VARCHAR(128) NULL,
       printifyStatus VARCHAR(128) NULL,
@@ -231,6 +232,7 @@ async function ensureFulfillmentTables(dbOverride?: any) {
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `));
+  await db.execute(sql.raw(`ALTER TABLE orders MODIFY fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending'`)).catch(() => undefined);
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS order_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -688,17 +690,39 @@ function parseSelectedLabel(value: string) {
   return value;
 }
 
+function emailNameFallback(email?: string | null) {
+  const local = cleanText(email || "").split("@")[0] || "";
+  return local.replace(/[._+-]+/g, " ").replace(/\s+/g, " ").trim();
+}
+
+function resolveStripeCustomerName(session: Stripe.Checkout.Session) {
+  const anySession = session as any;
+  const candidates: Array<{ value?: string | null; source: string; printifySafe: boolean }> = [
+    { value: anySession.shipping_details?.name, source: "shipping_details.name", printifySafe: true },
+    { value: anySession.customer_details?.name, source: "customer_details.name", printifySafe: true },
+    { value: anySession.customer?.name, source: "customer.name", printifySafe: true },
+    { value: anySession.payment_intent?.payment_method?.billing_details?.name, source: "payment_method.billing_details.name", printifySafe: true },
+    { value: anySession.payment_intent?.charges?.data?.[0]?.billing_details?.name, source: "charge.billing_details.name", printifySafe: true },
+    { value: emailNameFallback(anySession.customer_details?.email || anySession.customer_email), source: "email_local_part", printifySafe: false },
+  ];
+  const found = candidates.find(candidate => cleanText(candidate.value));
+  return { name: cleanText(found?.value), source: found?.source || "", printifySafe: Boolean(found?.printifySafe) };
+}
+
 function getOrderCustomerName(session: Stripe.Checkout.Session) {
-  return cleanText((session as any).shipping_details?.name || (session as any).customer_details?.name || "");
+  return resolveStripeCustomerName(session).name;
 }
 
 function getOrderShippingAddress(session: Stripe.Checkout.Session) {
   const shipping = (session as any).shipping_details;
   const customer = (session as any).customer_details;
+  const resolved = resolveStripeCustomerName(session);
   const address = shipping?.address || customer?.address;
   if (!address) return null;
   return {
-    name: shipping?.name || customer?.name || "",
+    name: resolved.printifySafe ? resolved.name : "",
+    displayName: resolved.name,
+    nameSource: resolved.source,
     email: session.customer_email || customer?.email || "",
     phone: customer?.phone || "",
     line1: address.line1 || "",
@@ -715,6 +739,7 @@ function validateShippingAddress(address: ReturnType<typeof getOrderShippingAddr
   if (!address.name) return "Missing customer name";
   if (!address.line1) return "Missing address line 1";
   if (!address.city) return "Missing city";
+  if (!address.state) return "Missing state/region";
   if (!address.postal_code) return "Missing postal code";
   if (!address.country) return "Missing country";
   return "";
@@ -849,6 +874,24 @@ async function createPrintifyOrderForInternalOrder(orderId: number, lockedDb?: a
   }
 
   const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  const shippingAddress = order.shippingAddress as any;
+  const shippingError = validateShippingAddress(shippingAddress);
+  const validationErrors: string[] = [];
+  if (order.stripePaymentStatus !== "paid") validationErrors.push(`Payment status is ${order.stripePaymentStatus || "unknown"}`);
+  if (shippingError) validationErrors.push(shippingError);
+  for (const item of items.filter(item => item.fulfillmentSource === "printify")) {
+    if (!item.printifyProductId) validationErrors.push(`Missing Printify product ID for ${item.productName}`);
+    if (!item.printifyVariantId) validationErrors.push(`Missing Printify variant ID for ${item.productName}`);
+  }
+  if (validationErrors.length > 0) {
+    await db.update(orders).set({
+      fulfillmentStatus: "Requires Admin Review",
+      errorMessage: validationErrors.join("; "),
+      processing: false,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    return { skipped: true, reason: validationErrors.join("; "), order };
+  }
   const lineItems = items
     .filter(item => item.fulfillmentSource === "printify")
     .map(item => ({
@@ -858,7 +901,7 @@ async function createPrintifyOrderForInternalOrder(orderId: number, lockedDb?: a
     }));
   if (lineItems.length === 0) throw new Error("No Printify line items available");
 
-  const shippingAddress = order.shippingAddress as any;
+  const { firstName, lastName } = splitCustomerName(String(shippingAddress?.name || ""));
   const payload = {
     external_id: order.stripeCheckoutSessionId || `build-level-order-${order.id}`,
     label: `Build Level Order ${order.id}`,
@@ -866,8 +909,8 @@ async function createPrintifyOrderForInternalOrder(orderId: number, lockedDb?: a
     shipping_method: Number(process.env.PRINTIFY_SHIPPING_METHOD || 1),
     send_shipping_notification: false,
     address_to: {
-      first_name: String(shippingAddress?.name || "Build").split(" ")[0],
-      last_name: String(shippingAddress?.name || "Level Customer").split(" ").slice(1).join(" ") || "Customer",
+      first_name: firstName,
+      last_name: lastName,
       email: order.customerEmail,
       phone: order.customerPhone || "",
       country: shippingAddress?.country,
@@ -945,6 +988,7 @@ async function createCheckoutSessionDirect({
   customerEmail,
   metadata,
   shippingCountries,
+  collectCustomerInfo,
 }: {
   lineItems: CheckoutLineItem[];
   successUrl: string;
@@ -952,6 +996,7 @@ async function createCheckoutSessionDirect({
   customerEmail?: string;
   metadata?: Record<string, string>;
   shippingCountries?: string[];
+  collectCustomerInfo?: boolean;
 }) {
   const secretKey = getStripeSecretKey();
 
@@ -960,6 +1005,10 @@ async function createCheckoutSessionDirect({
   body.set("success_url", successUrl);
   body.set("cancel_url", cancelUrl);
   body.set("allow_promotion_codes", "true");
+  if (collectCustomerInfo) {
+    body.set("billing_address_collection", "required");
+    body.set("phone_number_collection[enabled]", "true");
+  }
   if (customerEmail) body.set("customer_email", customerEmail);
 
   lineItems.forEach((item, index) => {
@@ -1044,6 +1093,7 @@ router.post("/checkout", async (req: Request, res: Response) => {
       customerEmail,
       metadata: buildPhysicalCheckoutMetadata(checkoutItems),
       shippingCountries: ["US", "GB", "CA", "AU", "DE", "FR", "JP", "NG", "ZA", "AE"],
+      collectCustomerInfo: true,
       successUrl: `${origin}/checkout/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${origin}/checkout/cancel`,
     });
@@ -1190,7 +1240,11 @@ router.post("/webhook", async (req: Request, res: Response) => {
     } else if (session.metadata?.type === "physical") {
       try {
         await withMysqlLock(session.id, async (lockedDb) => {
-          const result = await createInternalPhysicalOrder(event.id, session, lockedDb);
+          const stripe = getStripe();
+          const expandedSession = await stripe.checkout.sessions.retrieve(session.id, {
+            expand: ["customer", "payment_intent.payment_method", "payment_intent.latest_charge"],
+          });
+          const result = await createInternalPhysicalOrder(event.id, expandedSession, lockedDb);
           console.log("[Stripe Webhook] Physical order ledger result", {
             sessionId: session.id,
             orderId: result.order?.id,
