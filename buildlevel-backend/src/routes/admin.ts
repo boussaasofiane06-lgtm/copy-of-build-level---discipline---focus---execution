@@ -371,6 +371,98 @@ function validateAdminShippingAddress(address: any) {
   return "";
 }
 
+function splitCustomerName(name?: string | null) {
+  const parts = String(name || "").trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return { firstName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "Customer" };
+  return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
+}
+
+async function createPrintifyOrderFromInternalOrder(orderId: number) {
+  await ensureFulfillmentTables();
+  const db = await getDb();
+  const [order] = await db.select().from(orders).where(eq(orders.id, orderId)).limit(1);
+  if (!order) throw new Error(`Order ${orderId} not found`);
+  if (order.printifyOrderId) return { skipped: true, reason: "Printify order already exists", order };
+  if (order.processing) return { skipped: true, reason: "Order is already processing", order };
+  if (process.env.PRINTIFY_CREATE_ORDERS_ENABLED !== "true") throw new Error("Printify order creation is disabled. Set PRINTIFY_CREATE_ORDERS_ENABLED=true only for an approved test.");
+  if (process.env.PRINTIFY_SHIPPING_METHOD_CONFIRMED !== "true") throw new Error("Printify shipping method is not confirmed. Set PRINTIFY_SHIPPING_METHOD_CONFIRMED=true only after validating the method for the product/provider/destination.");
+
+  const items = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  const shippingAddress = order.shippingAddress as any;
+  const validationErrors: string[] = [];
+  const addressError = validateAdminShippingAddress(shippingAddress);
+  if (order.stripePaymentStatus !== "paid") validationErrors.push(`Payment status is ${order.stripePaymentStatus || "unknown"}`);
+  if (addressError) validationErrors.push(addressError);
+  for (const item of items.filter(item => item.fulfillmentSource === "printify")) {
+    if (!item.printifyProductId) validationErrors.push(`Missing Printify product ID for ${item.productName}`);
+    if (!item.printifyVariantId) validationErrors.push(`Missing Printify variant ID for ${item.productName}`);
+  }
+  if (validationErrors.length > 0) {
+    await db.update(orders).set({ fulfillmentStatus: "Requires Admin Review", errorMessage: validationErrors.join("; "), processing: false, updatedAt: new Date() }).where(eq(orders.id, order.id));
+    throw new Error(validationErrors.join("; "));
+  }
+
+  const lineItems = items
+    .filter(item => item.fulfillmentSource === "printify")
+    .map(item => ({ product_id: item.printifyProductId, variant_id: Number(item.printifyVariantId), quantity: item.quantity }));
+  if (lineItems.length === 0) throw new Error("No Printify line items available");
+
+  const { firstName, lastName } = splitCustomerName(String(shippingAddress?.name || order.customerName || ""));
+  const { shopId } = await getPrintifyCredentials();
+  if (!shopId) throw new Error("Printify shop ID is not configured");
+  const payload = {
+    external_id: order.stripeCheckoutSessionId || `build-level-order-${order.id}`,
+    label: `Build Level Order ${order.id}`,
+    line_items: lineItems,
+    shipping_method: Number(process.env.PRINTIFY_SHIPPING_METHOD || 1),
+    send_shipping_notification: false,
+    address_to: {
+      first_name: firstName,
+      last_name: lastName,
+      email: order.customerEmail,
+      phone: order.customerPhone || "",
+      country: shippingAddress.country,
+      region: shippingAddress.state || "",
+      address1: shippingAddress.line1,
+      address2: shippingAddress.line2 || "",
+      city: shippingAddress.city,
+      zip: shippingAddress.postal_code,
+    },
+  };
+
+  const attemptNumber = order.retryCount + 1;
+  await db.update(orders).set({ processing: true, fulfillmentStatus: "Processing", updatedAt: new Date() }).where(eq(orders.id, order.id));
+  await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "pending", requestPayload: payload as any, createdAt: new Date() });
+  try {
+    const response = await printifyRequestWithBody(`/shops/${shopId}/orders.json`, "POST", payload);
+    await db.update(orders).set({
+      printifyOrderId: String((response as any).id || ""),
+      printifyExternalId: String(payload.external_id),
+      printifyStatus: String((response as any).status || "created"),
+      printifyApiResponse: response as any,
+      fulfillmentStatus: "Awaiting Production Approval",
+      processing: false,
+      errorMessage: null,
+      retryCount: attemptNumber,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "success", responsePayload: response as any, createdAt: new Date() });
+    await db.insert(orderEvents).values({ orderId: order.id, eventType: "printify.order_created", payload: response as any, createdAt: new Date() });
+    return { success: true, response };
+  } catch (error: any) {
+    await db.update(orders).set({
+      fulfillmentStatus: "Failed",
+      processing: false,
+      errorMessage: error.message,
+      retryCount: attemptNumber,
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    await db.insert(fulfillmentAttempts).values({ orderId: order.id, attemptNumber, action: "create_printify_order", status: "failed", requestPayload: payload as any, errorMessage: error.message, createdAt: new Date() });
+    throw error;
+  }
+}
+
 function normalizeCountryForShipping(value: string) {
   const raw = String(value || "").trim();
   if (!raw) return "";
@@ -511,15 +603,12 @@ router.post("/fulfillment/orders/:id/refresh", requireAdmin, async (req: Request
 router.post("/fulfillment/orders/:id/retry", requireAdmin, async (req: Request, res: Response) => {
   try {
     await ensureFulfillmentTables();
-    if (process.env.PRINTIFY_CREATE_ORDERS_ENABLED !== "true") {
-      res.status(403).json({ error: "Printify order creation is disabled. Set PRINTIFY_CREATE_ORDERS_ENABLED=true only for an approved test." });
-      return;
-    }
     const id = Number(req.params.id);
     const db = await getDb();
     await db.insert(orderEvents).values({ orderId: id, eventType: "admin.retry_requested", payload: req.body || {}, createdAt: new Date() });
-    res.status(501).json({ error: "Retry creation endpoint is guarded; implementation requires final approval before live Printify order creation." });
-  } catch (e: any) { res.status(500).json({ error: e.message }); }
+    const result = await createPrintifyOrderFromInternalOrder(id);
+    res.json({ success: true, result });
+  } catch (e: any) { res.status(400).json({ error: e.message }); }
 });
 
 // ─── Blog Posts ───────────────────────────────────────────────────────────────
