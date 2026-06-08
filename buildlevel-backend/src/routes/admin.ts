@@ -497,6 +497,51 @@ function normalizeCountryForShipping(value: string) {
   return countryMap[normalized] || raw.toUpperCase();
 }
 
+function normalizePrintifyStatus(value: unknown) {
+  return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+}
+
+function mapPrintifyStatusToFulfillmentStatus(status: unknown) {
+  const normalized = normalizePrintifyStatus(status);
+  if (!normalized) return "Printify Order Created";
+  if (["created", "pending", "on_hold", "waiting_for_approval"].includes(normalized)) return "Printify Order Created";
+  if (["approved", "in_production", "production", "sent_to_production", "printing", "fulfilled"].includes(normalized)) return "Sent to Production";
+  if (["shipped", "partially_shipped", "in_transit", "out_for_delivery"].includes(normalized)) return "Shipped";
+  if (["delivered", "completed"].includes(normalized)) return "Delivered";
+  if (["cancelled", "canceled"].includes(normalized)) return "Cancelled";
+  if (["failed", "error", "rejected"].includes(normalized)) return "Failed";
+  return "Printify Order Created";
+}
+
+function getPrintifyOrderStatus(payload: any) {
+  return payload?.status || payload?.resource?.status || payload?.data?.status || payload?.order?.status || "";
+}
+
+function getPrintifyWebhookOrderId(payload: any) {
+  return String(
+    payload?.resource?.id ||
+    payload?.resource?.order_id ||
+    payload?.data?.id ||
+    payload?.data?.order_id ||
+    payload?.order?.id ||
+    payload?.order_id ||
+    "",
+  ).trim();
+}
+
+async function updateInternalOrderFromPrintify(order: typeof orders.$inferSelect, data: any, eventType: string) {
+  const db = await getDb();
+  const printifyStatus = String(getPrintifyOrderStatus(data) || order.printifyStatus || "");
+  const fulfillmentStatus = mapPrintifyStatusToFulfillmentStatus(printifyStatus) as any;
+  await db.update(orders).set({
+    printifyStatus,
+    printifyApiResponse: data as any,
+    fulfillmentStatus,
+    updatedAt: new Date(),
+  }).where(eq(orders.id, order.id));
+  await db.insert(orderEvents).values({ orderId: order.id, eventType, payload: data as any, createdAt: new Date() });
+}
+
 router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (req: Request, res: Response) => {
   try {
     await ensureFulfillmentTables();
@@ -594,8 +639,7 @@ router.post("/fulfillment/orders/:id/refresh", requireAdmin, async (req: Request
     if (!order?.printifyOrderId) { res.status(400).json({ error: "No Printify order ID to refresh" }); return; }
     const { shopId } = await getPrintifyCredentials();
     const data = await printifyRequest(`/shops/${shopId}/orders/${order.printifyOrderId}.json`);
-    await db.update(orders).set({ printifyStatus: String((data as any).status || ""), printifyApiResponse: data as any, updatedAt: new Date() }).where(eq(orders.id, id));
-    await db.insert(orderEvents).values({ orderId: id, eventType: "printify.refresh", payload: data as any, createdAt: new Date() });
+    await updateInternalOrderFromPrintify(order, data, "printify.refresh");
     res.json({ success: true, data });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
@@ -1867,7 +1911,18 @@ router.post("/printify/webhooks/setup", requireAdmin, async (req: Request, res: 
       return;
     }
     const webhookUrl = `${getBackendWebhookBaseUrl(req)}/api/admin/printify/webhook?secret=${encodeURIComponent(secret)}`;
-    const topics = ["product:publish:started", "product:publish:succeeded", "product:updated", "product:deleted"];
+    const topics = [
+      "product:publish:started",
+      "product:publish:succeeded",
+      "product:updated",
+      "product:deleted",
+      "order:created",
+      "order:updated",
+      "order:sent-to-production",
+      "order:shipment:created",
+      "order:delivered",
+      "order:cancelled",
+    ];
     const existingData = await printifyRequest(`/shops/${shopId}/webhooks.json`).catch(() => ({}));
     const existing = Array.isArray(existingData?.data) ? existingData.data : Array.isArray(existingData) ? existingData : [];
     const results = [];
@@ -1899,9 +1954,19 @@ router.post("/printify/webhook", async (req: Request, res: Response) => {
     const payload = req.body || {};
     const topic = getPrintifyWebhookTopic(req, payload);
     const printifyProductId = getPrintifyWebhookProductId(payload);
+    const printifyOrderId = getPrintifyWebhookOrderId(payload);
     let result: unknown;
 
-    if (topic.includes("deleted") && printifyProductId) {
+    if ((topic.includes("order") || printifyOrderId) && printifyOrderId) {
+      const db = await getDb();
+      const [order] = await db.select().from(orders).where(eq(orders.printifyOrderId, printifyOrderId)).limit(1);
+      if (order) {
+        await updateInternalOrderFromPrintify(order, payload, "printify.webhook");
+        result = { orderId: order.id, printifyOrderId, status: getPrintifyOrderStatus(payload) };
+      } else {
+        result = { printifyOrderId, ignored: "No matching internal order" };
+      }
+    } else if (topic.includes("deleted") && printifyProductId) {
       result = await delistPrintifyProduct(printifyProductId);
     } else if (printifyProductId) {
       result = await syncPrintifyProductToStore(printifyProductId);
@@ -1912,7 +1977,7 @@ router.post("/printify/webhook", async (req: Request, res: Response) => {
       result = await syncPrintifyStoreToWebsite();
     }
 
-    res.json({ success: true, topic, printifyProductId, result });
+    res.json({ success: true, topic, printifyProductId, printifyOrderId, result });
   } catch (e: any) {
     const payload = req.body || {};
     const topic = getPrintifyWebhookTopic(req, payload);

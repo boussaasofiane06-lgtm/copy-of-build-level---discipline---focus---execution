@@ -126,6 +126,7 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
                 <h4>Order #{selected.order.id}</h4>
                 <p style={{ color: "var(--text2)", marginTop: 4 }}>{selected.order.customerName || "Missing customer name"} · {selected.order.customerEmail}</p>
                 <p style={{ color: "var(--text2)", fontSize: "0.82rem", marginTop: 4 }}>Phone: {selected.order.customerPhone || "Missing phone"}</p>
+                <p style={{ color: "var(--text2)", fontSize: "0.82rem", marginTop: 4 }}>Website status: {selected.order.fulfillmentStatus} · Printify status: {selected.order.printifyStatus || "not synced"}</p>
                 <p style={{ color: "var(--text3)", fontSize: "0.8rem" }}>Created {new Date(selected.order.createdAt).toLocaleString()}</p>
               </div>
               <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 12 }}>
