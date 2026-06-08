@@ -367,7 +367,42 @@ function validateAdminShippingAddress(address: any) {
   if (!String(address.state || "").trim()) return "Missing state/region";
   if (!String(address.postal_code || "").trim()) return "Missing postal code";
   if (!String(address.country || "").trim()) return "Missing country";
+  if (String(address.country || "").trim().length !== 2) return "Country must be a 2-letter code";
   return "";
+}
+
+function normalizeCountryForShipping(value: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const normalized = raw.toLowerCase().replace(/[^a-z]/g, "");
+  const countryMap: Record<string, string> = {
+    us: "US",
+    usa: "US",
+    unitedstates: "US",
+    unitedstatesofamerica: "US",
+    america: "US",
+    uk: "GB",
+    unitedkingdom: "GB",
+    greatbritain: "GB",
+    canada: "CA",
+    ca: "CA",
+    australia: "AU",
+    au: "AU",
+    germany: "DE",
+    de: "DE",
+    france: "FR",
+    fr: "FR",
+    japan: "JP",
+    jp: "JP",
+    nigeria: "NG",
+    ng: "NG",
+    southafrica: "ZA",
+    za: "ZA",
+    unitedarabemirates: "AE",
+    uae: "AE",
+    ae: "AE",
+  };
+  return countryMap[normalized] || raw.toUpperCase();
 }
 
 router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (req: Request, res: Response) => {
@@ -382,7 +417,7 @@ router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (r
       city: z.string().max(128).optional().default(""),
       state: z.string().max(128).optional().default(""),
       postalCode: z.string().max(64).optional().default(""),
-      country: z.string().max(2).optional().default(""),
+      country: z.string().max(64).optional().default(""),
     }).parse(req.body || {});
     const db = await getDb();
     const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
@@ -397,7 +432,7 @@ router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (r
       city: data.city.trim(),
       state: data.state.trim(),
       postal_code: data.postalCode.trim(),
-      country: data.country.trim().toUpperCase(),
+      country: normalizeCountryForShipping(data.country),
       correctedByAdmin: true,
     };
     const items = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
