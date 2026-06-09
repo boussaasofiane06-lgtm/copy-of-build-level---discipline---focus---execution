@@ -3,6 +3,7 @@ import { eq, asc, desc, sql } from "drizzle-orm";
 import { z } from "zod";
 import Stripe from "stripe";
 import multer from "multer";
+import crypto from "crypto";
 import { getDb } from "../db/index.js";
 import {
   products, blogPosts, digitalProducts, affiliateProducts,
@@ -10,6 +11,7 @@ import {
 } from "../db/schema.js";
 import { requireAdmin, verifyAdminPassword, signAdminToken, ADMIN_COOKIE } from "../middleware/adminAuth.js";
 import { ALLOWED_IMAGE_EXTENSIONS, MAX_DIGITAL_FILE_SIZE_BYTES, isStorageConfigured, uploadObject } from "../storage/objectStorage.js";
+import { isEmailConfigured, sendCustomerEmail } from "../services/email.js";
 
 const router = Router();
 const upload = multer({
@@ -105,6 +107,9 @@ async function ensureFulfillmentTables() {
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS orders (
       id INT AUTO_INCREMENT PRIMARY KEY,
+      orderToken VARCHAR(128) NULL UNIQUE,
+      customerFirstName VARCHAR(128) NULL,
+      customerLastName VARCHAR(128) NULL,
       customerName VARCHAR(255) NULL,
       customerEmail VARCHAR(320) NOT NULL,
       customerPhone VARCHAR(64) NULL,
@@ -116,19 +121,46 @@ async function ensureFulfillmentTables() {
       orderTotal DECIMAL(10,2) NULL,
       currency VARCHAR(8) DEFAULT 'usd',
       orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
-      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
+      fulfillmentStatus ENUM('Payment Pending','Paid','Order Received','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','In Production','Partially Shipped','Shipped','Delivered','Fulfillment Payment Issue','Requires Admin Review','Failed','Cancelled') NOT NULL DEFAULT 'Payment Pending',
       printifyOrderId VARCHAR(128) NULL UNIQUE,
       printifyExternalId VARCHAR(128) NULL,
       printifyStatus VARCHAR(128) NULL,
+      customerStatus VARCHAR(128) NULL,
       printifyApiResponse JSON NULL,
       errorMessage TEXT NULL,
+      lastSyncAt TIMESTAMP NULL,
+      lastSyncFailedAt TIMESTAMP NULL,
+      lastSyncError TEXT NULL,
+      confirmationEmailSent BOOLEAN NOT NULL DEFAULT false,
+      confirmationEmailSentAt TIMESTAMP NULL,
+      confirmationEmailStatus VARCHAR(64) NULL,
+      confirmationEmailError TEXT NULL,
+      productionEmailSentAt TIMESTAMP NULL,
+      shippingEmailSentAt TIMESTAMP NULL,
+      deliveryEmailSentAt TIMESTAMP NULL,
       retryCount INT NOT NULL DEFAULT 0,
       processing BOOLEAN NOT NULL DEFAULT false,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `));
-  await db.execute(sql.raw(`ALTER TABLE orders MODIFY fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending'`)).catch(() => undefined);
+  await db.execute(sql.raw(`ALTER TABLE orders MODIFY fulfillmentStatus ENUM('Payment Pending','Paid','Order Received','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','In Production','Partially Shipped','Shipped','Delivered','Fulfillment Payment Issue','Requires Admin Review','Failed','Cancelled') NOT NULL DEFAULT 'Payment Pending'`)).catch(() => undefined);
+  for (const statement of [
+    `ALTER TABLE orders ADD COLUMN orderToken VARCHAR(128) NULL UNIQUE`,
+    `ALTER TABLE orders ADD COLUMN customerFirstName VARCHAR(128) NULL`,
+    `ALTER TABLE orders ADD COLUMN customerLastName VARCHAR(128) NULL`,
+    `ALTER TABLE orders ADD COLUMN customerStatus VARCHAR(128) NULL`,
+    `ALTER TABLE orders ADD COLUMN lastSyncAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN lastSyncFailedAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN lastSyncError TEXT NULL`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailSent BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailSentAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailStatus VARCHAR(64) NULL`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailError TEXT NULL`,
+    `ALTER TABLE orders ADD COLUMN productionEmailSentAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN shippingEmailSentAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN deliveryEmailSentAt TIMESTAMP NULL`,
+  ]) await db.execute(sql.raw(statement)).catch(() => undefined);
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS order_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -171,6 +203,74 @@ async function ensureFulfillmentTables() {
       payload JSON NULL,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_order_events_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_shipments (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      printifyShipmentId VARCHAR(128) NULL,
+      carrier VARCHAR(128) NULL,
+      trackingNumber VARCHAR(255) NULL,
+      trackingUrl TEXT NULL,
+      status VARCHAR(64) NULL,
+      shippedAt TIMESTAMP NULL,
+      deliveredAt TIMESTAMP NULL,
+      payload JSON NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_order_tracking (orderId, trackingNumber),
+      INDEX idx_order_shipments_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_notifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      notificationType ENUM('confirmation','production','shipping','delivery','admin_alert','tracking_resend') NOT NULL,
+      recipientEmail VARCHAR(320) NOT NULL,
+      subject VARCHAR(255) NOT NULL,
+      status ENUM('queued','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+      attemptCount INT NOT NULL DEFAULT 0,
+      lastError TEXT NULL,
+      sentAt TIMESTAMP NULL,
+      metadata JSON NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_order_notification (orderId, notificationType, recipientEmail),
+      INDEX idx_order_notifications_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_alerts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      alertType VARCHAR(128) NOT NULL,
+      message TEXT NOT NULL,
+      status ENUM('open','resolved') NOT NULL DEFAULT 'open',
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      resolvedAt TIMESTAMP NULL,
+      UNIQUE KEY uq_open_order_alert (orderId, alertType, status),
+      INDEX idx_order_alerts_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_issues (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      productId INT NULL,
+      issueType VARCHAR(128) NOT NULL,
+      description TEXT NOT NULL,
+      evidenceUrl TEXT NULL,
+      preferredResolution VARCHAR(128) NULL,
+      status ENUM('reported','admin_review','submitted_to_printify','approved','rejected','closed') NOT NULL DEFAULT 'reported',
+      printifyIssueId VARCHAR(128) NULL,
+      replacementOrderId VARCHAR(128) NULL,
+      refundAmount DECIMAL(10,2) NULL,
+      adminNotes TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_order_issues_order (orderId)
     )
   `));
   await db.execute(sql.raw(`ALTER TABLE orders ADD UNIQUE KEY unique_printify_order_id (printifyOrderId)`)).catch(() => undefined);
@@ -350,12 +450,16 @@ router.get("/fulfillment/orders/:id", requireAdmin, async (req: Request, res: Re
     const db = await getDb();
     const [order] = await db.select().from(orders).where(eq(orders.id, id)).limit(1);
     if (!order) { res.status(404).json({ error: "Order not found" }); return; }
-    const [items, attempts, events] = await Promise.all([
+    const [items, attempts, events, shipments, notifications, alerts, issues] = await Promise.all([
       db.select().from(orderItems).where(eq(orderItems.orderId, id)),
       db.select().from(fulfillmentAttempts).where(eq(fulfillmentAttempts.orderId, id)).orderBy(desc(fulfillmentAttempts.createdAt)),
       db.select().from(orderEvents).where(eq(orderEvents.orderId, id)).orderBy(desc(orderEvents.createdAt)),
+      db.execute(sql`SELECT * FROM order_shipments WHERE orderId = ${id} ORDER BY createdAt DESC`) as any,
+      db.execute(sql`SELECT * FROM order_notifications WHERE orderId = ${id} ORDER BY createdAt DESC`) as any,
+      db.execute(sql`SELECT * FROM order_alerts WHERE orderId = ${id} ORDER BY status ASC, createdAt DESC`) as any,
+      db.execute(sql`SELECT * FROM order_issues WHERE orderId = ${id} ORDER BY createdAt DESC`) as any,
     ]);
-    res.json({ order, items, attempts, events });
+    res.json({ order, items, attempts, events, shipments: shipments?.[0] || [], notifications: notifications?.[0] || [], alerts: alerts?.[0] || [], issues: issues?.[0] || [] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -513,8 +617,58 @@ function mapPrintifyStatusToFulfillmentStatus(status: unknown) {
   return "Printify Order Created";
 }
 
+function customerStatusForFulfillment(status?: string | null) {
+  const normalized = String(status || "").trim();
+  if (["Paid", "Order Received", "Awaiting Fulfillment", "Ready for Printify Test", "Printify Order Created"].includes(normalized)) return "Order Received";
+  if (normalized === "Awaiting Production Approval") return "Awaiting Production Approval";
+  if (["Sent to Production", "In Production"].includes(normalized)) return "In Production";
+  if (normalized === "Partially Shipped") return "Partially Shipped";
+  if (normalized === "Shipped") return "Shipped";
+  if (normalized === "Delivered") return "Delivered";
+  if (normalized === "Cancelled") return "Cancelled";
+  if (normalized === "Fulfillment Payment Issue") return "Fulfillment Payment Issue";
+  if (["Requires Admin Review", "Failed"].includes(normalized)) return "Needs Review";
+  return normalized || "Order Received";
+}
+
 function getPrintifyOrderStatus(payload: any) {
   return payload?.status || payload?.resource?.status || payload?.data?.status || payload?.order?.status || "";
+}
+
+function getPrintifyShipments(payload: any) {
+  const candidates = [
+    payload?.shipments,
+    payload?.resource?.shipments,
+    payload?.data?.shipments,
+    payload?.order?.shipments,
+    payload?.line_items?.flatMap?.((item: any) => item?.metadata?.shipments || []),
+  ].filter(Boolean);
+  const list = candidates.flatMap((value: any) => Array.isArray(value) ? value : [value]);
+  return list.map((shipment: any) => ({
+    printifyShipmentId: String(shipment?.id || shipment?.shipment_id || shipment?.tracking_number || ""),
+    carrier: String(shipment?.carrier || shipment?.shipping_carrier || shipment?.provider || ""),
+    trackingNumber: String(shipment?.tracking_number || shipment?.trackingNumber || shipment?.number || ""),
+    trackingUrl: String(shipment?.tracking_url || shipment?.trackingUrl || shipment?.url || ""),
+    status: String(shipment?.status || ""),
+    shippedAt: shipment?.shipped_at || shipment?.created_at || null,
+    deliveredAt: shipment?.delivered_at || null,
+    payload: shipment,
+  })).filter((shipment: any) => shipment.trackingNumber || shipment.printifyShipmentId);
+}
+
+async function sendOrderMilestoneEmail(db: any, order: any, type: "production" | "shipping" | "delivery", subject: string, body: string) {
+  if (!isEmailConfigured()) {
+    await db.execute(sql`INSERT INTO order_notifications (orderId, notificationType, recipientEmail, subject, status, lastError) VALUES (${order.id}, ${type}, ${order.customerEmail}, ${subject}, 'skipped', 'Email provider is not configured') ON DUPLICATE KEY UPDATE status = status`).catch(() => undefined);
+    return;
+  }
+  const [existing] = await db.execute(sql`SELECT id, status FROM order_notifications WHERE orderId = ${order.id} AND notificationType = ${type} AND recipientEmail = ${order.customerEmail} LIMIT 1`) as any;
+  if (existing?.[0]?.status === "sent") return;
+  try {
+    await sendCustomerEmail({ to: order.customerEmail, subject, text: body, html: `<div style="font-family:Arial,sans-serif;background:#0a0a0a;color:#f5f0e8;padding:28px"><h1>BUILD LEVEL</h1><p>${body}</p><p><a href="https://thebuildlevel.com/order/${order.orderToken}" style="display:inline-block;background:#c0392b;color:#fff;padding:12px 16px;text-decoration:none;border-radius:4px">View Order</a></p></div>` });
+    await db.execute(sql`INSERT INTO order_notifications (orderId, notificationType, recipientEmail, subject, status, sentAt, attemptCount) VALUES (${order.id}, ${type}, ${order.customerEmail}, ${subject}, 'sent', NOW(), 1) ON DUPLICATE KEY UPDATE status = 'sent', sentAt = NOW(), attemptCount = attemptCount + 1`);
+  } catch (error: any) {
+    await db.execute(sql`INSERT INTO order_notifications (orderId, notificationType, recipientEmail, subject, status, lastError, attemptCount) VALUES (${order.id}, ${type}, ${order.customerEmail}, ${subject}, 'failed', ${error?.message || "Email failed"}, 1) ON DUPLICATE KEY UPDATE status = 'failed', lastError = VALUES(lastError), attemptCount = attemptCount + 1`).catch(() => undefined);
+  }
 }
 
 function getPrintifyWebhookOrderId(payload: any) {
@@ -533,13 +687,24 @@ async function updateInternalOrderFromPrintify(order: typeof orders.$inferSelect
   const db = await getDb();
   const printifyStatus = String(getPrintifyOrderStatus(data) || order.printifyStatus || "");
   const fulfillmentStatus = mapPrintifyStatusToFulfillmentStatus(printifyStatus) as any;
+  const customerStatus = customerStatusForFulfillment(fulfillmentStatus);
+  const shipments = getPrintifyShipments(data);
+  for (const shipment of shipments) {
+    await db.execute(sql`INSERT INTO order_shipments (orderId, printifyShipmentId, carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt, payload) VALUES (${order.id}, ${shipment.printifyShipmentId || null}, ${shipment.carrier || null}, ${shipment.trackingNumber || shipment.printifyShipmentId}, ${shipment.trackingUrl || null}, ${shipment.status || null}, ${shipment.shippedAt ? new Date(shipment.shippedAt) : null}, ${shipment.deliveredAt ? new Date(shipment.deliveredAt) : null}, ${shipment.payload}) ON DUPLICATE KEY UPDATE carrier = VALUES(carrier), trackingUrl = VALUES(trackingUrl), status = VALUES(status), deliveredAt = COALESCE(VALUES(deliveredAt), deliveredAt), payload = VALUES(payload), updatedAt = NOW()`).catch(() => undefined);
+  }
   await db.update(orders).set({
     printifyStatus,
     printifyApiResponse: data as any,
     fulfillmentStatus,
+    customerStatus,
+    lastSyncAt: new Date(),
+    lastSyncError: null,
     updatedAt: new Date(),
   }).where(eq(orders.id, order.id));
   await db.insert(orderEvents).values({ orderId: order.id, eventType, payload: data as any, createdAt: new Date() });
+  if (["Sent to Production", "In Production"].includes(fulfillmentStatus)) await sendOrderMilestoneEmail(db, order, "production", `Your Build Level Order Is in Production`, `Your order #${order.id} is now in production. We’ll email you again as soon as tracking becomes available.`);
+  if (["Shipped", "Partially Shipped"].includes(fulfillmentStatus) && shipments.length > 0) await sendOrderMilestoneEmail(db, order, "shipping", `Your Build Level Order Has Shipped`, `Your order #${order.id} has shipped. Tracking: ${shipments.map(s => `${s.carrier} ${s.trackingNumber} ${s.trackingUrl}`).join(" | ")}`);
+  if (fulfillmentStatus === "Delivered") await sendOrderMilestoneEmail(db, order, "delivery", `Your Build Level Order Was Delivered`, `Your Build Level order #${order.id} has been marked as delivered.`);
 }
 
 router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (req: Request, res: Response) => {
@@ -573,6 +738,7 @@ router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (r
       correctedByAdmin: true,
     };
     const items = await db.select().from(orderItems).where(eq(orderItems.orderId, id));
+    const split = splitCustomerName(data.customerName);
     const reviewReasons: string[] = [];
     if (order.stripePaymentStatus !== "paid") reviewReasons.push(`Payment status is ${order.stripePaymentStatus || "unknown"}`);
     const addressError = validateAdminShippingAddress(address);
@@ -583,10 +749,13 @@ router.patch("/fulfillment/orders/:id/customer-shipping", requireAdmin, async (r
     }
     const nextStatus = reviewReasons.length === 0 ? "Ready for Printify Test" : "Requires Admin Review";
     await db.update(orders).set({
+      customerFirstName: split.firstName || null,
+      customerLastName: split.lastName || null,
       customerName: data.customerName.trim() || null,
       customerPhone: data.customerPhone.trim() || null,
       shippingAddress: address,
       fulfillmentStatus: nextStatus as any,
+      customerStatus: customerStatusForFulfillment(nextStatus),
       errorMessage: reviewReasons.length ? reviewReasons.join("; ") : null,
       processing: false,
       updatedAt: new Date(),
@@ -641,6 +810,28 @@ router.post("/fulfillment/orders/:id/refresh", requireAdmin, async (req: Request
     const data = await printifyRequest(`/shops/${shopId}/orders/${order.printifyOrderId}.json`);
     await updateInternalOrderFromPrintify(order, data, "printify.refresh");
     res.json({ success: true, data });
+  } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+router.post("/fulfillment/sync-open", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    await ensureFulfillmentTables();
+    const db = await getDb();
+    const openOrders = await db.select().from(orders).where(sql`printifyOrderId IS NOT NULL AND fulfillmentStatus NOT IN ('Delivered','Cancelled','Failed')`).limit(50);
+    const { shopId } = await getPrintifyCredentials();
+    const results = [];
+    for (const order of openOrders) {
+      try {
+        const data = await printifyRequest(`/shops/${shopId}/orders/${order.printifyOrderId}.json`);
+        await updateInternalOrderFromPrintify(order, data, "printify.fallback_sync");
+        results.push({ orderId: order.id, status: "synced", printifyOrderId: order.printifyOrderId });
+      } catch (error: any) {
+        await db.update(orders).set({ lastSyncFailedAt: new Date(), lastSyncError: error?.message || "Sync failed", updatedAt: new Date() }).where(eq(orders.id, order.id));
+        await db.execute(sql`INSERT INTO order_alerts (orderId, alertType, message, status) VALUES (${order.id}, 'printify_sync_failed', ${error?.message || "Printify sync failed"}, 'open') ON DUPLICATE KEY UPDATE message = VALUES(message)`).catch(() => undefined);
+        results.push({ orderId: order.id, status: "failed", error: error?.message || "Sync failed" });
+      }
+    }
+    res.json({ success: true, checked: openOrders.length, results });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -1714,6 +1905,17 @@ function getPrintifyWebhookSecret() {
 function isPrintifyWebhookAuthorized(req: Request) {
   const expected = getPrintifyWebhookSecret();
   if (!expected) return true;
+  const hmacHeader = String(req.headers["x-printify-hmac-sha256"] || req.headers["x-printify-hmac"] || "").trim();
+  if (hmacHeader) {
+    const rawBody = (req as any).rawBody;
+    const computed = crypto.createHmac("sha256", expected).update(rawBody || JSON.stringify(req.body || {})).digest("hex");
+    const provided = hmacHeader.replace(/^sha256=/i, "");
+    try {
+      return crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(provided));
+    } catch {
+      return false;
+    }
+  }
   const provided = String(req.query.secret || req.headers["x-printify-webhook-secret"] || req.headers["x-printify-signature"] || "").trim();
   return provided === expected;
 }

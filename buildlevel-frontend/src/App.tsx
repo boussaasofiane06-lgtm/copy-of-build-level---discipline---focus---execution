@@ -24,6 +24,7 @@ import Maintenance from "./pages/Maintenance";
 import CartRecovery from "./pages/CartRecovery";
 import EmailPreferences from "./pages/EmailPreferences";
 import SupportTicketPage from "./pages/SupportTicket";
+import OrderStatusPage from "./pages/OrderStatus";
 import PolicyPage, { FAQPage, PolicyCenter } from "./pages/PolicyPage";
 import { MaintenanceConfig, publicApi } from "./lib/api";
 
@@ -55,6 +56,7 @@ function PublicRoutes() {
           <Route path="/cart/recover/:token" element={<CartRecovery />} />
           <Route path="/email/preferences/:token" element={<EmailPreferences />} />
           <Route path="/support/ticket/:ticketNumber" element={<SupportTicketPage />} />
+          <Route path="/order/:token" element={<OrderStatusPage />} />
           <Route path="/blog" element={<Blog />} />
           <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/about" element={<About />} />

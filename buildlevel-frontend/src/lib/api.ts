@@ -217,6 +217,9 @@ export interface Review {
 
 export interface FulfillmentOrder {
   id: number;
+  orderToken?: string | null;
+  customerFirstName?: string | null;
+  customerLastName?: string | null;
   customerName?: string | null;
   customerEmail: string;
   customerPhone?: string | null;
@@ -231,10 +234,27 @@ export interface FulfillmentOrder {
   printifyOrderId?: string | null;
   printifyExternalId?: string | null;
   printifyStatus?: string | null;
+  customerStatus?: string | null;
   errorMessage?: string | null;
   retryCount: number;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface PublicOrderStatus {
+  order: {
+    id: number;
+    customerStatus?: string | null;
+    paymentStatus?: string | null;
+    orderDate: string;
+    lastUpdated: string;
+    orderTotal?: string | null;
+    currency?: string | null;
+    shippingAddress?: Record<string, unknown>;
+  };
+  items: Array<{ id: number; productName: string; quantity: number; selectedSize?: string | null; selectedColor?: string | null; unitPrice?: string | null }>;
+  shipments: Array<{ id: number; carrier?: string | null; trackingNumber?: string | null; trackingUrl?: string | null; status?: string | null; shippedAt?: string | null; deliveredAt?: string | null; createdAt?: string | null }>;
+  issues: Array<{ id: number; issueType: string; preferredResolution?: string | null; status: string; createdAt?: string; updatedAt?: string }>;
 }
 
 export interface FulfillmentOrderItem {
@@ -483,6 +503,10 @@ export const publicApi = {
     api.post<{ success: true; cart: SavedCart }>("/cart/sync", data).then(r => r.data),
   recoverCart: (token: string) =>
     api.get<{ success: true; cart: SavedCart }>(`/cart/recover/${encodeURIComponent(token)}`).then(r => r.data),
+  getOrderStatus: (token: string) =>
+    api.get<PublicOrderStatus>(`/orders/${encodeURIComponent(token)}/status`).then(r => r.data),
+  reportOrderIssue: (token: string, data: { productId?: number | null; issueType: string; description: string; evidenceUrl?: string; preferredResolution?: string }) =>
+    api.post<{ success: true }>(`/orders/${encodeURIComponent(token)}/issues`, data).then(r => r.data),
   markCartConverted: (data: { sessionId: string; completedOrderId?: string }) =>
     api.post<{ success: true }>("/cart/converted", data).then(r => r.data),
   subscribe: (data: { email: string; firstName?: string; interests: string[]; source: string; consent: boolean; resubscribe?: boolean }) =>
@@ -595,11 +619,12 @@ export const adminApi = {
   saveEngagementSettings: (data: { bannedWords: string }) => api.post<{ success: true }>("/admin/engagement/settings", data).then(r => r.data),
   createAdminReview: (data: Partial<Review> & { customerName: string; rating: number; reviewText: string }) => api.post<{ success: true }>("/admin/engagement/reviews", data).then(r => r.data),
   getFulfillmentOrders: (status?: string) => api.get<FulfillmentOrder[]>("/admin/fulfillment/orders", { params: { status } }).then(r => r.data),
-  getFulfillmentOrder: (id: number) => api.get<{ order: FulfillmentOrder; items: FulfillmentOrderItem[]; attempts: unknown[]; events: unknown[] }>(`/admin/fulfillment/orders/${id}`).then(r => r.data),
+  getFulfillmentOrder: (id: number) => api.get<{ order: FulfillmentOrder; items: FulfillmentOrderItem[]; attempts: unknown[]; events: unknown[]; shipments?: unknown[]; notifications?: unknown[]; alerts?: unknown[]; issues?: unknown[] }>(`/admin/fulfillment/orders/${id}`).then(r => r.data),
   holdFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/hold`).then(r => r.data),
   releaseFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/release`).then(r => r.data),
   resolveFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/resolve`).then(r => r.data),
   refreshFulfillmentOrder: (id: number) => api.post<{ success: true; data?: unknown }>(`/admin/fulfillment/orders/${id}/refresh`).then(r => r.data),
+  syncOpenPrintifyOrders: () => api.post<{ success: true; checked: number; results: unknown[] }>("/admin/fulfillment/sync-open").then(r => r.data),
   retryFulfillmentOrder: (id: number) => api.post<{ success: true }>(`/admin/fulfillment/orders/${id}/retry`).then(r => r.data),
   updateFulfillmentCustomerShipping: (id: number, data: { customerName?: string; customerPhone?: string; line1?: string; line2?: string; city?: string; state?: string; postalCode?: string; country?: string }) =>
     api.patch<{ success: true; order: FulfillmentOrder; missing: string[] }>(`/admin/fulfillment/orders/${id}/customer-shipping`, data).then(r => r.data),

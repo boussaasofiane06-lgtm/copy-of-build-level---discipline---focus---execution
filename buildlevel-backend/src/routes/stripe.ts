@@ -5,6 +5,7 @@ import { eq, sql } from "drizzle-orm";
 import { createDedicatedDbConnection, getDb } from "../db/index.js";
 import { digitalProducts, digitalPurchases, products, siteSettings, orders, orderItems, fulfillmentAttempts, orderEvents, productVariants } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
+import { BUSINESS_EMAIL, isEmailConfigured, sendCustomerEmail } from "../services/email.js";
 
 const router = Router();
 const MAX_PHYSICAL_METADATA_ITEMS = 15;
@@ -140,13 +141,17 @@ type DigitalAccessResult = {
 type OrderStatus =
   | "Payment Pending"
   | "Paid"
+  | "Order Received"
   | "Awaiting Fulfillment"
   | "Ready for Printify Test"
   | "Processing"
   | "Printify Order Created"
   | "Awaiting Production Approval"
   | "Sent to Production"
+  | "In Production"
+  | "Partially Shipped"
   | "Requires Admin Review"
+  | "Fulfillment Payment Issue"
   | "Failed"
   | "Cancelled"
   | "Shipped"
@@ -209,6 +214,9 @@ async function ensureFulfillmentTables(dbOverride?: any) {
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS orders (
       id INT AUTO_INCREMENT PRIMARY KEY,
+      orderToken VARCHAR(128) NULL UNIQUE,
+      customerFirstName VARCHAR(128) NULL,
+      customerLastName VARCHAR(128) NULL,
       customerName VARCHAR(255) NULL,
       customerEmail VARCHAR(320) NOT NULL,
       customerPhone VARCHAR(64) NULL,
@@ -220,19 +228,46 @@ async function ensureFulfillmentTables(dbOverride?: any) {
       orderTotal DECIMAL(10,2) NULL,
       currency VARCHAR(8) DEFAULT 'usd',
       orderType ENUM('apparel','digital','mixed') NOT NULL DEFAULT 'apparel',
-      fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending',
+      fulfillmentStatus ENUM('Payment Pending','Paid','Order Received','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','In Production','Partially Shipped','Shipped','Delivered','Fulfillment Payment Issue','Requires Admin Review','Failed','Cancelled') NOT NULL DEFAULT 'Payment Pending',
       printifyOrderId VARCHAR(128) NULL UNIQUE,
       printifyExternalId VARCHAR(128) NULL,
       printifyStatus VARCHAR(128) NULL,
+      customerStatus VARCHAR(128) NULL,
       printifyApiResponse JSON NULL,
       errorMessage TEXT NULL,
+      lastSyncAt TIMESTAMP NULL,
+      lastSyncFailedAt TIMESTAMP NULL,
+      lastSyncError TEXT NULL,
+      confirmationEmailSent BOOLEAN NOT NULL DEFAULT false,
+      confirmationEmailSentAt TIMESTAMP NULL,
+      confirmationEmailStatus VARCHAR(64) NULL,
+      confirmationEmailError TEXT NULL,
+      productionEmailSentAt TIMESTAMP NULL,
+      shippingEmailSentAt TIMESTAMP NULL,
+      deliveryEmailSentAt TIMESTAMP NULL,
       retryCount INT NOT NULL DEFAULT 0,
       processing BOOLEAN NOT NULL DEFAULT false,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
     )
   `));
-  await db.execute(sql.raw(`ALTER TABLE orders MODIFY fulfillmentStatus ENUM('Payment Pending','Paid','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','Requires Admin Review','Failed','Cancelled','Shipped','Delivered') NOT NULL DEFAULT 'Payment Pending'`)).catch(() => undefined);
+  await db.execute(sql.raw(`ALTER TABLE orders MODIFY fulfillmentStatus ENUM('Payment Pending','Paid','Order Received','Awaiting Fulfillment','Ready for Printify Test','Processing','Printify Order Created','Awaiting Production Approval','Sent to Production','In Production','Partially Shipped','Shipped','Delivered','Fulfillment Payment Issue','Requires Admin Review','Failed','Cancelled') NOT NULL DEFAULT 'Payment Pending'`)).catch(() => undefined);
+  for (const statement of [
+    `ALTER TABLE orders ADD COLUMN orderToken VARCHAR(128) NULL UNIQUE`,
+    `ALTER TABLE orders ADD COLUMN customerFirstName VARCHAR(128) NULL`,
+    `ALTER TABLE orders ADD COLUMN customerLastName VARCHAR(128) NULL`,
+    `ALTER TABLE orders ADD COLUMN customerStatus VARCHAR(128) NULL`,
+    `ALTER TABLE orders ADD COLUMN lastSyncAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN lastSyncFailedAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN lastSyncError TEXT NULL`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailSent BOOLEAN NOT NULL DEFAULT false`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailSentAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailStatus VARCHAR(64) NULL`,
+    `ALTER TABLE orders ADD COLUMN confirmationEmailError TEXT NULL`,
+    `ALTER TABLE orders ADD COLUMN productionEmailSentAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN shippingEmailSentAt TIMESTAMP NULL`,
+    `ALTER TABLE orders ADD COLUMN deliveryEmailSentAt TIMESTAMP NULL`,
+  ]) await db.execute(sql.raw(statement)).catch(() => undefined);
   await db.execute(sql.raw(`
     CREATE TABLE IF NOT EXISTS order_items (
       id INT AUTO_INCREMENT PRIMARY KEY,
@@ -275,6 +310,74 @@ async function ensureFulfillmentTables(dbOverride?: any) {
       payload JSON NULL,
       createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
       INDEX idx_order_events_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_shipments (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      printifyShipmentId VARCHAR(128) NULL,
+      carrier VARCHAR(128) NULL,
+      trackingNumber VARCHAR(255) NULL,
+      trackingUrl TEXT NULL,
+      status VARCHAR(64) NULL,
+      shippedAt TIMESTAMP NULL,
+      deliveredAt TIMESTAMP NULL,
+      payload JSON NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_order_tracking (orderId, trackingNumber),
+      INDEX idx_order_shipments_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_notifications (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      notificationType ENUM('confirmation','production','shipping','delivery','admin_alert','tracking_resend') NOT NULL,
+      recipientEmail VARCHAR(320) NOT NULL,
+      subject VARCHAR(255) NOT NULL,
+      status ENUM('queued','sent','failed','skipped') NOT NULL DEFAULT 'queued',
+      attemptCount INT NOT NULL DEFAULT 0,
+      lastError TEXT NULL,
+      sentAt TIMESTAMP NULL,
+      metadata JSON NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      UNIQUE KEY uq_order_notification (orderId, notificationType, recipientEmail),
+      INDEX idx_order_notifications_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_alerts (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      alertType VARCHAR(128) NOT NULL,
+      message TEXT NOT NULL,
+      status ENUM('open','resolved') NOT NULL DEFAULT 'open',
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      resolvedAt TIMESTAMP NULL,
+      UNIQUE KEY uq_open_order_alert (orderId, alertType, status),
+      INDEX idx_order_alerts_order (orderId)
+    )
+  `));
+  await db.execute(sql.raw(`
+    CREATE TABLE IF NOT EXISTS order_issues (
+      id INT AUTO_INCREMENT PRIMARY KEY,
+      orderId INT NOT NULL,
+      productId INT NULL,
+      issueType VARCHAR(128) NOT NULL,
+      description TEXT NOT NULL,
+      evidenceUrl TEXT NULL,
+      preferredResolution VARCHAR(128) NULL,
+      status ENUM('reported','admin_review','submitted_to_printify','approved','rejected','closed') NOT NULL DEFAULT 'reported',
+      printifyIssueId VARCHAR(128) NULL,
+      replacementOrderId VARCHAR(128) NULL,
+      refundAmount DECIMAL(10,2) NULL,
+      adminNotes TEXT NULL,
+      createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+      INDEX idx_order_issues_order (orderId)
     )
   `));
   await db.execute(sql.raw(`ALTER TABLE orders ADD UNIQUE KEY unique_printify_order_id (printifyOrderId)`)).catch(() => undefined);
@@ -604,8 +707,8 @@ async function resolvePrintifyVariantId(printifyProductId: string, selectedSize:
 
 function splitCustomerName(name?: string | null) {
   const parts = cleanText(name).split(/\s+/).filter(Boolean);
-  if (parts.length === 0) return { firstName: "Build", lastName: "Level Customer" };
-  if (parts.length === 1) return { firstName: parts[0], lastName: "Customer" };
+  if (parts.length === 0) return { firstName: "", lastName: "" };
+  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
 }
 
@@ -678,6 +781,58 @@ function getPhysicalPaymentReference(session: Stripe.Checkout.Session) {
   return cleanText(typeof session.payment_intent === "string" ? session.payment_intent : session.id);
 }
 
+function createOrderToken() {
+  return `blord_${crypto.randomBytes(24).toString("hex")}`;
+}
+
+function customerStatusForFulfillment(status?: string | null) {
+  const normalized = cleanText(status);
+  if (normalized === "Payment Pending") return "Payment Pending";
+  if (["Paid", "Order Received", "Awaiting Fulfillment", "Ready for Printify Test", "Printify Order Created"].includes(normalized)) return "Order Received";
+  if (normalized === "Awaiting Production Approval") return "Awaiting Production Approval";
+  if (["Sent to Production", "In Production"].includes(normalized)) return "In Production";
+  if (normalized === "Partially Shipped") return "Partially Shipped";
+  if (normalized === "Shipped") return "Shipped";
+  if (normalized === "Delivered") return "Delivered";
+  if (normalized === "Cancelled") return "Cancelled";
+  if (normalized === "Fulfillment Payment Issue") return "Fulfillment Payment Issue";
+  if (["Requires Admin Review", "Failed"].includes(normalized)) return "Needs Review";
+  return normalized || "Order Received";
+}
+
+async function recordOrderAlert(db: any, orderId: number, alertType: string, message: string) {
+  await db.execute(sql`INSERT INTO order_alerts (orderId, alertType, message, status) VALUES (${orderId}, ${alertType}, ${message}, 'open') ON DUPLICATE KEY UPDATE message = VALUES(message)`).catch(() => undefined);
+}
+
+async function sendOrderNotification(db: any, order: any, type: "confirmation" | "production" | "shipping" | "delivery", subject: string, html: string, text: string) {
+  const email = cleanText(order.customerEmail);
+  if (!email) return;
+  const [existing] = await db.execute(sql`SELECT id, status FROM order_notifications WHERE orderId = ${order.id} AND notificationType = ${type} AND recipientEmail = ${email} LIMIT 1`) as any;
+  if (existing?.[0]?.status === "sent") return;
+  if (!isEmailConfigured()) {
+    await db.execute(sql`INSERT INTO order_notifications (orderId, notificationType, recipientEmail, subject, status, lastError, metadata) VALUES (${order.id}, ${type}, ${email}, ${subject}, 'skipped', 'Email provider is not configured', ${JSON.stringify({ reason: "email_not_configured" })}) ON DUPLICATE KEY UPDATE status = 'skipped', lastError = VALUES(lastError), updatedAt = NOW()`).catch(() => undefined);
+    return;
+  }
+  try {
+    await sendCustomerEmail({ to: email, subject, text, html });
+    await db.execute(sql`INSERT INTO order_notifications (orderId, notificationType, recipientEmail, subject, status, attemptCount, sentAt) VALUES (${order.id}, ${type}, ${email}, ${subject}, 'sent', 1, NOW()) ON DUPLICATE KEY UPDATE status = 'sent', attemptCount = attemptCount + 1, sentAt = NOW(), lastError = NULL, updatedAt = NOW()`);
+  } catch (error: any) {
+    await db.execute(sql`INSERT INTO order_notifications (orderId, notificationType, recipientEmail, subject, status, attemptCount, lastError) VALUES (${order.id}, ${type}, ${email}, ${subject}, 'failed', 1, ${error?.message || "Email failed"}) ON DUPLICATE KEY UPDATE status = 'failed', attemptCount = attemptCount + 1, lastError = VALUES(lastError), updatedAt = NOW()`).catch(() => undefined);
+    await recordOrderAlert(db, order.id, `${type}_email_failed`, `${type} email failed: ${error?.message || "Unknown error"}`);
+  }
+}
+
+async function sendOrderConfirmationEmail(db: any, order: any, items: any[]) {
+  if (order.confirmationEmailSent) return;
+  const address = order.shippingAddress || {};
+  const orderUrl = `https://thebuildlevel.com/order/${order.orderToken}`;
+  const itemsText = items.map(item => `${item.productName} (${item.selectedSize || "default"}) x${item.quantity}`).join(", ");
+  const subject = `Build Level Order Received — Order #${order.id}`;
+  const html = `<div style="font-family:Arial,sans-serif;background:#0a0a0a;color:#f5f0e8;padding:28px"><h1>BUILD LEVEL</h1><h2>Order Received — #${order.id}</h2><p>Hi ${order.customerName || "Builder"}, thank you for your order. We received your payment and are preparing your order for fulfillment. You’ll receive another update when production begins and when your order ships.</p><p><strong>Items:</strong> ${itemsText}</p><p><strong>Ship to:</strong><br/>${address.line1 || ""} ${address.line2 || ""}<br/>${address.city || ""}, ${address.state || ""} ${address.postal_code || ""}<br/>${address.country || ""}</p><p><strong>Total:</strong> ${order.currency || "usd"} ${order.orderTotal || ""}</p><p><a href="${orderUrl}" style="display:inline-block;background:#c0392b;color:#fff;padding:12px 16px;text-decoration:none;border-radius:4px">View Order</a></p><p>Need help? Contact ${BUSINESS_EMAIL}</p></div>`;
+  await sendOrderNotification(db, order, "confirmation", subject, html, `Build Level order #${order.id} received. Items: ${itemsText}. View: ${orderUrl}`);
+  await db.update(orders).set({ confirmationEmailSent: true, confirmationEmailSentAt: new Date(), confirmationEmailStatus: "sent" }).where(eq(orders.id, order.id)).catch(() => undefined);
+}
+
 function parseSelectedLabel(value: string) {
   try {
     if (value.trim().startsWith("{")) {
@@ -737,6 +892,11 @@ function getOrderShippingAddress(session: Stripe.Checkout.Session) {
 function validateShippingAddress(address: ReturnType<typeof getOrderShippingAddress>) {
   if (!address) return "Missing shipping address";
   if (!address.name) return "Missing customer name";
+  const split = splitCustomerName(address.name);
+  if (!split.firstName) return "Missing first name";
+  if (!split.lastName) return "Missing last name";
+  if (!address.email) return "Missing customer email";
+  if (!address.phone) return "Missing phone number";
   if (!address.line1) return "Missing address line 1";
   if (!address.city) return "Missing city";
   if (!address.state) return "Missing state/region";
@@ -766,12 +926,17 @@ async function createInternalPhysicalOrder(eventId: string, session: Stripe.Chec
   const shippingAddress = getOrderShippingAddress(session);
   const addressError = validateShippingAddress(shippingAddress);
   const paymentStatus = session.payment_status || "unknown";
-  const baseStatus: OrderStatus = paymentStatus === "paid" ? "Paid" : "Payment Pending";
+  const baseStatus: OrderStatus = paymentStatus === "paid" ? "Order Received" : "Payment Pending";
+  const fullName = getOrderCustomerName(session);
+  const splitName = splitCustomerName(shippingAddress?.name || fullName);
 
   let order = existingOrder[0];
   if (!order) {
     await db.insert(orders).values({
-      customerName: getOrderCustomerName(session),
+      orderToken: createOrderToken(),
+      customerFirstName: splitName.firstName || null,
+      customerLastName: splitName.lastName || null,
+      customerName: fullName,
       customerEmail: email || "unknown@example.com",
       customerPhone: cleanText((session as any).customer_details?.phone),
       shippingAddress: shippingAddress || {},
@@ -783,6 +948,7 @@ async function createInternalPhysicalOrder(eventId: string, session: Stripe.Chec
       currency: session.currency || "usd",
       orderType: "apparel",
       fulfillmentStatus: baseStatus,
+      customerStatus: customerStatusForFulfillment(baseStatus),
       printifyExternalId: sessionId,
       createdAt: new Date(),
       updatedAt: new Date(),
@@ -792,6 +958,18 @@ async function createInternalPhysicalOrder(eventId: string, session: Stripe.Chec
   }
 
   if (!order) throw new Error("Failed to create internal order");
+  if (!order.orderToken || !order.customerFirstName || !order.customerLastName) {
+    const splitExisting = splitCustomerName((order.shippingAddress as any)?.name || order.customerName);
+    await db.update(orders).set({
+      orderToken: order.orderToken || createOrderToken(),
+      customerFirstName: order.customerFirstName || splitExisting.firstName || null,
+      customerLastName: order.customerLastName || splitExisting.lastName || null,
+      customerStatus: order.customerStatus || customerStatusForFulfillment(order.fulfillmentStatus),
+      updatedAt: new Date(),
+    }).where(eq(orders.id, order.id));
+    const [reloaded] = await db.select().from(orders).where(eq(orders.id, order.id)).limit(1);
+    order = reloaded || order;
+  }
   await db.insert(orderEvents).values({ orderId: order.id, eventType: "stripe.checkout.session.completed", stripeEventId: eventId, payload: session as any, createdAt: new Date() }).catch(() => undefined);
 
   const existingItems = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
@@ -816,6 +994,9 @@ async function createInternalPhysicalOrder(eventId: string, session: Stripe.Chec
     }
   }
 
+  const currentItems = await db.select().from(orderItems).where(eq(orderItems.orderId, order.id));
+  await sendOrderConfirmationEmail(db, order, currentItems);
+
   const reviewReasons: string[] = [];
   if (paymentStatus !== "paid") reviewReasons.push(`Payment status is ${paymentStatus}`);
   if (addressError) reviewReasons.push(addressError);
@@ -835,15 +1016,17 @@ async function createInternalPhysicalOrder(eventId: string, session: Stripe.Chec
   if (reviewReasons.length > 0) {
     await db.update(orders).set({
       fulfillmentStatus: "Requires Admin Review",
+      customerStatus: customerStatusForFulfillment("Requires Admin Review"),
       errorMessage: reviewReasons.join("; "),
       processing: false,
       updatedAt: new Date(),
     }).where(eq(orders.id, order.id));
+    for (const reason of reviewReasons) await recordOrderAlert(db, order.id, reason.toLowerCase().replace(/[^a-z0-9]+/g, "_").slice(0, 120), reason);
     const [updated] = await db.select().from(orders).where(eq(orders.id, order.id)).limit(1);
     return { order: updated, duplicate: false, requiresReview: true, reason: reviewReasons.join("; ") };
   }
 
-  await db.update(orders).set({ fulfillmentStatus: "Awaiting Fulfillment", updatedAt: new Date() }).where(eq(orders.id, order.id));
+  await db.update(orders).set({ fulfillmentStatus: "Awaiting Fulfillment", customerStatus: customerStatusForFulfillment("Awaiting Fulfillment"), updatedAt: new Date() }).where(eq(orders.id, order.id));
   const [updated] = await db.select().from(orders).where(eq(orders.id, order.id)).limit(1);
   return { order: updated, duplicate: false, requiresReview: false, reason: "" };
 }
@@ -933,6 +1116,7 @@ async function createPrintifyOrderForInternalOrder(orderId: number, lockedDb?: a
       printifyStatus: cleanText((response as any).status || "created"),
       printifyApiResponse: response as any,
       fulfillmentStatus: "Awaiting Production Approval",
+      customerStatus: customerStatusForFulfillment("Awaiting Production Approval"),
       processing: false,
       errorMessage: null,
       retryCount: attemptNumber,
@@ -943,6 +1127,7 @@ async function createPrintifyOrderForInternalOrder(orderId: number, lockedDb?: a
   } catch (error: any) {
     await db.update(orders).set({
       fulfillmentStatus: "Failed",
+      customerStatus: customerStatusForFulfillment("Failed"),
       processing: false,
       errorMessage: error.message,
       retryCount: attemptNumber,

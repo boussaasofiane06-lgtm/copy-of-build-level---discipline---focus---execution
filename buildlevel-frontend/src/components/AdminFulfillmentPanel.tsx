@@ -10,7 +10,7 @@ const panelStyle = {
 
 export default function AdminFulfillmentPanel({ showToast }: { showToast: (message: string) => void }) {
   const [orders, setOrders] = useState<FulfillmentOrder[]>([]);
-  const [selected, setSelected] = useState<{ order: FulfillmentOrder; items: FulfillmentOrderItem[]; attempts: unknown[]; events: unknown[] } | null>(null);
+  const [selected, setSelected] = useState<{ order: FulfillmentOrder; items: FulfillmentOrderItem[]; attempts: unknown[]; events: unknown[]; shipments?: any[]; notifications?: any[]; alerts?: any[]; issues?: any[] } | null>(null);
   const [status, setStatus] = useState("");
   const [loading, setLoading] = useState(false);
   const [editingCustomer, setEditingCustomer] = useState(false);
@@ -95,6 +95,7 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
             <option value="">All statuses</option>
             {["Paid", "Awaiting Fulfillment", "Ready for Printify Test", "Processing", "Printify Order Created", "Awaiting Production Approval", "Requires Admin Review", "Failed", "Cancelled", "Shipped", "Delivered"].map(item => <option key={item} value={item}>{item}</option>)}
           </select>
+          <button className="btn btn-outline btn-sm" onClick={() => action("Sync open Printify orders", () => adminApi.syncOpenPrintifyOrders())}>Sync Open Printify Orders</button>
         </div>
       </div>
 
@@ -188,6 +189,26 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
                 <h5 style={{ marginBottom: 8 }}>Printify / Errors</h5>
                 <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", color: "var(--text2)", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: 10, fontSize: "0.75rem" }}>
                   {JSON.stringify({ printifyOrderId: selected.order.printifyOrderId, printifyStatus: selected.order.printifyStatus, error: selected.order.errorMessage }, null, 2)}
+                </pre>
+              </div>
+              <div>
+                <h5 style={{ marginBottom: 8 }}>Shipments / Tracking</h5>
+                {(selected.shipments || []).length === 0 ? <p style={{ color: "var(--text2)" }}>No shipments yet.</p> : (
+                  <div style={{ display: "grid", gap: 8 }}>
+                    {(selected.shipments || []).map(shipment => (
+                      <div key={shipment.id} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+                        <strong>{shipment.carrier || "Carrier pending"}</strong>
+                        <p style={{ color: "var(--text2)", fontSize: "0.82rem" }}>{shipment.trackingNumber || "Tracking pending"} · {shipment.status || "status pending"}</p>
+                        {shipment.trackingUrl && <a href={shipment.trackingUrl} target="_blank" rel="noreferrer" className="btn btn-outline btn-sm">Track</a>}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div>
+                <h5 style={{ marginBottom: 8 }}>Alerts / Notifications / Issues</h5>
+                <pre style={{ whiteSpace: "pre-wrap", overflowX: "auto", color: "var(--text2)", background: "var(--bg3)", border: "1px solid var(--border)", borderRadius: 8, padding: 10, fontSize: "0.75rem" }}>
+                  {JSON.stringify({ alerts: selected.alerts || [], notifications: selected.notifications || [], issues: selected.issues || [] }, null, 2)}
                 </pre>
               </div>
             </div>

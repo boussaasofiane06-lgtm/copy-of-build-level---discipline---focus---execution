@@ -3,7 +3,7 @@ import { eq, asc, and, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { Readable } from "stream";
 import { getDb } from "../db/index.js";
-import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings } from "../db/schema.js";
+import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings, orders, orderItems } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 import { BUSINESS_EMAIL, isEmailConfigured, sendBusinessEmail, sendCustomerEmail } from "../services/email.js";
 
@@ -273,6 +273,72 @@ router.get("/blog/:slug", async (req, res) => {
     res.json(row);
   } catch (e: any) {
     res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Private customer order status ────────────────────────────────────────────
+async function ensureCustomerOrderStatusTables() {
+  const db = await getDb();
+  await db.execute(sql.raw(`ALTER TABLE orders ADD COLUMN orderToken VARCHAR(128) NULL UNIQUE`)).catch(() => undefined);
+  await db.execute(sql.raw(`ALTER TABLE orders ADD COLUMN customerStatus VARCHAR(128) NULL`)).catch(() => undefined);
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS order_shipments (id INT AUTO_INCREMENT PRIMARY KEY, orderId INT NOT NULL, printifyShipmentId VARCHAR(128) NULL, carrier VARCHAR(128) NULL, trackingNumber VARCHAR(255) NULL, trackingUrl TEXT NULL, status VARCHAR(64) NULL, shippedAt TIMESTAMP NULL, deliveredAt TIMESTAMP NULL, payload JSON NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, UNIQUE KEY uq_order_tracking (orderId, trackingNumber), INDEX idx_order_shipments_order (orderId))`)).catch(() => undefined);
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS order_issues (id INT AUTO_INCREMENT PRIMARY KEY, orderId INT NOT NULL, productId INT NULL, issueType VARCHAR(128) NOT NULL, description TEXT NOT NULL, evidenceUrl TEXT NULL, preferredResolution VARCHAR(128) NULL, status ENUM('reported','admin_review','submitted_to_printify','approved','rejected','closed') NOT NULL DEFAULT 'reported', printifyIssueId VARCHAR(128) NULL, replacementOrderId VARCHAR(128) NULL, refundAmount DECIMAL(10,2) NULL, adminNotes TEXT NULL, createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, updatedAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP, INDEX idx_order_issues_order (orderId))`)).catch(() => undefined);
+  await db.execute(sql.raw(`CREATE TABLE IF NOT EXISTS order_alerts (id INT AUTO_INCREMENT PRIMARY KEY, orderId INT NOT NULL, alertType VARCHAR(128) NOT NULL, message TEXT NOT NULL, status ENUM('open','resolved') NOT NULL DEFAULT 'open', createdAt TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP, resolvedAt TIMESTAMP NULL, UNIQUE KEY uq_open_order_alert (orderId, alertType, status), INDEX idx_order_alerts_order (orderId))`)).catch(() => undefined);
+}
+
+router.get("/orders/:token/status", async (req, res) => {
+  try {
+    await ensureCustomerOrderStatusTables();
+    const token = String(req.params.token || "").trim();
+    if (!token || token.length < 20) { res.status(404).json({ error: "Order not found" }); return; }
+    const db = await getDb();
+    const [order] = await db.select().from(orders).where(eq(orders.orderToken, token)).limit(1);
+    if (!order) { res.status(404).json({ error: "Order not found" }); return; }
+    const [items, shipmentResult, issueResult] = await Promise.all([
+      db.select().from(orderItems).where(eq(orderItems.orderId, order.id)),
+      db.execute(sql`SELECT id, carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt, createdAt FROM order_shipments WHERE orderId = ${order.id} ORDER BY createdAt ASC`) as any,
+      db.execute(sql`SELECT id, issueType, preferredResolution, status, createdAt, updatedAt FROM order_issues WHERE orderId = ${order.id} ORDER BY createdAt DESC`) as any,
+    ]);
+    const shipping = order.shippingAddress as any || {};
+    res.json({
+      order: {
+        id: order.id,
+        customerStatus: order.customerStatus || order.fulfillmentStatus,
+        paymentStatus: order.stripePaymentStatus,
+        orderDate: order.createdAt,
+        lastUpdated: order.updatedAt,
+        orderTotal: order.orderTotal,
+        currency: order.currency,
+        shippingAddress: { line1: shipping.line1, line2: shipping.line2, city: shipping.city, state: shipping.state, postal_code: shipping.postal_code, country: shipping.country },
+      },
+      items: items.map(item => ({ id: item.id, productName: item.productName, quantity: item.quantity, selectedSize: item.selectedSize, selectedColor: item.selectedColor, unitPrice: item.unitPrice })),
+      shipments: shipmentResult?.[0] || [],
+      issues: issueResult?.[0] || [],
+    });
+  } catch {
+    res.status(500).json({ error: "Order status unavailable" });
+  }
+});
+
+router.post("/orders/:token/issues", async (req, res) => {
+  try {
+    await ensureCustomerOrderStatusTables();
+    const token = String(req.params.token || "").trim();
+    const data = z.object({
+      productId: z.number().optional().nullable(),
+      issueType: z.enum(["Damaged product", "Manufacturing defect", "Wrong product received", "Missing item", "Lost shipment", "Delivery problem", "Wrong size or color ordered", "Other issue"]),
+      description: z.string().min(5).max(5000),
+      evidenceUrl: z.string().max(2000).optional().default(""),
+      preferredResolution: z.string().max(128).optional().default(""),
+    }).parse(req.body || {});
+    const db = await getDb();
+    const [order] = await db.select().from(orders).where(eq(orders.orderToken, token)).limit(1);
+    if (!order) { res.status(404).json({ error: "Order not found" }); return; }
+    await db.execute(sql`INSERT INTO order_issues (orderId, productId, issueType, description, evidenceUrl, preferredResolution, status) VALUES (${order.id}, ${data.productId || null}, ${data.issueType}, ${data.description}, ${data.evidenceUrl || null}, ${data.preferredResolution || null}, 'reported')`);
+    await db.execute(sql`INSERT INTO order_alerts (orderId, alertType, message, status) VALUES (${order.id}, 'customer_reported_issue', ${data.issueType}, 'open') ON DUPLICATE KEY UPDATE message = VALUES(message)`).catch(() => undefined);
+    res.json({ success: true });
+  } catch (error: any) {
+    res.status(400).json({ error: error.message || "Could not submit issue" });
   }
 });
 
