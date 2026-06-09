@@ -725,8 +725,14 @@ async function updateInternalOrderFromPrintify(order: typeof orders.$inferSelect
   const shipments = getPrintifyShipments(data);
   const fulfillmentStatus = mapPrintifyStatusToFulfillmentStatus(printifyStatus, shipments) as any;
   const customerStatus = customerStatusForFulfillment(fulfillmentStatus);
+  const savedShipments: typeof shipments = [];
   for (const shipment of shipments) {
-    await db.execute(sql`INSERT INTO order_shipments (orderId, printifyShipmentId, carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt, payload) VALUES (${order.id}, ${shipment.printifyShipmentId || null}, ${shipment.carrier || null}, ${shipment.trackingNumber || shipment.printifyShipmentId}, ${shipment.trackingUrl || null}, ${shipment.status || null}, ${shipment.shippedAt ? new Date(shipment.shippedAt) : null}, ${shipment.deliveredAt ? new Date(shipment.deliveredAt) : null}, ${shipment.payload}) ON DUPLICATE KEY UPDATE carrier = VALUES(carrier), trackingUrl = VALUES(trackingUrl), status = VALUES(status), deliveredAt = COALESCE(VALUES(deliveredAt), deliveredAt), payload = VALUES(payload), updatedAt = NOW()`).catch(() => undefined);
+    try {
+      await db.execute(sql`INSERT INTO order_shipments (orderId, printifyShipmentId, carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt, payload) VALUES (${order.id}, ${shipment.printifyShipmentId || null}, ${shipment.carrier || null}, ${shipment.trackingNumber || shipment.printifyShipmentId}, ${shipment.trackingUrl || null}, ${shipment.status || null}, ${shipment.shippedAt ? new Date(shipment.shippedAt) : null}, ${shipment.deliveredAt ? new Date(shipment.deliveredAt) : null}, ${JSON.stringify(shipment.payload || {})}) ON DUPLICATE KEY UPDATE carrier = VALUES(carrier), trackingUrl = VALUES(trackingUrl), status = VALUES(status), deliveredAt = COALESCE(VALUES(deliveredAt), deliveredAt), payload = VALUES(payload), updatedAt = NOW()`);
+      savedShipments.push(shipment);
+    } catch (error: any) {
+      await db.execute(sql`INSERT INTO order_alerts (orderId, alertType, message, status) VALUES (${order.id}, 'shipment_save_failed', ${error?.message || "Shipment tracking could not be saved"}, 'open') ON DUPLICATE KEY UPDATE message = VALUES(message)`).catch(() => undefined);
+    }
   }
   await db.update(orders).set({
     printifyStatus,
@@ -739,7 +745,7 @@ async function updateInternalOrderFromPrintify(order: typeof orders.$inferSelect
   }).where(eq(orders.id, order.id));
   await db.insert(orderEvents).values({ orderId: order.id, eventType, payload: data as any, createdAt: new Date() });
   if (["Sent to Production", "In Production"].includes(fulfillmentStatus)) await sendOrderMilestoneEmail(db, order, "production", `Your Build Level Order Is in Production`, `Your order #${order.id} is now in production. We’ll email you again as soon as tracking becomes available.`);
-  if (["Shipped", "Partially Shipped"].includes(fulfillmentStatus) && shipments.length > 0) await sendOrderMilestoneEmail(db, order, "shipping", `Your Build Level Order Has Shipped`, `Your order #${order.id} has shipped. Tracking: ${shipments.map(s => `${s.carrier} ${s.trackingNumber} ${s.trackingUrl}`).join(" | ")}`);
+  if (["Shipped", "Partially Shipped"].includes(fulfillmentStatus) && savedShipments.some(shipment => shipment.trackingNumber || shipment.trackingUrl)) await sendOrderMilestoneEmail(db, order, "shipping", `Your Build Level Order Has Shipped`, `Your order #${order.id} has shipped. Tracking: ${savedShipments.map(s => `${s.carrier} ${s.trackingNumber} ${s.trackingUrl}`).join(" | ")}`);
   if (fulfillmentStatus === "Delivered") await sendOrderMilestoneEmail(db, order, "delivery", `Your Build Level Order Was Delivered`, `Your Build Level order #${order.id} has been marked as delivered.`);
 }
 
