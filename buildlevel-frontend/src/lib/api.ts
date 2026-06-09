@@ -608,6 +608,13 @@ export const adminApi = {
   getMaintenanceSettings: () => api.get<MaintenanceConfig>("/admin/maintenance").then(r => r.data),
   saveMaintenanceSettings: (data: MaintenanceConfig) =>
     api.post<{ success: true }>("/admin/maintenance", data).then(r => r.data),
+  verifyProductionDatabase: () => api.get<{
+    checkedAt: string;
+    overallStatus: "PASS" | "FAIL";
+    tables: Array<{ table: string; exists: boolean; status: "PASS" | "FAIL"; safeRecommendedAction: string }>;
+    constraints: Array<{ name: string; table: string; exists: boolean; duplicateCount: number; status: "PASS" | "FAIL"; safeRecommendedAction: string }>;
+    columns: Array<{ table: string; column: string; exists: boolean; status: "PASS" | "FAIL"; safeRecommendedAction: string }>;
+  }>("/admin/maintenance/database-verification").then(r => r.data),
   getEngagementAnalytics: () => api.get<unknown>("/admin/engagement/analytics").then(r => r.data),
   getModerationQueue: (status?: string) => api.get<{ comments: BlogComment[]; reviews: Review[] }>("/admin/engagement/moderation", { params: { status } }).then(r => r.data),
   updateCommentModeration: (id: number, data: { status?: string; comment?: string }) => api.patch<{ success: true }>(`/admin/engagement/comments/${id}`, data).then(r => r.data),

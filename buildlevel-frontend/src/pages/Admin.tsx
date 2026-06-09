@@ -194,6 +194,8 @@ export default function Admin() {
   const [thumbnailPreviews, setThumbnailPreviews] = useState<string[]>([]);
   const [digitalFileInfo, setDigitalFileInfo] = useState<{ name: string; size: number; mimeType: string } | null>(null);
   const [digitalUploadConfig, setDigitalUploadConfig] = useState<DigitalUploadConfig | null>(null);
+  const [dbVerification, setDbVerification] = useState<any>(null);
+  const [dbVerifying, setDbVerifying] = useState(false);
 
   // Blog form
   const [showBlogForm, setShowBlogForm] = useState(false);
@@ -595,6 +597,19 @@ export default function Admin() {
       showToast(maintenanceForm.enabled ? "Maintenance mode enabled" : "Maintenance mode disabled");
     } catch (error: any) {
       showToast(error?.response?.data?.error || "Error saving maintenance mode");
+    }
+  };
+
+  const verifyProductionDatabase = async () => {
+    setDbVerifying(true);
+    try {
+      const result = await adminApi.verifyProductionDatabase();
+      setDbVerification(result);
+      showToast(`Database verification ${result.overallStatus}`);
+    } catch (error: any) {
+      showToast(error?.response?.data?.error || "Database verification failed");
+    } finally {
+      setDbVerifying(false);
     }
   };
 
@@ -1209,6 +1224,31 @@ export default function Admin() {
                       Open Public Site
                     </a>
                   </div>
+                </div>
+
+                <div style={{ background: "linear-gradient(145deg, rgba(26,26,26,0.96), rgba(10,10,10,0.96))", border: "1px solid var(--border)", borderRadius: 12, padding: 24, marginTop: 18 }}>
+                  <div style={{ color: "var(--red)", fontFamily: "var(--font-display)", fontSize: "0.72rem", letterSpacing: "0.18em", textTransform: "uppercase", marginBottom: 8 }}>Read-only audit</div>
+                  <h3 style={{ fontSize: "1.05rem", marginBottom: 8 }}>Verify Production Database</h3>
+                  <p style={{ color: "var(--text2)", fontSize: "0.86rem", marginBottom: 14 }}>Runs protected read-only table, index, duplicate, and column checks through the live backend. No credentials are shown and no database changes are made.</p>
+                  <button className="btn btn-outline btn-sm" onClick={verifyProductionDatabase} disabled={dbVerifying}>{dbVerifying ? "Verifying..." : "VERIFY PRODUCTION DATABASE"}</button>
+                  {dbVerification && (
+                    <div style={{ marginTop: 16, display: "grid", gap: 12 }}>
+                      <strong style={{ color: dbVerification.overallStatus === "PASS" ? "#86efac" : "var(--red)" }}>Overall: {dbVerification.overallStatus} · {new Date(dbVerification.checkedAt).toLocaleString()}</strong>
+                      {["tables", "constraints", "columns"].map(section => (
+                        <div key={section} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10 }}>
+                          <h4 style={{ fontSize: "0.86rem", marginBottom: 8, textTransform: "capitalize" }}>{section}</h4>
+                          {(dbVerification[section] || []).map((row: any, index: number) => (
+                            <div key={`${section}-${index}`} style={{ display: "grid", gap: 4, borderTop: index ? "1px solid var(--border)" : "none", paddingTop: index ? 8 : 0, marginTop: index ? 8 : 0, color: "var(--text2)", fontSize: "0.78rem" }}>
+                              <strong style={{ color: row.status === "PASS" ? "#86efac" : "var(--red)" }}>{row.status} — {row.name || `${row.table}.${row.column || ""}` || row.table}</strong>
+                              {"exists" in row && <span>Exists: {row.exists ? "Yes" : "No"}</span>}
+                              {"duplicateCount" in row && <span>Duplicate count: {row.duplicateCount}</span>}
+                              <span>Safe recommended action: {row.safeRecommendedAction}</span>
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
             )}
