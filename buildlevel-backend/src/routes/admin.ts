@@ -605,11 +605,16 @@ function normalizePrintifyStatus(value: unknown) {
   return String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-function mapPrintifyStatusToFulfillmentStatus(status: unknown) {
+function mapPrintifyStatusToFulfillmentStatus(status: unknown, shipments: Array<Record<string, any>> = []) {
   const normalized = normalizePrintifyStatus(status);
+  const deliveredShipments = shipments.filter(shipment => normalizePrintifyStatus(shipment.status).includes("delivered") || shipment.deliveredAt);
+  if (shipments.length > 0 && deliveredShipments.length === shipments.length) return "Delivered";
+  if (shipments.length > 1 && deliveredShipments.length > 0) return "Partially Shipped";
+  if (shipments.length > 0) return "Shipped";
   if (!normalized) return "Printify Order Created";
   if (["created", "pending", "on_hold", "waiting_for_approval"].includes(normalized)) return "Printify Order Created";
-  if (["approved", "in_production", "production", "sent_to_production", "printing", "fulfilled"].includes(normalized)) return "Sent to Production";
+  if (["approved", "in_production", "production", "sent_to_production", "printing"].includes(normalized)) return "Sent to Production";
+  if (["fulfilled"].includes(normalized)) return "Shipped";
   if (["shipped", "partially_shipped", "in_transit", "out_for_delivery"].includes(normalized)) return "Shipped";
   if (["delivered", "completed"].includes(normalized)) return "Delivered";
   if (["cancelled", "canceled"].includes(normalized)) return "Cancelled";
@@ -635,25 +640,43 @@ function getPrintifyOrderStatus(payload: any) {
   return payload?.status || payload?.resource?.status || payload?.data?.status || payload?.order?.status || "";
 }
 
+function collectPrintifyShipmentCandidates(value: any, results: any[] = [], depth = 0) {
+  if (!value || depth > 6) return results;
+  if (Array.isArray(value)) {
+    for (const item of value) collectPrintifyShipmentCandidates(item, results, depth + 1);
+    return results;
+  }
+  if (typeof value !== "object") return results;
+  const hasTracking = value.tracking_number || value.trackingNumber || value.tracking || value.number || value.tracking_code || value.trackingCode;
+  const hasShipmentShape = hasTracking || value.tracking_url || value.trackingUrl || value.carrier || value.shipping_carrier || value.shipped_at || value.delivered_at;
+  if (hasShipmentShape) results.push(value);
+  for (const key of ["shipments", "shipment", "tracking", "tracking_details", "trackingDetails", "fulfillments", "packages", "line_items", "metadata", "data", "resource", "order"]) {
+    if (value[key]) collectPrintifyShipmentCandidates(value[key], results, depth + 1);
+  }
+  return results;
+}
+
 function getPrintifyShipments(payload: any) {
-  const candidates = [
-    payload?.shipments,
-    payload?.resource?.shipments,
-    payload?.data?.shipments,
-    payload?.order?.shipments,
-    payload?.line_items?.flatMap?.((item: any) => item?.metadata?.shipments || []),
-  ].filter(Boolean);
-  const list = candidates.flatMap((value: any) => Array.isArray(value) ? value : [value]);
-  return list.map((shipment: any) => ({
-    printifyShipmentId: String(shipment?.id || shipment?.shipment_id || shipment?.tracking_number || ""),
-    carrier: String(shipment?.carrier || shipment?.shipping_carrier || shipment?.provider || ""),
-    trackingNumber: String(shipment?.tracking_number || shipment?.trackingNumber || shipment?.number || ""),
-    trackingUrl: String(shipment?.tracking_url || shipment?.trackingUrl || shipment?.url || ""),
-    status: String(shipment?.status || ""),
-    shippedAt: shipment?.shipped_at || shipment?.created_at || null,
-    deliveredAt: shipment?.delivered_at || null,
-    payload: shipment,
-  })).filter((shipment: any) => shipment.trackingNumber || shipment.printifyShipmentId);
+  const seen = new Set<string>();
+  return collectPrintifyShipmentCandidates(payload).map((shipment: any) => {
+    const trackingNumber = String(shipment?.tracking_number || shipment?.trackingNumber || shipment?.tracking || shipment?.number || shipment?.tracking_code || shipment?.trackingCode || "").trim();
+    const printifyShipmentId = String(shipment?.id || shipment?.shipment_id || shipment?.shipmentId || trackingNumber || "").trim();
+    return {
+      printifyShipmentId,
+      carrier: String(shipment?.carrier || shipment?.shipping_carrier || shipment?.carrier_code || shipment?.provider || shipment?.service || "").trim(),
+      trackingNumber,
+      trackingUrl: String(shipment?.tracking_url || shipment?.trackingUrl || shipment?.url || shipment?.tracking_link || shipment?.trackingLink || "").trim(),
+      status: String(shipment?.status || shipment?.shipment_status || "").trim(),
+      shippedAt: shipment?.shipped_at || shipment?.shippedAt || shipment?.created_at || shipment?.createdAt || null,
+      deliveredAt: shipment?.delivered_at || shipment?.deliveredAt || null,
+      payload: shipment,
+    };
+  }).filter((shipment: any) => {
+    const key = shipment.trackingNumber || shipment.printifyShipmentId;
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function sendOrderMilestoneEmail(db: any, order: any, type: "production" | "shipping" | "delivery", subject: string, body: string) {
@@ -686,9 +709,9 @@ function getPrintifyWebhookOrderId(payload: any) {
 async function updateInternalOrderFromPrintify(order: typeof orders.$inferSelect, data: any, eventType: string) {
   const db = await getDb();
   const printifyStatus = String(getPrintifyOrderStatus(data) || order.printifyStatus || "");
-  const fulfillmentStatus = mapPrintifyStatusToFulfillmentStatus(printifyStatus) as any;
-  const customerStatus = customerStatusForFulfillment(fulfillmentStatus);
   const shipments = getPrintifyShipments(data);
+  const fulfillmentStatus = mapPrintifyStatusToFulfillmentStatus(printifyStatus, shipments) as any;
+  const customerStatus = customerStatusForFulfillment(fulfillmentStatus);
   for (const shipment of shipments) {
     await db.execute(sql`INSERT INTO order_shipments (orderId, printifyShipmentId, carrier, trackingNumber, trackingUrl, status, shippedAt, deliveredAt, payload) VALUES (${order.id}, ${shipment.printifyShipmentId || null}, ${shipment.carrier || null}, ${shipment.trackingNumber || shipment.printifyShipmentId}, ${shipment.trackingUrl || null}, ${shipment.status || null}, ${shipment.shippedAt ? new Date(shipment.shippedAt) : null}, ${shipment.deliveredAt ? new Date(shipment.deliveredAt) : null}, ${shipment.payload}) ON DUPLICATE KEY UPDATE carrier = VALUES(carrier), trackingUrl = VALUES(trackingUrl), status = VALUES(status), deliveredAt = COALESCE(VALUES(deliveredAt), deliveredAt), payload = VALUES(payload), updatedAt = NOW()`).catch(() => undefined);
   }

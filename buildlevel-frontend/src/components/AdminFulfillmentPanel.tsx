@@ -169,7 +169,7 @@ export default function AdminFulfillmentPanel({ showToast }: { showToast: (messa
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
                 <button className="btn btn-outline btn-sm" onClick={() => action("Hold order", () => adminApi.holdFulfillmentOrder(selected.order.id))}>Hold</button>
                 <button className="btn btn-outline btn-sm" onClick={() => action("Release order", () => adminApi.releaseFulfillmentOrder(selected.order.id))}>Release</button>
-                <button className="btn btn-outline btn-sm" onClick={() => action("Refresh status", () => adminApi.refreshFulfillmentOrder(selected.order.id))}>Refresh</button>
+                <button className="btn btn-outline btn-sm" onClick={() => action("Sync Printify status", () => adminApi.refreshFulfillmentOrder(selected.order.id))}>SYNC PRINTIFY STATUS</button>
                 <button className="btn btn-outline btn-sm" onClick={() => action("Retry Printify creation", () => adminApi.retryFulfillmentOrder(selected.order.id))}>Retry</button>
                 <button className="btn btn-outline btn-sm" onClick={() => action("Mark issue resolved", () => adminApi.resolveFulfillmentOrder(selected.order.id))}>Resolve</button>
               </div>
