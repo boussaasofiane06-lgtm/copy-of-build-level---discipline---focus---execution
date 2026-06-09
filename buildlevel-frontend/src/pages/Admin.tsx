@@ -8,6 +8,7 @@ import AdminAbandonedCartsPanel from "../components/AdminAbandonedCartsPanel";
 import AdminEmailCampaignsPanel from "../components/AdminEmailCampaignsPanel";
 import AdminShopOrganizationPanel from "../components/AdminShopOrganizationPanel";
 import AdminSupportPanel from "../components/AdminSupportPanel";
+import ProductionDatabaseVerification from "../components/ProductionDatabaseVerification";
 import {
   APPAREL_AUDIENCES,
   DEFAULT_AUDIENCE,
@@ -1210,6 +1211,7 @@ export default function Admin() {
                     </a>
                   </div>
                 </div>
+                <ProductionDatabaseVerification showToast={showToast} />
               </div>
             )}
           </>
