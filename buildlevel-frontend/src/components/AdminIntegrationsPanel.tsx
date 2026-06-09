@@ -346,7 +346,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     try {
       const result = await adminApi.setupPrintifyWebhooks();
       const failed = result.results.filter(item => item.status === "failed");
-      showToast(failed.length ? `Printify webhooks partially installed (${failed.length} failed)` : "Printify auto-publish webhooks installed");
+      showToast(failed.length ? `Printify webhooks need attention (${failed.length} failed)` : "Printify webhooks configured");
       loadIntegrations();
     } catch (error: any) {
       showToast(error?.response?.data?.error || "Printify webhook setup failed");
@@ -534,7 +534,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
               </button>
               <button type="button" onClick={() => testProvider("printify")} className="btn btn-outline btn-sm">Validate</button>
               <button type="button" onClick={() => publishPrintify()} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>Publish to Website</button>
-              <button type="button" onClick={setupPrintifyWebhooks} className="btn btn-outline btn-sm" disabled={testing === "printify-webhooks"}>Auto Publish Webhooks</button>
+              <button type="button" onClick={setupPrintifyWebhooks} className="btn btn-outline btn-sm" disabled={testing === "printify-webhooks"}>Configure Printify Webhooks</button>
             </div>
             {integrations?.printify.disabled && (
               <p style={{ color: "var(--text3)", fontSize: "0.74rem" }}>
@@ -568,6 +568,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             )}
             <p style={{ color: "var(--text2)", fontSize: "0.78rem" }}>
               Loaded records: {countSnapshotRecords(printifySnapshot, ["data", "products", "orders"])}
+              {(printifySnapshot.products as any)?.summary ? ` · Products loaded: ${(printifySnapshot.products as any).summary.loadedProducts}` : ""}
             </p>
             {printifySnapshot.sync && (
               <p style={{ color: "var(--text2)", fontSize: "0.78rem", lineHeight: 1.6 }}>

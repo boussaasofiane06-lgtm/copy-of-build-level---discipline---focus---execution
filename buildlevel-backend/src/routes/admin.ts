@@ -1789,21 +1789,21 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   const sizes = getPrintifySizes(product);
   const db = await getDb();
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
-  const locallyHidden = existing.length > 0 && (existing[0].hidden === true || existing[0].published === false);
+  const existingProduct = existing[0];
   const values = {
     name: product.title || "Printify Product",
     description: cleanPrintifyDescription(product.description),
-    price,
-    category: existing[0]?.category || "mens-t-shirts",
+    price: existingProduct?.price || price,
+    category: existingProduct?.category || "unclassified",
     sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
     imageUrl,
-    badge: existing[0]?.badge || (visible ? "New Release" : "Coming Soon"),
-    inStock: locallyHidden ? false : visible && getPrintifyInStock(product),
-    published: locallyHidden ? false : visible,
-    hidden: locallyHidden ? true : !visible,
-    delisted: locallyHidden ? false : !visible,
-    featured: existing[0]?.featured ?? false,
-    sortOrder: existing[0]?.sortOrder ?? 0,
+    badge: existingProduct?.badge || "",
+    inStock: existingProduct ? existingProduct.inStock : false,
+    published: existingProduct ? existingProduct.published : false,
+    hidden: existingProduct ? existingProduct.hidden : true,
+    delisted: existingProduct ? existingProduct.delisted : false,
+    featured: existingProduct?.featured ?? false,
+    sortOrder: existingProduct?.sortOrder ?? 0,
     printifyProductId,
     updatedAt: new Date(),
   };
@@ -1824,13 +1824,15 @@ async function fetchAllPrintifyProducts() {
   const allProducts: any[] = [];
   let page = 1;
   let lastPage = 1;
+  let nextPageUrl = "";
   do {
-    const data = await printifyRequest(`/shops/${shopId}/products.json?page=${page}&limit=100`);
+    const data = await printifyRequest(`/shops/${shopId}/products.json?page=${page}&limit=50`);
     const pageProducts = Array.isArray(data?.data) ? data.data : [];
     allProducts.push(...pageProducts);
     lastPage = Number(data?.last_page || data?.lastPage || page);
+    nextPageUrl = String(data?.next_page_url || "");
     page += 1;
-  } while (page <= lastPage && page <= 50);
+  } while ((nextPageUrl || page <= lastPage) && page <= 100);
   return allProducts;
 }
 
@@ -1995,12 +1997,18 @@ router.get("/printify/products", requireAdmin, async (req: Request, res: Respons
   try {
     const { apiKey, shopId } = await getPrintifyCredentials();
     if (!apiKey || !shopId) { res.status(400).json({ error: 'Printify not configured' }); return; }
-    const page = parseInt(req.query.page as string) || 1;
-    const r = await fetch(`https://api.printify.com/v1/shops/${shopId}/products.json?page=${page}&limit=20`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    const productsList = await fetchAllPrintifyProducts();
+    res.json({
+      data: productsList,
+      total: productsList.length,
+      loaded: productsList.length,
+      summary: {
+        loadedProducts: productsList.length,
+        totalPrintifyProducts: productsList.length,
+        progress: "complete",
+        errors: [],
+      },
     });
-    const data = await r.json();
-    res.json(data);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
@@ -2234,6 +2242,13 @@ function normalizeShopifyUrl(storeUrl: string) {
   return storeUrl.startsWith('http') ? storeUrl : `https://${storeUrl}`;
 }
 
+function normalizeShopifyStoreDomain(value: string) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const url = raw.startsWith("http") ? new URL(raw) : new URL(`https://${raw}`);
+  return url.hostname.toLowerCase().replace(/^www\./, "");
+}
+
 async function shopifyRequest(path: string, method = "GET", body?: unknown) {
   const { storeUrl, apiKey } = await getShopifyCredentials();
   if (!storeUrl || !apiKey) throw new Error("Shopify not configured");
@@ -2350,8 +2365,16 @@ router.post("/shopify/webhook", async (req: Request, res: Response) => {
 
 router.post("/shopify/credentials", requireAdmin, async (req: Request, res: Response) => {
   try {
-    const storeUrl = String(req.body.storeUrl || "").trim();
+    const storeUrl = normalizeShopifyStoreDomain(String(req.body.storeUrl || "").trim());
     const apiKey = String(req.body.apiKey || "").trim();
+    if (!/^[a-z0-9][a-z0-9-]*\.myshopify\.com$/i.test(storeUrl)) {
+      res.status(400).json({ error: "Use the permanent .myshopify.com store domain, not the custom website domain." });
+      return;
+    }
+    if (!apiKey) {
+      res.status(400).json({ error: "Shopify Admin API access token is required." });
+      return;
+    }
     await saveSetting("shopify_disabled", "false");
     const db = await getDb();
     for (const [key, value] of [['shopify_store_url', storeUrl], ['shopify_api_key', apiKey]]) {
@@ -2695,6 +2718,126 @@ router.get("/ai-chat/sessions/:sessionId", requireAdmin, async (req: Request, re
     );
     res.json({ messages: rows || [] });
   } catch (e: any) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Temporary read-only production database verification ─────────────────────
+const dbVerificationTables = ["orders", "order_events", "product_variants", "order_items", "fulfillment_attempts"] as const;
+const requiredConstraints = [
+  { table: "orders", name: "orders.stripeEventId", columns: ["stripeEventId"] },
+  { table: "orders", name: "orders.stripeCheckoutSessionId", columns: ["stripeCheckoutSessionId"] },
+  { table: "orders", name: "orders.stripePaymentIntentId", columns: ["stripePaymentIntentId"] },
+  { table: "orders", name: "orders.printifyOrderId", columns: ["printifyOrderId"] },
+  { table: "order_events", name: "order_events.stripeEventId", columns: ["stripeEventId"] },
+  { table: "product_variants", name: "product_variants(printifyProductId, printifyVariantId)", columns: ["printifyProductId", "printifyVariantId"] },
+] as const;
+const requiredOrderColumns = ["orderToken", "customerFirstName", "customerLastName", "customerStatus", "confirmationEmailSent", "confirmationEmailSentAt", "confirmationEmailStatus", "confirmationEmailError", "productionEmailSentAt", "shippingEmailSentAt", "deliveryEmailSentAt", "lastSyncAt", "lastSyncFailedAt", "lastSyncError"];
+
+async function tableExists(db: any, table: string) {
+  try {
+    const [rows] = await db.execute(sql.raw(`SHOW CREATE TABLE \`${table}\``)) as any;
+    return Boolean(rows?.[0]);
+  } catch {
+    return false;
+  }
+}
+
+async function getTableIndexes(db: any, table: string) {
+  try {
+    const [rows] = await db.execute(sql.raw(`SHOW INDEX FROM \`${table}\``)) as any;
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
+function hasUniqueConstraint(indexRows: any[], columns: readonly string[]) {
+  const grouped = new Map<string, any[]>();
+  for (const row of indexRows) {
+    if (Number(row.Non_unique) !== 0) continue;
+    const keyName = String(row.Key_name || "");
+    if (!grouped.has(keyName)) grouped.set(keyName, []);
+    grouped.get(keyName)!.push(row);
+  }
+  for (const rows of grouped.values()) {
+    const ordered = rows.slice().sort((a, b) => Number(a.Seq_in_index) - Number(b.Seq_in_index)).map(row => String(row.Column_name));
+    if (ordered.length === columns.length && ordered.every((column, index) => column === columns[index])) return true;
+  }
+  return false;
+}
+
+async function getDuplicateCount(db: any, table: string, columns: readonly string[]) {
+  try {
+    const notNullWhere = columns.map(column => `\`${column}\` IS NOT NULL AND \`${column}\` <> ''`).join(" AND ");
+    const groupBy = columns.map(column => `\`${column}\``).join(", ");
+    const [rows] = await db.execute(sql.raw(`SELECT COALESCE(SUM(duplicateCount - 1), 0) AS duplicateCount FROM (SELECT COUNT(*) AS duplicateCount FROM \`${table}\` WHERE ${notNullWhere} GROUP BY ${groupBy} HAVING COUNT(*) > 1) duplicates`)) as any;
+    return Number(rows?.[0]?.duplicateCount || 0);
+  } catch {
+    return -1;
+  }
+}
+
+async function columnExists(db: any, table: string, column: string) {
+  try {
+    const [rows] = await db.execute(sql.raw(`SHOW COLUMNS FROM \`${table}\` LIKE '${column.replace(/'/g, "''")}'`)) as any;
+    return Boolean(rows?.[0]);
+  } catch {
+    return false;
+  }
+}
+
+router.get("/maintenance/database-verification", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const tables = [];
+    for (const table of dbVerificationTables) {
+      const exists = await tableExists(db, table);
+      tables.push({
+        table,
+        exists,
+        status: exists ? "PASS" : "FAIL",
+        safeRecommendedAction: exists ? "No action needed." : `Create missing table ${table} with a reviewed migration.`,
+      });
+    }
+    const constraints = [];
+    for (const constraint of requiredConstraints) {
+      const exists = await tableExists(db, constraint.table);
+      const indexes = exists ? await getTableIndexes(db, constraint.table) : [];
+      const constraintExists = exists ? hasUniqueConstraint(indexes, constraint.columns) : false;
+      const duplicateCount = exists ? await getDuplicateCount(db, constraint.table, constraint.columns) : -1;
+      constraints.push({
+        name: constraint.name,
+        table: constraint.table,
+        exists: constraintExists,
+        duplicateCount,
+        status: constraintExists && duplicateCount === 0 ? "PASS" : "FAIL",
+        safeRecommendedAction: constraintExists && duplicateCount === 0
+          ? "No action needed."
+          : duplicateCount > 0
+            ? "Resolve duplicate records manually before adding/enforcing this unique constraint."
+            : "Add missing unique constraint with a reviewed migration after confirming no duplicates.",
+      });
+    }
+    const columns = [];
+    for (const column of requiredOrderColumns) {
+      const exists = await columnExists(db, "orders", column);
+      columns.push({
+        table: "orders",
+        column,
+        exists,
+        status: exists ? "PASS" : "FAIL",
+        safeRecommendedAction: exists ? "No action needed." : `Add missing orders.${column} with a reviewed migration.`,
+      });
+    }
+    res.json({
+      checkedAt: new Date().toISOString(),
+      tables,
+      constraints,
+      columns,
+      overallStatus: [...tables, ...constraints, ...columns].every(item => item.status === "PASS") ? "PASS" : "FAIL",
+    });
+  } catch (e: any) {
+    res.status(500).json({ error: "Database verification failed without exposing connection details." });
+  }
 });
 
 export default router;
