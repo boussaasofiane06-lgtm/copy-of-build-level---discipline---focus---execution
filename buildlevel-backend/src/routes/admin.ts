@@ -647,26 +647,39 @@ function collectPrintifyShipmentCandidates(value: any, results: any[] = [], dept
     return results;
   }
   if (typeof value !== "object") return results;
-  const hasTracking = value.tracking_number || value.trackingNumber || value.tracking || value.number || value.tracking_code || value.trackingCode;
-  const hasShipmentShape = hasTracking || value.tracking_url || value.trackingUrl || value.carrier || value.shipping_carrier || value.shipped_at || value.delivered_at;
+  const hasTracking = value.tracking_number || value.trackingNumber || value.tracking || value.number || value.tracking_code || value.trackingCode || value.tracking_numbers || value.trackingNumbers;
+  const hasShipmentShape = hasTracking || value.tracking_url || value.trackingUrl || value.tracking_urls || value.trackingUrls || value.carrier || value.carrier_name || value.carrierName || value.shipping_carrier || value.shipped_at || value.delivered_at;
   if (hasShipmentShape) results.push(value);
-  for (const key of ["shipments", "shipment", "tracking", "tracking_details", "trackingDetails", "fulfillments", "packages", "line_items", "metadata", "data", "resource", "order"]) {
-    if (value[key]) collectPrintifyShipmentCandidates(value[key], results, depth + 1);
+  for (const child of Object.values(value)) {
+    if (child && typeof child === "object") collectPrintifyShipmentCandidates(child, results, depth + 1);
   }
   return results;
+}
+
+function firstPrintifyValue(...values: any[]) {
+  for (const value of values) {
+    if (Array.isArray(value)) {
+      const nested = firstPrintifyValue(...value);
+      if (nested) return nested;
+      continue;
+    }
+    const text = String(value || "").trim();
+    if (text) return text;
+  }
+  return "";
 }
 
 function getPrintifyShipments(payload: any) {
   const seen = new Set<string>();
   return collectPrintifyShipmentCandidates(payload).map((shipment: any) => {
-    const trackingNumber = String(shipment?.tracking_number || shipment?.trackingNumber || shipment?.tracking || shipment?.number || shipment?.tracking_code || shipment?.trackingCode || "").trim();
+    const trackingNumber = firstPrintifyValue(shipment?.tracking_number, shipment?.trackingNumber, shipment?.tracking, shipment?.number, shipment?.tracking_code, shipment?.trackingCode, shipment?.tracking_numbers, shipment?.trackingNumbers);
     const printifyShipmentId = String(shipment?.id || shipment?.shipment_id || shipment?.shipmentId || trackingNumber || "").trim();
     return {
       printifyShipmentId,
-      carrier: String(shipment?.carrier || shipment?.shipping_carrier || shipment?.carrier_code || shipment?.provider || shipment?.service || "").trim(),
+      carrier: firstPrintifyValue(shipment?.carrier, shipment?.carrier_name, shipment?.carrierName, shipment?.shipping_carrier, shipment?.shippingCarrier, shipment?.carrier_code, shipment?.provider, shipment?.service),
       trackingNumber,
-      trackingUrl: String(shipment?.tracking_url || shipment?.trackingUrl || shipment?.url || shipment?.tracking_link || shipment?.trackingLink || "").trim(),
-      status: String(shipment?.status || shipment?.shipment_status || "").trim(),
+      trackingUrl: firstPrintifyValue(shipment?.tracking_url, shipment?.trackingUrl, shipment?.tracking_urls, shipment?.trackingUrls, shipment?.url, shipment?.tracking_link, shipment?.trackingLink),
+      status: String(shipment?.status || shipment?.shipment_status || shipment?.shipmentStatus || "").trim(),
       shippedAt: shipment?.shipped_at || shipment?.shippedAt || shipment?.created_at || shipment?.createdAt || null,
       deliveredAt: shipment?.delivered_at || shipment?.deliveredAt || null,
       payload: shipment,
