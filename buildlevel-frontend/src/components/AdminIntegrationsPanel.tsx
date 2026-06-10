@@ -165,6 +165,7 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
   const [shopifySnapshot, setShopifySnapshot] = useState<Record<string, unknown>>({});
   const [printifySnapshot, setPrintifySnapshot] = useState<Record<string, unknown>>({});
   const [printifyProducts, setPrintifyProducts] = useState<Array<{ id: string; title?: string; visible?: boolean; is_locked?: boolean }>>([]);
+  const [selectedPrintifyProductIds, setSelectedPrintifyProductIds] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [testing, setTesting] = useState<string>("");
 
@@ -328,10 +329,12 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
       setPrintifySnapshot((current) => ({ ...current, [action]: data }));
       if (action === "products" && data && typeof data === "object" && Array.isArray((data as any).data)) {
         setPrintifyProducts((data as any).data);
+        setSelectedPrintifyProductIds([]);
       }
       const syncProducts = (data as { products?: unknown })?.products;
       if (action === "sync" && syncProducts && typeof syncProducts === "object" && Array.isArray((syncProducts as any).data)) {
         setPrintifyProducts((syncProducts as any).data);
+        setSelectedPrintifyProductIds([]);
       }
       showToast(action === "sync" ? getPrintifySyncMessage(data) || "Printify store synced" : `Printify ${action} loaded`);
     } catch (error: any) {
@@ -367,6 +370,28 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
     } finally {
       setTesting("");
     }
+  };
+
+  const toggleSelectedPrintifyProduct = (id: string) => {
+    setSelectedPrintifyProductIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  };
+
+  const publishSelectedPrintify = async () => {
+    if (selectedPrintifyProductIds.length === 0) { showToast("Select Printify products first"); return; }
+    if (!window.confirm(`Publish ${selectedPrintifyProductIds.length} selected Printify products to the website?`)) return;
+    setTesting("printify-publish-selected");
+    let success = 0;
+    let failed = 0;
+    for (const id of selectedPrintifyProductIds) {
+      try {
+        await adminApi.publishPrintifyProduct(id);
+        success += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    showToast(`Selected Printify publish complete. Success: ${success}. Failed: ${failed}.`);
+    setTesting("");
   };
 
   const saveSocial = async () => {
@@ -550,20 +575,30 @@ export default function AdminIntegrationsPanel({ showToast }: { showToast: (mess
             </div>
             {printifyProducts.length > 0 && (
               <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
-                <div style={{ color: "var(--text2)", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-                  Printify Products
-                </div>
-                {printifyProducts.slice(0, 8).map(product => (
-                  <div key={product.id} style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 10, alignItems: "center", border: "1px solid var(--border)", borderRadius: 8, padding: 10, background: "rgba(255,255,255,0.025)" }}>
-                    <div style={{ minWidth: 0 }}>
-                      <div style={{ color: "var(--text)", fontSize: "0.82rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.title || product.id}</div>
-                      <div style={{ color: "var(--text3)", fontSize: "0.7rem" }}>{product.visible ? "Visible" : "Draft"} · {product.is_locked ? "Locked" : "Editable"}</div>
-                    </div>
-                    <button type="button" onClick={() => publishPrintify(product.id)} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>
-                      Publish to Website
-                    </button>
+                <div style={{ display: "flex", justifyContent: "space-between", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                  <div style={{ color: "var(--text2)", fontSize: "0.75rem", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+                    Printify Products ({printifyProducts.length})
                   </div>
-                ))}
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => setSelectedPrintifyProductIds(printifyProducts.map(product => product.id))}>Select All</button>
+                    <button type="button" className="btn btn-outline btn-sm" onClick={() => setSelectedPrintifyProductIds([])}>Clear</button>
+                    <button type="button" className="btn btn-primary btn-sm" onClick={publishSelectedPrintify} disabled={testing === "printify-publish-selected" || selectedPrintifyProductIds.length === 0}>Publish Selected ({selectedPrintifyProductIds.length})</button>
+                  </div>
+                </div>
+                <div style={{ display: "grid", gap: 6, maxHeight: 360, overflowY: "auto", paddingRight: 4 }}>
+                  {printifyProducts.map(product => (
+                    <div key={product.id} style={{ display: "grid", gridTemplateColumns: "auto 1fr auto", gap: 8, alignItems: "center", border: "1px solid var(--border)", borderRadius: 6, padding: "6px 8px", background: "rgba(255,255,255,0.025)" }}>
+                      <input type="checkbox" checked={selectedPrintifyProductIds.includes(product.id)} onChange={() => toggleSelectedPrintifyProduct(product.id)} />
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: "var(--text)", fontSize: "0.78rem", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{product.title || product.id}</div>
+                        <div style={{ color: "var(--text3)", fontSize: "0.66rem" }}>{product.visible ? "Visible" : "Draft"} · {product.is_locked ? "Locked" : "Editable"} · {product.id}</div>
+                      </div>
+                      <button type="button" onClick={() => publishPrintify(product.id)} className="btn btn-outline btn-sm" disabled={testing === "printify-publish"}>
+                        Publish
+                      </button>
+                    </div>
+                  ))}
+                  </div>
               </div>
             )}
             <p style={{ color: "var(--text2)", fontSize: "0.78rem" }}>

@@ -1866,13 +1866,15 @@ async function fetchAllPrintifyProducts() {
   const allProducts: any[] = [];
   let page = 1;
   let lastPage = 1;
+  let nextPageUrl = "";
   do {
-    const data = await printifyRequest(`/shops/${shopId}/products.json?page=${page}&limit=100`);
+    const data = await printifyRequest(`/shops/${shopId}/products.json?page=${page}&limit=50`);
     const pageProducts = Array.isArray(data?.data) ? data.data : [];
     allProducts.push(...pageProducts);
     lastPage = Number(data?.last_page || data?.lastPage || page);
+    nextPageUrl = String(data?.next_page_url || data?.nextPageUrl || "");
     page += 1;
-  } while (page <= lastPage && page <= 50);
+  } while ((nextPageUrl || page <= lastPage) && page <= 100);
   return allProducts;
 }
 
@@ -2037,12 +2039,18 @@ router.get("/printify/products", requireAdmin, async (req: Request, res: Respons
   try {
     const { apiKey, shopId } = await getPrintifyCredentials();
     if (!apiKey || !shopId) { res.status(400).json({ error: 'Printify not configured' }); return; }
-    const page = parseInt(req.query.page as string) || 1;
-    const r = await fetch(`https://api.printify.com/v1/shops/${shopId}/products.json?page=${page}&limit=20`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
+    const data = await fetchAllPrintifyProducts();
+    res.json({
+      data,
+      loaded: data.length,
+      total: data.length,
+      summary: {
+        loadedProducts: data.length,
+        totalPrintifyProducts: data.length,
+        progress: "complete",
+        errors: [],
+      },
     });
-    const data = await r.json();
-    res.json(data);
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
