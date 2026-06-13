@@ -245,6 +245,9 @@ export default function Shop() {
   const modalTouchStartXRef = useRef<number | null>(null);
   const [modalImageLoading, setModalImageLoading] = useState(false);
   const [modalImageError, setModalImageError] = useState(false);
+  const [likedProducts, setLikedProducts] = useState<Record<number, boolean>>({});
+  const [reviewForm, setReviewForm] = useState({ customerName: "", email: "", rating: 5, reviewText: "" });
+  const [reviewMessage, setReviewMessage] = useState("");
 
   useEffect(() => {
     publicApi.getProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
@@ -291,6 +294,8 @@ export default function Shop() {
     publicApi.getReviews({ targetType: "product", targetId: viewProduct.id, limit: 6 })
       .then(setProductReviews)
       .catch(() => setProductReviews({ reviews: [], averageRating: 0, count: 0 }));
+    setReviewForm({ customerName: "", email: "", rating: 5, reviewText: "" });
+    setReviewMessage("");
 
     const previousOverflow = document.body.style.overflow;
     document.body.style.overflow = "hidden";
@@ -498,15 +503,79 @@ export default function Shop() {
     return "Add to Cart";
   };
 
+  const submitProductReview = async (product: Product) => {
+    if (!reviewForm.customerName.trim() || !reviewForm.reviewText.trim()) {
+      setReviewMessage("Add your name and review before submitting.");
+      return;
+    }
+    try {
+      await publicApi.submitReview({
+        targetType: "product",
+        targetId: product.id,
+        customerName: reviewForm.customerName,
+        email: reviewForm.email,
+        rating: reviewForm.rating,
+        reviewText: reviewForm.reviewText,
+        sessionId: `product-${product.id}-${Date.now()}`,
+      });
+      setReviewMessage("Thank you. Your review was submitted for approval.");
+      setReviewForm({ customerName: "", email: "", rating: 5, reviewText: "" });
+    } catch (error: any) {
+      setReviewMessage(error?.response?.data?.error || "Review could not be submitted.");
+    }
+  };
+
+  const shareProduct = async (product: Product) => {
+    const url = `${window.location.origin}/shop`;
+    const text = `I recommend ${product.name} from Build Level.`;
+    try {
+      if (navigator.share) await navigator.share({ title: product.name, text, url });
+      else {
+        await navigator.clipboard.writeText(`${text} ${url}`);
+        setReviewMessage("Product link copied.");
+      }
+    } catch {
+      // Customer cancelled native share.
+    }
+  };
+
+  const renderProductActions = (product: Product) => (
+    <div style={{ border: "1px solid var(--border)", borderRadius: 10, padding: 12, margin: "18px 0", background: "rgba(255,255,255,0.025)" }}>
+      <h3 style={{ fontSize: "0.9rem", marginBottom: 10 }}>Review • Rate • Recommend</h3>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
+        <button type="button" className="btn btn-outline btn-sm" onClick={() => setLikedProducts(prev => ({ ...prev, [product.id]: !prev[product.id] }))}>
+          {likedProducts[product.id] ? "Liked" : "Like"}
+        </button>
+        <button type="button" className="btn btn-outline btn-sm" onClick={() => shareProduct(product)}>Recommend / Share</button>
+      </div>
+      <div style={{ display: "grid", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", color: "var(--text2)" }}>
+          <span>Rate it:</span>
+          {[1, 2, 3, 4, 5].map(star => (
+            <button key={star} type="button" onClick={() => setReviewForm(form => ({ ...form, rating: star }))} style={{ border: 0, background: "transparent", color: star <= reviewForm.rating ? "#ff6600" : "var(--text3)", fontSize: 22, cursor: "pointer" }}>★</button>
+          ))}
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))", gap: 8 }}>
+          <input className="input" placeholder="Your name" value={reviewForm.customerName} onChange={event => setReviewForm(form => ({ ...form, customerName: event.target.value }))} />
+          <input className="input" placeholder="Email (optional)" value={reviewForm.email} onChange={event => setReviewForm(form => ({ ...form, email: event.target.value }))} />
+        </div>
+        <textarea className="input" rows={3} placeholder="Write your review" value={reviewForm.reviewText} onChange={event => setReviewForm(form => ({ ...form, reviewText: event.target.value }))} />
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => submitProductReview(product)}>Submit Review</button>
+        {reviewMessage && <p style={{ color: reviewMessage.includes("could not") || reviewMessage.includes("Add your") ? "var(--red)" : "#ff6600", fontSize: "0.82rem" }}>{reviewMessage}</p>}
+      </div>
+    </div>
+  );
+
   const addToCart = (product: Product) => {
     const option = getSelectedProductOption(product, variantSelections);
+    const selected = getEffectiveSelection(product, variantSelections);
     if (getProductOptions(product).length && !option) return;
     globalCart.addApparel({
       product,
       quantity: 1,
       unitPrice: option?.price || Number.parseFloat(product.price),
-      selectedSize: option?.size || "",
-      selectedColor: option?.color || "",
+      selectedSize: selected.size || option?.size || "",
+      selectedColor: selected.color || option?.color || "",
       selectedVariant: option?.value || option?.label || "",
       printifyVariantId: option?.variantId,
     });
@@ -724,6 +793,17 @@ export default function Shop() {
                 </div>
               )}
               {renderVariantSelectors(viewProduct)}
+              {getProductOptions(viewProduct).length > 0 && (
+                <div style={{ border: "1px solid var(--border)", borderRadius: 8, padding: 10, marginBottom: 14, color: "var(--text2)", fontSize: "0.84rem" }}>
+                  {getSelectedProductOption(viewProduct, variantSelections) ? (
+                    <>
+                      Selected: {getEffectiveSelection(viewProduct, variantSelections).color || "Default color"} / {getEffectiveSelection(viewProduct, variantSelections).size || "Default size"}
+                    </>
+                  ) : (
+                    <>Select color and size before adding to cart.</>
+                  )}
+                </div>
+              )}
               {viewProduct.description && <p style={{ color: "var(--text2)", lineHeight: 1.7, marginBottom: 18, whiteSpace: "pre-line" }}>{viewProduct.description}</p>}
               <div style={{ marginBottom: 18 }}><TrustBadges type="apparel" /></div>
               <div style={{ border: "1px solid rgba(255,102,0,0.35)", borderRadius: 10, padding: 12, margin: "18px 0", background: "rgba(255,102,0,0.06)" }}>
@@ -735,6 +815,7 @@ export default function Shop() {
               </button>
               <ReportProblemButton source="Product question" style={{ width: "100%", marginBottom: 10 }} />
               <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
+              {renderProductActions(viewProduct)}
               <ProductReviews summary={productReviews} />
               <RecommendationStrip title="Customers Also Bought" products={getRecommendations(viewProduct)} hrefBase="/shop" />
             </div>
@@ -765,7 +846,7 @@ export default function Shop() {
                 style={{ background: audience === "all" ? "var(--red)" : "var(--bg3)", color: audience === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
                 All Apparel
               </button>
-              {publicAudiences.filter(a => audienceHasProducts(a.value) || a.value === "for-you").map(a => (
+              {publicAudiences.map(a => (
                 <button key={a.value} onClick={() => { setAudience(a.value); setCategory("all"); }} className="btn btn-sm"
                   style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)", ...labelStyle(getAudienceStyle(a.value)) }}>
                   {textCase(a.label, getAudienceStyle(a.value))}
@@ -835,6 +916,13 @@ export default function Shop() {
                     </div>
                   )}
                   {renderVariantSelectors(p, true)}
+                  {getProductOptions(p).length > 0 && (
+                    <p style={{ color: "var(--text3)", fontSize: "0.74rem", marginBottom: 10 }}>
+                      {getSelectedProductOption(p, variantSelections)
+                        ? `Selected: ${getEffectiveSelection(p, variantSelections).color || "Default color"} / ${getEffectiveSelection(p, variantSelections).size || "Default size"}`
+                        : "Select color and size"}
+                    </p>
+                  )}
                   <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 8 }}>
                     <button onClick={() => setViewProduct(p)} className="btn btn-outline btn-sm" style={{ width: "100%" }}>
                       View
