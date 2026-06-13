@@ -48,6 +48,15 @@ export interface Product {
   shopifyVariantId?: string | null;
   shopifyProductId?: string | null;
   printifyProductId?: string | null;
+  variants?: Array<{
+    printifyVariantId?: string | null;
+    label?: string | null;
+    size?: string | null;
+    color?: string | null;
+    imageUrl?: string | null;
+    available?: boolean | number;
+    enabled?: boolean | number;
+  }>;
   createdAt: string;
 }
 

@@ -3,7 +3,7 @@ import { eq, asc, and, lte, or, sql } from "drizzle-orm";
 import { z } from "zod";
 import { Readable } from "stream";
 import { getDb } from "../db/index.js";
-import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings, orders, orderItems } from "../db/schema.js";
+import { products, blogPosts, digitalProducts, digitalPurchases, affiliateProducts, membershipTiers, siteSettings, orders, orderItems, productVariants } from "../db/schema.js";
 import { getProtectedDownloadUrl } from "../storage/objectStorage.js";
 import { BUSINESS_EMAIL, isEmailConfigured, sendBusinessEmail, sendCustomerEmail } from "../services/email.js";
 
@@ -231,7 +231,26 @@ router.get("/products", async (req, res) => {
       .from(products)
       .where(and(eq(products.published, true), eq(products.hidden, false), eq(products.delisted, false)))
       .orderBy(asc(products.sortOrder), asc(products.createdAt));
-    res.json(rows.map(cleanProductForResponse));
+    const ids = rows.map(row => row.id);
+    const variants = ids.length ? await db.select().from(productVariants).where(sql`${productVariants.productId} IN (${sql.join(ids.map(id => sql`${id}`), sql`, `)})`) : [];
+    const variantsByProduct = new Map<number, typeof variants>();
+    for (const variant of variants) {
+      const list = variantsByProduct.get(variant.productId) || [];
+      list.push(variant);
+      variantsByProduct.set(variant.productId, list);
+    }
+    res.json(rows.map(row => ({
+      ...cleanProductForResponse(row),
+      variants: (variantsByProduct.get(row.id) || []).map(variant => ({
+        printifyVariantId: variant.printifyVariantId,
+        label: variant.label,
+        size: variant.size,
+        color: variant.color,
+        imageUrl: variant.imageUrl,
+        available: variant.available,
+        enabled: variant.enabled,
+      })),
+    })));
   } catch (e: any) {
     res.status(500).json({ error: e.message });
   }

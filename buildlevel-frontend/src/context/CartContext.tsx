@@ -36,6 +36,7 @@ type AddApparelInput = {
   selectedColor?: string;
   selectedVariant?: string;
   printifyVariantId?: string;
+  imageUrl?: string;
 };
 
 type CartContextValue = {
@@ -173,7 +174,7 @@ export function CartProvider({ children }: { children: ReactNode }) {
       productType: "apparel",
       productId: input.product.id,
       name: input.product.name,
-      imageUrl: input.product.imageUrl,
+      imageUrl: input.imageUrl || input.product.imageUrl,
       quantity: Math.max(1, input.quantity || 1),
       unitPrice: input.unitPrice,
       selectedSize: input.selectedSize,

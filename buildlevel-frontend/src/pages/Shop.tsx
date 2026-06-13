@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GymMotivationSection } from "../components/PromoVisualSections";
-import { ProductReviewSummary, ProductReviews, RecommendationStrip, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
+import { ProductReviewSummary, ProductReviews, TrustBadges, type ReviewSummaryData } from "../components/Engagement";
 import { publicApi, Product, ProductShopAssignment, ShopTaxonomy } from "../lib/api";
 import { useCart } from "../context/CartContext";
 import ReportProblemButton from "../components/ReportProblemButton";
@@ -95,6 +95,29 @@ const getProductImages = (imageUrl?: string | null) => {
 };
 
 const getProductCoverImage = (product: Product) => getProductImages(product.imageUrl)[0] || "";
+
+const getVariantImageForOption = (product: Product, option?: ProductOption | null, selected?: ProductVariantSelection) => {
+  const variants = Array.isArray(product.variants) ? product.variants : [];
+  if (!variants.length) return "";
+  const byId = option?.variantId
+    ? variants.find(variant => String(variant.printifyVariantId || "") === String(option.variantId) && variant.imageUrl)
+    : undefined;
+  if (byId?.imageUrl) return byId.imageUrl;
+  const bySelection = variants.find(variant =>
+    variant.imageUrl &&
+    (!selected?.color || String(variant.color || "").toLowerCase() === selected.color.toLowerCase()) &&
+    (!selected?.size || String(variant.size || "").toLowerCase() === selected.size.toLowerCase())
+  );
+  if (bySelection?.imageUrl) return bySelection.imageUrl;
+  const byColor = selected?.color ? variants.find(variant => variant.imageUrl && String(variant.color || "").toLowerCase() === selected.color?.toLowerCase()) : undefined;
+  return byColor?.imageUrl || "";
+};
+
+const getSelectedProductImage = (product: Product, selections: Record<number, ProductVariantSelection>) => {
+  const option = getSelectedProductOption(product, selections);
+  const selected = getEffectiveSelection(product, selections);
+  return getVariantImageForOption(product, option, selected) || getProductCoverImage(product);
+};
 
 const parseProductOption = (value: string, fallbackPrice: number): ProductOption | null => {
   const trimmed = value.trim();
@@ -311,6 +334,15 @@ export default function Shop() {
       document.removeEventListener("keydown", handleKeyDown);
     };
   }, [viewProduct]);
+
+  useEffect(() => {
+    if (!viewProduct) return;
+    const selectedImage = getSelectedProductImage(viewProduct, variantSelections);
+    if (!selectedImage || selectedImage === viewImage) return;
+    setModalImageError(false);
+    setModalImageLoading(true);
+    setViewImage(selectedImage);
+  }, [variantSelections, viewProduct?.id]);
 
   const normalizedBadge = (product: Product) => (product.badge || "").trim().toLowerCase();
   const getProductStatus = (product: Product) => {
@@ -566,6 +598,37 @@ export default function Shop() {
     </div>
   );
 
+  const renderApparelRecommendations = (product: Product) => {
+    const recommendations = getRecommendations(product);
+    if (!recommendations.length) return null;
+    return (
+      <div style={{ marginTop: 22 }}>
+        <h3 style={{ fontSize: "0.95rem", marginBottom: 12 }}>Customers Also Bought</h3>
+        <div className="recommendation-grid">
+          {recommendations.map(item => (
+            <button
+              key={item.id}
+              type="button"
+              className="recommendation-card"
+              onClick={() => { setViewProduct(item); setViewImage(getSelectedProductImage(item, variantSelections) || getProductCoverImage(item)); }}
+              style={{ textAlign: "left", cursor: "pointer" }}
+            >
+              <div className="recommendation-card__image">
+                {getProductCoverImage(item) ? <img src={storageImageUrl(getProductCoverImage(item))} alt={item.name} /> : <span style={{ color: "var(--text3)", fontSize: "0.75rem" }}>No Image</span>}
+              </div>
+              <div className="recommendation-card__body">
+                <span className="badge badge-dark" style={{ alignSelf: "flex-start" }}>{getDynamicCategoryLabel(getProductCategorySlug(item))}</span>
+                <p className="recommendation-card__title">{item.name}</p>
+                <p className="recommendation-card__price">{getProductDisplayPrice(item, variantSelections)}</p>
+                <span className="recommendation-card__button">View Product</span>
+              </div>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const addToCart = (product: Product) => {
     const option = getSelectedProductOption(product, variantSelections);
     const selected = getEffectiveSelection(product, variantSelections);
@@ -578,6 +641,7 @@ export default function Shop() {
       selectedColor: selected.color || option?.color || "",
       selectedVariant: option?.value || option?.label || "",
       printifyVariantId: option?.variantId,
+      imageUrl: getSelectedProductImage(product, variantSelections),
     });
   };
 
@@ -685,7 +749,7 @@ export default function Shop() {
   ) : null;
 
   const modalImages = viewProduct ? getProductImages(viewProduct.imageUrl) : [];
-  const modalCoverImage = viewProduct ? getProductCoverImage(viewProduct) : "";
+  const modalCoverImage = viewProduct ? getSelectedProductImage(viewProduct, variantSelections) : "";
   const activeModalImage = viewImage || modalCoverImage;
   const activeModalImageIndex = Math.max(0, modalImages.indexOf(activeModalImage));
   const selectModalImage = (image: string) => {
@@ -817,7 +881,7 @@ export default function Shop() {
               <button onClick={() => { setViewProduct(null); setViewImage(""); }} className="btn btn-outline" style={{ width: "100%" }}>Back to Collection</button>
               {renderProductActions(viewProduct)}
               <ProductReviews summary={productReviews} />
-              <RecommendationStrip title="Customers Also Bought" products={getRecommendations(viewProduct)} hrefBase="/shop" />
+              {renderApparelRecommendations(viewProduct)}
             </div>
           </div>
         </div>
@@ -884,7 +948,7 @@ export default function Shop() {
           <div className="grid-4">
             {filtered.map(p => {
               const productImages = getProductImages(p.imageUrl);
-              const coverImage = productImages[0] || "";
+              const coverImage = getSelectedProductImage(p, variantSelections) || productImages[0] || "";
               return (
               <div key={p.id} className="card">
                 <div style={{ aspectRatio: "4/5", background: "var(--bg3)", overflow: "hidden", position: "relative" }}>

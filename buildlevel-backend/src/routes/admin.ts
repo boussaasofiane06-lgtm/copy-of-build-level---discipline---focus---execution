@@ -1681,7 +1681,7 @@ async function syncPrintifyVariants(productId: number, product: any) {
       enabled: variant?.is_enabled !== false,
       printProviderId: product?.print_provider_id ? String(product.print_provider_id) : null,
       blueprintId: product?.blueprint_id ? String(product.blueprint_id) : null,
-      imageUrl: product?.images?.[0]?.src || null,
+      imageUrl: getPrintifyVariantImageUrl(product, String(variant.id)),
       updatedAt: new Date(),
     };
     if (existing.length > 0) await db.update(productVariants).set(values).where(eq(productVariants.id, existing[0].id));
@@ -1707,6 +1707,15 @@ function getPrintifyImageUrls(product: any) {
     .map((image: any) => String(image?.src || "").trim())
     .filter((url: string) => /^https?:\/\//i.test(url));
   return Array.from(new Set<string>(urls)).slice(0, 24);
+}
+
+function getPrintifyVariantImageUrl(product: any, variantId: string) {
+  const images = Array.isArray(product?.images) ? product.images : [];
+  const match = images.find((image: any) => {
+    const ids = image?.variant_ids || image?.variantIds || image?.variants || [];
+    return Array.isArray(ids) && ids.map(String).includes(String(variantId));
+  });
+  return match?.src || images[0]?.src || null;
 }
 
 function serializeProductImages(urls: string[]) {
