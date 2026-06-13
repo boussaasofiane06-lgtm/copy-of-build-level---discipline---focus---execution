@@ -214,6 +214,32 @@ export default function Admin() {
   };
   const assignmentForProduct = (productId?: number) => (shopTaxonomy.productAssignments || []).filter(row => Number(row.productId) === Number(productId));
 
+  const isKnownCategoryForAudience = (audience: string, category: string) =>
+    dynamicCategoriesForAudience(audience).some(item => item.slug === category);
+
+  const ensureProductCategoryId = async (audienceId: number) => {
+    const existing = shopTaxonomy.categories.find(c => c.slug === productForm.category && Number(c.audienceId) === Number(audienceId));
+    if (existing?.id) return existing.id;
+    const customName = (customProductCategory || getCategoryLabel(productForm.category) || productForm.category).trim();
+    if (!customName) return 0;
+    await adminApi.createShopCategory({
+      audienceId,
+      name: customName,
+      slug: productForm.category,
+      categoryType: "category",
+      enabled: true,
+      hidden: false,
+      published: true,
+    } as any);
+    const taxonomy = await adminApi.getShopTaxonomy();
+    setShopTaxonomy({
+      audiences: Array.from(new Map<string, ShopAudience>(taxonomy.audiences.map(item => [item.slug, item] as [string, ShopAudience])).values()),
+      categories: Array.from(new Map<string, ShopCategory>(taxonomy.categories.map(item => [`${item.audienceId}:${item.parentId || 0}:${item.slug}`, item] as [string, ShopCategory])).values()),
+      productAssignments: taxonomy.productAssignments || [],
+    });
+    return taxonomy.categories.find(c => c.slug === productForm.category && Number(c.audienceId) === Number(audienceId))?.id || 0;
+  };
+
   const logout = async () => {
     if (!window.confirm("Are you sure you want to log out of the Build Level Admin Panel?")) return;
     await adminApi.logout().catch(() => undefined);
@@ -305,7 +331,7 @@ export default function Admin() {
       const saved = editProduct?.id ? await adminApi.updateProduct(editProduct.id, data as any).then(() => ({ id: editProduct.id })) : await adminApi.createProduct(data as any);
       const savedProductId = Number(saved?.id || editProduct?.id || 0);
       const audienceId = getAudienceIdBySlug(productForm.audience);
-      const categoryId = shopTaxonomy.categories.find(c => c.slug === productForm.category && Number(c.audienceId) === Number(audienceId))?.id || 0;
+      const categoryId = audienceId ? await ensureProductCategoryId(audienceId) : 0;
       if (savedProductId && audienceId) await adminApi.updateProductClassification(savedProductId, { audienceId, categoryId: categoryId || undefined }).catch(() => undefined);
       showToast(data.published ? (editProduct?.id ? "Product updated and visible if qualified" : "Product created and visible if qualified") : "Product saved as draft");
       setShowProductForm(false); setEditProduct(null);
@@ -679,12 +705,13 @@ export default function Admin() {
                           value={productForm.audience}
                           onChange={e => {
                             const audience = e.target.value;
-                            setProductForm(f => ({
-                              ...f,
-                              audience,
-                              category: dynamicCategoriesForAudience(audience)[0]?.slug || DEFAULT_CATEGORY,
-                            }));
-                            setCustomProductCategory("");
+                            setProductForm(f => {
+                              const currentCategory = f.category || "";
+                              if (!isKnownCategoryForAudience(audience, currentCategory)) {
+                                setCustomProductCategory(current => current || getCategoryLabel(currentCategory));
+                              }
+                              return { ...f, audience };
+                            });
                           }}
                         >
                           {enabledAudienceOptions().map(audience => <option key={audience.slug} value={audience.slug}>{audience.name}</option>)}
@@ -694,11 +721,12 @@ export default function Admin() {
                         <label style={labelStyle}>Category</label>
                         <select
                           style={inputStyle}
-                          value={dynamicCategoriesForAudience(productForm.audience).some(category => category.slug === productForm.category) ? productForm.category : "__custom"}
+                          value={isKnownCategoryForAudience(productForm.audience, productForm.category) ? productForm.category : "__custom"}
                           onChange={e => {
                             if (e.target.value === "__custom") {
-                              const label = customProductCategory || "";
-                              setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience as ApparelAudience, label) }));
+                              const label = customProductCategory || getCategoryLabel(productForm.category) || "";
+                              setCustomProductCategory(label);
+                              setProductForm(f => ({ ...f, category: createCustomCategorySlug(f.audience as ApparelAudience, label) || f.category }));
                               return;
                             }
                             setCustomProductCategory("");

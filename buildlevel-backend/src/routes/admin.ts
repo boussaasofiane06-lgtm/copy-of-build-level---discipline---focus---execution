@@ -1831,21 +1831,21 @@ async function syncPrintifyProductToStore(printifyProductOrId: string | Record<s
   const sizes = getPrintifySizes(product);
   const db = await getDb();
   const existing = await db.select().from(products).where(eq(products.printifyProductId, printifyProductId)).limit(1);
-  const locallyHidden = existing.length > 0 && (existing[0].hidden === true || existing[0].published === false);
+  const existingProduct = existing[0];
   const values = {
     name: product.title || "Printify Product",
     description: cleanPrintifyDescription(product.description),
-    price,
-    category: existing[0]?.category || "mens-t-shirts",
+    price: existingProduct?.price ? String(existingProduct.price) : price,
+    category: existingProduct?.category || "unclassified",
     sizes: sizes.length ? sizes : ["S", "M", "L", "XL"],
     imageUrl,
-    badge: existing[0]?.badge || (visible ? "New Release" : "Coming Soon"),
-    inStock: locallyHidden ? false : visible && getPrintifyInStock(product),
-    published: locallyHidden ? false : visible,
-    hidden: locallyHidden ? true : !visible,
-    delisted: locallyHidden ? false : !visible,
-    featured: existing[0]?.featured ?? false,
-    sortOrder: existing[0]?.sortOrder ?? 0,
+    badge: existingProduct?.badge || "",
+    inStock: existingProduct ? existingProduct.inStock : false,
+    published: existingProduct ? existingProduct.published : false,
+    hidden: existingProduct ? existingProduct.hidden : true,
+    delisted: existingProduct ? existingProduct.delisted : false,
+    featured: existingProduct?.featured ?? false,
+    sortOrder: existingProduct?.sortOrder ?? 0,
     printifyProductId,
     updatedAt: new Date(),
   };
