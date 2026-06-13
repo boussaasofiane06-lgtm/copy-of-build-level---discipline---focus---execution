@@ -2747,5 +2747,146 @@ router.get("/ai-chat/sessions/:sessionId", requireAdmin, async (req: Request, re
   } catch (e: any) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Temporary read-only production database verification ─────────────────────
+const verificationTables = ["orders", "order_events", "product_variants", "order_items", "fulfillment_attempts"] as const;
+const verificationConstraints = [
+  { table: "orders", name: "orders.stripeEventId", columns: ["stripeEventId"] },
+  { table: "orders", name: "orders.stripeCheckoutSessionId", columns: ["stripeCheckoutSessionId"] },
+  { table: "orders", name: "orders.stripePaymentIntentId", columns: ["stripePaymentIntentId"] },
+  { table: "orders", name: "orders.printifyOrderId", columns: ["printifyOrderId"] },
+  { table: "order_events", name: "order_events.stripeEventId", columns: ["stripeEventId"] },
+  { table: "product_variants", name: "product_variants(printifyProductId, printifyVariantId)", columns: ["printifyProductId", "printifyVariantId"] },
+] as const;
+const verificationOrderColumns = [
+  "orderToken",
+  "customerFirstName",
+  "customerLastName",
+  "customerStatus",
+  "confirmationEmailSent",
+  "confirmationEmailSentAt",
+  "confirmationEmailStatus",
+  "confirmationEmailError",
+  "productionEmailSentAt",
+  "shippingEmailSentAt",
+  "deliveryEmailSentAt",
+  "lastSyncAt",
+  "lastSyncFailedAt",
+  "lastSyncError",
+];
+
+async function verifyTableExists(db: any, table: string) {
+  try {
+    const [rows] = await db.execute(sql.raw(`SHOW CREATE TABLE \`${table}\``)) as any;
+    return Boolean(rows?.[0]);
+  } catch {
+    return false;
+  }
+}
+
+async function verifyColumnExists(db: any, table: string, column: string) {
+  try {
+    const [rows] = await db.execute(sql.raw(`SHOW COLUMNS FROM \`${table}\` LIKE '${column.replace(/'/g, "''")}'`)) as any;
+    return Boolean(rows?.[0]);
+  } catch {
+    return false;
+  }
+}
+
+async function getVerificationIndexes(db: any, table: string) {
+  try {
+    const [rows] = await db.execute(sql.raw(`SHOW INDEX FROM \`${table}\``)) as any;
+    return rows || [];
+  } catch {
+    return [];
+  }
+}
+
+function hasUniqueIndex(indexRows: any[], columns: readonly string[]) {
+  const grouped = new Map<string, any[]>();
+  for (const row of indexRows) {
+    if (Number(row.Non_unique) !== 0) continue;
+    const keyName = String(row.Key_name || "");
+    if (!grouped.has(keyName)) grouped.set(keyName, []);
+    grouped.get(keyName)!.push(row);
+  }
+  for (const rows of grouped.values()) {
+    const ordered = rows
+      .slice()
+      .sort((a, b) => Number(a.Seq_in_index) - Number(b.Seq_in_index))
+      .map(row => String(row.Column_name));
+    if (ordered.length === columns.length && ordered.every((column, index) => column === columns[index])) return true;
+  }
+  return false;
+}
+
+async function getVerificationDuplicateCount(db: any, table: string, columns: readonly string[]) {
+  try {
+    const notNullWhere = columns.map(column => `\`${column}\` IS NOT NULL AND \`${column}\` <> ''`).join(" AND ");
+    const groupBy = columns.map(column => `\`${column}\``).join(", ");
+    const [rows] = await db.execute(sql.raw(`SELECT COALESCE(SUM(duplicateCount - 1), 0) AS duplicateCount FROM (SELECT COUNT(*) AS duplicateCount FROM \`${table}\` WHERE ${notNullWhere} GROUP BY ${groupBy} HAVING COUNT(*) > 1) duplicateRows`)) as any;
+    return Number(rows?.[0]?.duplicateCount || 0);
+  } catch {
+    return -1;
+  }
+}
+
+router.get("/maintenance/database-verification", requireAdmin, async (_req: Request, res: Response) => {
+  try {
+    const db = await getDb();
+    const tables = [];
+    for (const table of verificationTables) {
+      const exists = await verifyTableExists(db, table);
+      tables.push({
+        table,
+        exists,
+        status: exists ? "PASS" : "FAIL",
+        safeRecommendedAction: exists ? "No action needed." : `Create missing table ${table} using a reviewed migration.`,
+      });
+    }
+
+    const constraints = [];
+    for (const constraint of verificationConstraints) {
+      const tableExists = await verifyTableExists(db, constraint.table);
+      const indexes = tableExists ? await getVerificationIndexes(db, constraint.table) : [];
+      const exists = tableExists ? hasUniqueIndex(indexes, constraint.columns) : false;
+      const duplicateCount = tableExists ? await getVerificationDuplicateCount(db, constraint.table, constraint.columns) : -1;
+      constraints.push({
+        name: constraint.name,
+        table: constraint.table,
+        exists,
+        duplicateCount,
+        status: exists && duplicateCount === 0 ? "PASS" : "FAIL",
+        safeRecommendedAction: exists && duplicateCount === 0
+          ? "No action needed."
+          : duplicateCount > 0
+            ? "Resolve duplicate records manually before adding or enforcing this unique constraint."
+            : "Add missing unique constraint using a reviewed migration after confirming no duplicates.",
+      });
+    }
+
+    const columns = [];
+    for (const column of verificationOrderColumns) {
+      const exists = await verifyColumnExists(db, "orders", column);
+      columns.push({
+        table: "orders",
+        column,
+        exists,
+        status: exists ? "PASS" : "FAIL",
+        safeRecommendedAction: exists ? "No action needed." : `Add missing orders.${column} using a reviewed migration.`,
+      });
+    }
+
+    res.json({
+      checkedAt: new Date().toISOString(),
+      overallStatus: [...tables, ...constraints, ...columns].every(item => item.status === "PASS") ? "PASS" : "FAIL",
+      tables,
+      constraints,
+      columns,
+    });
+  } catch {
+    res.status(500).json({ error: "Database verification failed without exposing connection details." });
+  }
+});
+
 export default router;
 
