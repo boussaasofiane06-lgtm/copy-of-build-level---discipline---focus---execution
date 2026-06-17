@@ -248,6 +248,14 @@ const getProductDisplayPrice = (product: Product, selections: Record<number, Pro
   return `$${Number.parseFloat(product.price).toFixed(2)}`;
 };
 
+const normalizeShopSlug = (value?: string | null) =>
+  String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
 export default function Shop() {
   const globalCart = useCart();
   const [products, setProducts] = useState<Product[]>([]);
@@ -378,13 +386,24 @@ export default function Shop() {
   const getPrimaryAssignment = (product: Product): ProductShopAssignment | undefined =>
     getAssignmentRows(product.id).find(item => item.audienceSlug);
   const isCanCoolerProduct = (product: Product) => /can cooler|koozie/i.test(`${product.name} ${product.description || ""}`);
-  const getProductAudienceSlug = (product: Product) => getPrimaryAssignment(product)?.audienceSlug || (isCanCoolerProduct(product) ? "home-living" : getAudienceForCategory(product.category));
+  const findAudienceBySlug = (slug?: string | null) =>
+    taxonomy?.audiences.find(item => normalizeShopSlug(item.slug) === normalizeShopSlug(slug));
+  const findCategoryBySlug = (slug?: string | null) =>
+    taxonomy?.categories.find(item => item.slug === slug);
+  const getCategoryAudienceSlug = (categorySlug?: string | null) => {
+    const category = findCategoryBySlug(categorySlug);
+    return category?.audienceSlug ? normalizeShopSlug(category.audienceSlug) : "";
+  };
+  const getProductAudienceSlug = (product: Product) =>
+    normalizeShopSlug(getPrimaryAssignment(product)?.audienceSlug) ||
+    getCategoryAudienceSlug(product.category) ||
+    (isCanCoolerProduct(product) ? "home-living" : getAudienceForCategory(product.category));
   const getProductCategorySlug = (product: Product) => {
     const rows = getAssignmentRows(product.id);
     return rows.find(row => row.assignmentType === "subcategory")?.categorySlug || rows.find(row => row.assignmentType === "primary")?.categorySlug || (isCanCoolerProduct(product) ? "can-coolers" : product.category);
   };
   const getDynamicAudienceLabel = (slug?: string | null) =>
-    taxonomy?.audiences.find(item => item.slug === slug)?.name || (slug ? getAudienceLabel(slug as ApparelAudience) : "Legacy");
+    findAudienceBySlug(slug)?.name?.trim() || (slug ? getAudienceLabel(slug as ApparelAudience) : "Legacy");
   const getDynamicCategoryLabel = (slug?: string | null) =>
     taxonomy?.categories.find(item => item.slug === slug)?.name || getCategoryLabel(slug);
   const parseStyleSettings = (value: unknown) => {
@@ -394,7 +413,7 @@ export default function Shop() {
     }
     return value as Record<string, string>;
   };
-  const getAudienceStyle = (slug?: string | null) => parseStyleSettings(taxonomy?.audiences.find(item => item.slug === slug)?.styleSettings);
+  const getAudienceStyle = (slug?: string | null) => parseStyleSettings(findAudienceBySlug(slug)?.styleSettings);
   const getCategoryStyle = (slug?: string | null) => parseStyleSettings(taxonomy?.categories.find(item => item.slug === slug)?.styleSettings);
   const textCase = (text: string, style: Record<string, string>) => {
     if (style.textCase === "uppercase") return text.toUpperCase();
@@ -416,9 +435,11 @@ export default function Shop() {
     textDecoration: style.fontStyle === "underline" ? "underline" : style.fontStyle === "strike" ? "line-through" : undefined,
   });
   const publicAudiences = taxonomy?.audiences?.length
-    ? Array.from(new Map(taxonomy.audiences.filter(item => Boolean(item.enabled) && !Boolean(item.hidden)).map(item => [item.slug, { value: item.slug, label: item.name, isForYou: Boolean(item.isForYou) }])).values())
+    ? Array.from(new Map(taxonomy.audiences
+      .filter(item => Boolean(item.enabled) && !Boolean(item.hidden))
+      .map(item => [normalizeShopSlug(item.slug), { value: normalizeShopSlug(item.slug), label: String(item.name || "").trim(), isForYou: Boolean(item.isForYou) }])).values())
     : APPAREL_AUDIENCES.map(item => ({ ...item, isForYou: false }));
-  const isAssignedToForYou = (product: Product) => getProductAudienceSlug(product) === "for-you" || getAssignmentRows(product.id).some(item => item.audienceSlug === "for-you");
+  const isAssignedToForYou = (product: Product) => getProductAudienceSlug(product) === "for-you" || getAssignmentRows(product.id).some(item => normalizeShopSlug(item.audienceSlug) === "for-you");
   const audienceHasProducts = (value: string) =>
     value === "for-you"
       ? storefrontProducts.some(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
@@ -427,7 +448,7 @@ export default function Shop() {
     ? storefrontProducts
     : audience === "for-you"
       ? storefrontProducts.filter(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
-      : storefrontProducts.filter(p => getProductAudienceSlug(p) === audience);
+      : storefrontProducts.filter(p => getProductAudienceSlug(p) === normalizeShopSlug(audience));
   const sortCategories = (categories: string[]) => {
     const priority = (audience === "all" ? ["mens", "womens", "kids"].flatMap(a => STOREFRONT_CATEGORY_PRIORITY[a as ApparelAudience] || []) : STOREFRONT_CATEGORY_PRIORITY[audience as ApparelAudience]) || [];
     return categories.sort((a, b) => {
@@ -445,9 +466,9 @@ export default function Shop() {
     : categoryFiltered;
   const productsForAudienceGroup = (value: string) => value === "for-you"
     ? storefrontProducts.filter(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
-    : storefrontProducts.filter(product => getProductAudienceSlug(product) === value);
+      : storefrontProducts.filter(product => getProductAudienceSlug(product) === normalizeShopSlug(value));
   const categoryEnabledForAudience = (audienceSlug: string, categorySlug: string) => {
-    const matches = (taxonomy?.categories || []).filter(item => item.audienceSlug === audienceSlug && item.slug === categorySlug);
+    const matches = (taxonomy?.categories || []).filter(item => normalizeShopSlug(item.audienceSlug) === normalizeShopSlug(audienceSlug) && item.slug === categorySlug);
     return matches.length === 0 || matches.some(item => Boolean(item.enabled) && !Boolean(item.hidden));
   };
   const categoriesForAudienceGroup = (value: string) => {
