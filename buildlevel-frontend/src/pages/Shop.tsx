@@ -263,6 +263,9 @@ export default function Shop() {
   const [taxonomy, setTaxonomy] = useState<ShopTaxonomy | null>(null);
   const [audience, setAudience] = useState("all");
   const [category, setCategory] = useState("all");
+  const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
+  const [expandedAudience, setExpandedAudience] = useState("for-you");
+  const [productSearch, setProductSearch] = useState("");
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
   const productModalScrollRef = useRef<HTMLDivElement>(null);
   const modalTouchStartXRef = useRef<number | null>(null);
@@ -427,7 +430,35 @@ export default function Shop() {
     });
   };
   const availableCategories = sortCategories(Array.from(new Set(audienceFiltered.map(p => getProductCategorySlug(p)).filter(Boolean))));
-  const filtered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => getProductCategorySlug(p) === category);
+  const categoryFiltered = category === "all" ? audienceFiltered : audienceFiltered.filter(p => getProductCategorySlug(p) === category);
+  const normalizedSearch = productSearch.trim().toLowerCase();
+  const filtered = normalizedSearch
+    ? categoryFiltered.filter(p => `${p.name} ${p.description || ""} ${getDynamicAudienceLabel(getProductAudienceSlug(p))} ${getDynamicCategoryLabel(getProductCategorySlug(p))}`.toLowerCase().includes(normalizedSearch))
+    : categoryFiltered;
+  const shopAudienceOrder = ["for-you", "mens", "womens", "kids", "accessories", "home-living"];
+  const shopCategoryAudienceGroups = shopAudienceOrder
+    .map(slug => publicAudiences.find(item => item.value === slug) || { value: slug, label: getDynamicAudienceLabel(slug), isForYou: slug === "for-you" })
+    .filter((item, index, arr) => arr.findIndex(entry => entry.value === item.value) === index);
+  const productsForAudienceGroup = (value: string) => value === "for-you"
+    ? storefrontProducts.filter(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
+    : storefrontProducts.filter(product => getProductAudienceSlug(product) === value);
+  const categoriesForAudienceGroup = (value: string) => {
+    const productCategories = productsForAudienceGroup(value).map(product => getProductCategorySlug(product)).filter(Boolean);
+    const taxonomyCategories = (taxonomy?.categories || [])
+      .filter(item => item.audienceSlug === value && Boolean(item.enabled) && !Boolean(item.hidden))
+      .map(item => item.slug);
+    return sortCategories(Array.from(new Set([...productCategories, ...taxonomyCategories])));
+  };
+  const setShopFilter = (nextAudience: string, nextCategory = "all") => {
+    setAudience(nextAudience);
+    setCategory(nextCategory);
+    setCategoryMenuOpen(false);
+  };
+  const activeFilterLabel = audience === "all"
+    ? "All Apparel"
+    : category === "all"
+      ? `All ${getDynamicAudienceLabel(audience)}`
+      : `${getDynamicAudienceLabel(audience)} / ${getDynamicCategoryLabel(category)}`;
   const getRecommendations = (product: Product) =>
     storefrontProducts
       .filter(item => item.id !== product.id)
@@ -904,45 +935,93 @@ export default function Shop() {
       <div className="container section-sm">
         {/* Filters + Cart button */}
         <div style={{ display: "flex", flexDirection: "column", marginBottom: 32, gap: 14 }}>
-          {storefrontProducts.length > 0 && <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
-            <div className="shop-filter-scroll" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button onClick={() => { setAudience("all"); setCategory("all"); }} className="btn btn-sm"
-                style={{ background: audience === "all" ? "var(--red)" : "var(--bg3)", color: audience === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-                All Apparel
-              </button>
-              {publicAudiences.map(a => (
-                <button key={a.value} onClick={() => { setAudience(a.value); setCategory("all"); }} className="btn btn-sm"
-                  style={{ background: audience === a.value ? "var(--red)" : "var(--bg3)", color: audience === a.value ? "#fff" : "var(--text2)", border: "1px solid var(--border)", ...labelStyle(getAudienceStyle(a.value)) }}>
-                  {textCase(a.label, getAudienceStyle(a.value))}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
+            <div style={{ display: "grid", gap: 10, flex: "1 1 360px", maxWidth: 720 }}>
+              <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+                <button
+                  type="button"
+                  onClick={() => setCategoryMenuOpen(open => !open)}
+                  className="btn btn-primary btn-sm"
+                  aria-expanded={categoryMenuOpen}
+                >
+                  Shop by Category
                 </button>
-              ))}
+                <button
+                  type="button"
+                  onClick={() => setShopFilter("all", "all")}
+                  className="btn btn-outline btn-sm"
+                >
+                  Reset
+                </button>
+                <span style={{ color: "var(--text2)", fontSize: "0.84rem" }}>{activeFilterLabel}</span>
+              </div>
+              <input
+                className="input"
+                placeholder="Search products"
+                value={productSearch}
+                onChange={event => setProductSearch(event.target.value)}
+                style={{ maxWidth: 420 }}
+              />
             </div>
             {cart.length > 0 && (
               <button onClick={() => setCartOpen(true)} className="btn btn-primary">
                 Cart ({cart.reduce((s, i) => s + i.quantity, 0)}) — ${cartTotal.toFixed(2)}
               </button>
             )}
-          </div>}
-          {availableCategories.length > 0 && <div className="shop-filter-scroll" style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button onClick={() => setCategory("all")} className="btn btn-sm"
-              style={{ background: category === "all" ? "var(--red)" : "transparent", color: category === "all" ? "#fff" : "var(--text2)", border: "1px solid var(--border)" }}>
-              {audience === "all" ? "All Categories" : `All ${getDynamicAudienceLabel(audience)}`}
-            </button>
-            {availableCategories.map(c => (
-              <button key={c} onClick={() => setCategory(c)} className="btn btn-sm"
-                style={{ background: category === c ? "var(--red)" : "transparent", color: category === c ? "#fff" : "var(--text2)", border: "1px solid var(--border)", ...labelStyle(getCategoryStyle(c)) }}>
-                {textCase(getDynamicCategoryLabel(c), getCategoryStyle(c))}
-              </button>
-            ))}
-          </div>}
+          </div>
+          {categoryMenuOpen && (
+            <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg2)", padding: 14, display: "grid", gap: 10 }}>
+              {shopCategoryAudienceGroups.map(group => {
+                const categories = categoriesForAudienceGroup(group.value);
+                const expanded = expandedAudience === group.value;
+                return (
+                  <section key={group.value} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "rgba(255,255,255,0.025)" }}>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedAudience(expanded ? "" : group.value)}
+                      className="btn btn-sm"
+                      style={{ width: "100%", justifyContent: "space-between", border: 0, borderRadius: 0, background: audience === group.value ? "var(--red)" : "transparent", color: audience === group.value ? "#fff" : "var(--text2)", ...labelStyle(getAudienceStyle(group.value)) }}
+                    >
+                      <span>{textCase(group.label, getAudienceStyle(group.value))}</span>
+                      <span>{expanded ? "−" : "+"}</span>
+                    </button>
+                    {expanded && (
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, padding: 12 }}>
+                        <button
+                          type="button"
+                          className="btn btn-outline btn-sm"
+                          onClick={() => setShopFilter(group.value, "all")}
+                          style={{ borderColor: audience === group.value && category === "all" ? "var(--red)" : "var(--border)" }}
+                        >
+                          All {group.label}
+                        </button>
+                        {categories.map(categorySlug => (
+                          <button
+                            key={`${group.value}-${categorySlug}`}
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            onClick={() => setShopFilter(group.value, categorySlug)}
+                            style={{ borderColor: audience === group.value && category === categorySlug ? "var(--red)" : "var(--border)", ...labelStyle(getCategoryStyle(categorySlug)) }}
+                          >
+                            {textCase(getDynamicCategoryLabel(categorySlug), getCategoryStyle(categorySlug))}
+                          </button>
+                        ))}
+                        {categories.length === 0 && <p style={{ color: "var(--text3)", fontSize: "0.82rem" }}>No categories yet.</p>}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {loading ? (
           <div style={{ display: "flex", justifyContent: "center", padding: 80 }}><div className="spinner" /></div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: "center", padding: "72px 24px", color: "var(--text2)", border: "1px solid var(--border)", background: "var(--bg2)", borderRadius: 8 }}>
-            <p style={{ fontFamily: "var(--font-display)", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--red)", fontSize: "0.78rem", marginBottom: 10 }}>Next Drop Loading</p>
-            <p style={{ fontSize: "1rem" }}>The next BUILD LEVEL release is being prepared.</p>
+            <p style={{ fontFamily: "var(--font-display)", letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--red)", fontSize: "0.78rem", marginBottom: 10 }}>No products found in this category</p>
+            <p style={{ fontSize: "1rem" }}>Try another category or search term.</p>
           </div>
         ) : (
           <div className="grid-4">
