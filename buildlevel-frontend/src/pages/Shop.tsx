@@ -266,6 +266,7 @@ export default function Shop() {
   const [categoryMenuOpen, setCategoryMenuOpen] = useState(false);
   const [expandedAudience, setExpandedAudience] = useState("for-you");
   const [productSearch, setProductSearch] = useState("");
+  const [isMobileFilter, setIsMobileFilter] = useState(false);
   const closeCartButtonRef = useRef<HTMLButtonElement>(null);
   const productModalScrollRef = useRef<HTMLDivElement>(null);
   const modalTouchStartXRef = useRef<number | null>(null);
@@ -278,6 +279,13 @@ export default function Shop() {
   useEffect(() => {
     publicApi.getProducts().then(p => { setProducts(p); setLoading(false); }).catch(() => setLoading(false));
     publicApi.getShopTaxonomy().then(setTaxonomy).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    const sync = () => setIsMobileFilter(window.innerWidth < 720);
+    sync();
+    window.addEventListener("resize", sync);
+    return () => window.removeEventListener("resize", sync);
   }, []);
 
   useEffect(() => {
@@ -435,20 +443,24 @@ export default function Shop() {
   const filtered = normalizedSearch
     ? categoryFiltered.filter(p => `${p.name} ${p.description || ""} ${getDynamicAudienceLabel(getProductAudienceSlug(p))} ${getDynamicCategoryLabel(getProductCategorySlug(p))}`.toLowerCase().includes(normalizedSearch))
     : categoryFiltered;
-  const shopAudienceOrder = ["for-you", "mens", "womens", "kids", "accessories", "home-living"];
-  const shopCategoryAudienceGroups = shopAudienceOrder
-    .map(slug => publicAudiences.find(item => item.value === slug) || { value: slug, label: getDynamicAudienceLabel(slug), isForYou: slug === "for-you" })
-    .filter((item, index, arr) => arr.findIndex(entry => entry.value === item.value) === index);
   const productsForAudienceGroup = (value: string) => value === "for-you"
     ? storefrontProducts.filter(product => isAssignedToForYou(product) || product.featured || getProductStatus(product) === "New Release")
     : storefrontProducts.filter(product => getProductAudienceSlug(product) === value);
+  const categoryEnabledForAudience = (audienceSlug: string, categorySlug: string) => {
+    const matches = (taxonomy?.categories || []).filter(item => item.audienceSlug === audienceSlug && item.slug === categorySlug);
+    return matches.length === 0 || matches.some(item => Boolean(item.enabled) && !Boolean(item.hidden));
+  };
   const categoriesForAudienceGroup = (value: string) => {
     const productCategories = productsForAudienceGroup(value).map(product => getProductCategorySlug(product)).filter(Boolean);
-    const taxonomyCategories = (taxonomy?.categories || [])
-      .filter(item => item.audienceSlug === value && Boolean(item.enabled) && !Boolean(item.hidden))
-      .map(item => item.slug);
-    return sortCategories(Array.from(new Set([...productCategories, ...taxonomyCategories])));
+    return sortCategories(Array.from(new Set(productCategories)).filter(categorySlug => categoryEnabledForAudience(value, categorySlug)));
   };
+  const shopCategoryAudienceGroups = publicAudiences
+    .map(item => ({ ...item, categories: categoriesForAudienceGroup(item.value), productCount: productsForAudienceGroup(item.value).length }))
+    .filter(item => item.productCount > 0 && item.categories.length > 0);
+  const activeExpandedAudience = shopCategoryAudienceGroups.some(item => item.value === expandedAudience)
+    ? expandedAudience
+    : shopCategoryAudienceGroups[0]?.value || "";
+  const activeExpandedGroup = shopCategoryAudienceGroups.find(item => item.value === activeExpandedAudience);
   const setShopFilter = (nextAudience: string, nextCategory = "all") => {
     setAudience(nextAudience);
     setCategory(nextCategory);
@@ -936,11 +948,14 @@ export default function Shop() {
         {/* Filters + Cart button */}
         <div style={{ display: "flex", flexDirection: "column", marginBottom: 32, gap: 14 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 16 }}>
-            <div style={{ display: "grid", gap: 10, flex: "1 1 360px", maxWidth: 720 }}>
+            <div style={{ display: "grid", gap: 10, flex: "1 1 360px", maxWidth: 720, position: "relative" }}>
               <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
                 <button
                   type="button"
-                  onClick={() => setCategoryMenuOpen(open => !open)}
+                  onClick={() => {
+                    setCategoryMenuOpen(open => !open);
+                    if (!activeExpandedAudience && shopCategoryAudienceGroups[0]) setExpandedAudience(shopCategoryAudienceGroups[0].value);
+                  }}
                   className="btn btn-primary btn-sm"
                   aria-expanded={categoryMenuOpen}
                 >
@@ -962,6 +977,95 @@ export default function Shop() {
                 onChange={event => setProductSearch(event.target.value)}
                 style={{ maxWidth: 420 }}
               />
+              {categoryMenuOpen && (
+                <>
+                  {isMobileFilter && (
+                    <button
+                      type="button"
+                      aria-label="Close shop category menu"
+                      onClick={() => setCategoryMenuOpen(false)}
+                      style={{ position: "fixed", inset: 0, zIndex: 998, background: "rgba(0,0,0,0.55)", border: 0 }}
+                    />
+                  )}
+                  <div
+                    role="dialog"
+                    aria-label="Shop by Category"
+                    onMouseLeave={() => { if (!isMobileFilter) setCategoryMenuOpen(false); }}
+                    style={{
+                      position: isMobileFilter ? "fixed" : "absolute",
+                      top: isMobileFilter ? 16 : "calc(100% + 8px)",
+                      left: isMobileFilter ? 16 : 0,
+                      right: isMobileFilter ? 16 : "auto",
+                      zIndex: 999,
+                      width: isMobileFilter ? "auto" : "min(680px, calc(100vw - 48px))",
+                      maxHeight: isMobileFilter ? "calc(100vh - 32px)" : 460,
+                      overflowY: "auto",
+                      display: "grid",
+                      gridTemplateColumns: isMobileFilter ? "1fr" : "220px minmax(240px, 1fr)",
+                      gap: 0,
+                      border: "1px solid var(--border)",
+                      borderRadius: 12,
+                      background: "rgba(14,14,14,0.98)",
+                      boxShadow: "0 24px 70px rgba(0,0,0,0.55)",
+                    }}
+                  >
+                    <div style={{ borderRight: isMobileFilter ? "none" : "1px solid var(--border)", borderBottom: isMobileFilter ? "1px solid var(--border)" : "none", padding: 10, display: "grid", gap: 6 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+                        <strong style={{ color: "var(--text2)", fontFamily: "var(--font-display)", fontSize: "0.75rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>Audiences</strong>
+                        {isMobileFilter && <button type="button" className="btn btn-outline btn-sm" onClick={() => setCategoryMenuOpen(false)}>Close</button>}
+                      </div>
+                      {shopCategoryAudienceGroups.map(group => (
+                        <button
+                          key={group.value}
+                          type="button"
+                          onMouseEnter={() => !isMobileFilter && setExpandedAudience(group.value)}
+                          onClick={() => setExpandedAudience(group.value)}
+                          className="btn btn-sm"
+                          style={{
+                            justifyContent: "space-between",
+                            background: activeExpandedAudience === group.value ? "var(--red)" : "transparent",
+                            color: activeExpandedAudience === group.value ? "#fff" : "var(--text2)",
+                            border: "1px solid var(--border)",
+                            ...labelStyle(getAudienceStyle(group.value)),
+                          }}
+                        >
+                          <span>{textCase(group.label, getAudienceStyle(group.value))}</span>
+                          <span>›</span>
+                        </button>
+                      ))}
+                    </div>
+                    <div style={{ padding: 12, display: "grid", alignContent: "start", gap: 8 }}>
+                      {activeExpandedGroup ? (
+                        <>
+                          <button
+                            type="button"
+                            className="btn btn-outline btn-sm"
+                            onClick={() => setShopFilter(activeExpandedGroup.value, "all")}
+                            style={{ justifySelf: "start", borderColor: audience === activeExpandedGroup.value && category === "all" ? "var(--red)" : "var(--border)" }}
+                          >
+                            All {activeExpandedGroup.label}
+                          </button>
+                          <div style={{ display: "grid", gridTemplateColumns: isMobileFilter ? "1fr" : "repeat(2, minmax(0, 1fr))", gap: 8 }}>
+                            {activeExpandedGroup.categories.map(categorySlug => (
+                              <button
+                                key={`${activeExpandedGroup.value}-${categorySlug}`}
+                                type="button"
+                                className="btn btn-outline btn-sm"
+                                onClick={() => setShopFilter(activeExpandedGroup.value, categorySlug)}
+                                style={{ justifyContent: "flex-start", borderColor: audience === activeExpandedGroup.value && category === categorySlug ? "var(--red)" : "var(--border)", ...labelStyle(getCategoryStyle(categorySlug)) }}
+                              >
+                                {textCase(getDynamicCategoryLabel(categorySlug), getCategoryStyle(categorySlug))}
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      ) : (
+                        <p style={{ color: "var(--text2)", fontSize: "0.85rem" }}>No categories available.</p>
+                      )}
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
             {cart.length > 0 && (
               <button onClick={() => setCartOpen(true)} className="btn btn-primary">
@@ -969,51 +1073,6 @@ export default function Shop() {
               </button>
             )}
           </div>
-          {categoryMenuOpen && (
-            <div style={{ border: "1px solid var(--border)", borderRadius: 12, background: "var(--bg2)", padding: 14, display: "grid", gap: 10 }}>
-              {shopCategoryAudienceGroups.map(group => {
-                const categories = categoriesForAudienceGroup(group.value);
-                const expanded = expandedAudience === group.value;
-                return (
-                  <section key={group.value} style={{ border: "1px solid var(--border)", borderRadius: 10, overflow: "hidden", background: "rgba(255,255,255,0.025)" }}>
-                    <button
-                      type="button"
-                      onClick={() => setExpandedAudience(expanded ? "" : group.value)}
-                      className="btn btn-sm"
-                      style={{ width: "100%", justifyContent: "space-between", border: 0, borderRadius: 0, background: audience === group.value ? "var(--red)" : "transparent", color: audience === group.value ? "#fff" : "var(--text2)", ...labelStyle(getAudienceStyle(group.value)) }}
-                    >
-                      <span>{textCase(group.label, getAudienceStyle(group.value))}</span>
-                      <span>{expanded ? "−" : "+"}</span>
-                    </button>
-                    {expanded && (
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: 8, padding: 12 }}>
-                        <button
-                          type="button"
-                          className="btn btn-outline btn-sm"
-                          onClick={() => setShopFilter(group.value, "all")}
-                          style={{ borderColor: audience === group.value && category === "all" ? "var(--red)" : "var(--border)" }}
-                        >
-                          All {group.label}
-                        </button>
-                        {categories.map(categorySlug => (
-                          <button
-                            key={`${group.value}-${categorySlug}`}
-                            type="button"
-                            className="btn btn-outline btn-sm"
-                            onClick={() => setShopFilter(group.value, categorySlug)}
-                            style={{ borderColor: audience === group.value && category === categorySlug ? "var(--red)" : "var(--border)", ...labelStyle(getCategoryStyle(categorySlug)) }}
-                          >
-                            {textCase(getDynamicCategoryLabel(categorySlug), getCategoryStyle(categorySlug))}
-                          </button>
-                        ))}
-                        {categories.length === 0 && <p style={{ color: "var(--text3)", fontSize: "0.82rem" }}>No categories yet.</p>}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-          )}
         </div>
 
         {loading ? (
